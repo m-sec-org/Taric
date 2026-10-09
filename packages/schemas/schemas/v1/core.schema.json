@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taric.dev/schemas/v1/core.schema.json",
+  "title": "Taric Core Contracts v1",
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "recordBase": {
+      "type": "object",
+      "required": ["id", "schema_version", "engagement_id", "created_at", "provenance"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "schema_version": { "const": "1.0.0" },
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "provenance": {
+          "type": "object",
+          "required": ["host_id", "producer_id", "source_kind"],
+          "properties": {
+            "host_id": { "type": "string", "minLength": 1 },
+            "producer_id": { "type": "string", "minLength": 1 },
+            "source_kind": { "enum": ["host", "tool", "worker", "reviewer", "import"] },
+            "source_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "scope": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["allowed_targets", "excluded_targets", "rules_of_engagement_ref"],
+          "properties": {
+            "allowed_targets": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "excluded_targets": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "rules_of_engagement_ref": { "type": "string", "minLength": 1 },
+            "valid_from": { "$ref": "#/$defs/timestamp" },
+            "valid_until": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      ]
+    },
+    "engagement": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["name", "scope_ref", "status"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "scope_ref": { "$ref": "#/$defs/uuid" },
+            "status": { "enum": ["active", "paused", "completed", "archived"] },
+            "action_mode": { "enum": ["llm_recommend", "authorized_autonomous", "host_hitl"] }
+          }
+        }
+      ]
+    },
+    "resource": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["kind", "identity", "revision"],
+          "properties": {
+            "kind": { "enum": ["host", "service", "web_app", "route", "endpoint", "page", "asset", "workflow", "dataset", "other"] },
+            "identity": { "type": "object", "minProperties": 1 },
+            "revision": { "type": "integer", "minimum": 1 },
+            "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "artifact_refs": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } }
+          }
+        }
+      ]
+    },
+    "artifactReference": {
+      "type": "object",
+      "required": ["host_ref"],
+      "properties": {
+        "host_ref": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "location": { "type": "string" },
+        "media_type": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["resource_ref", "observed_at", "statement", "artifact_refs"],
+          "properties": {
+            "resource_ref": { "$ref": "#/$defs/uuid" },
+            "observed_at": { "$ref": "#/$defs/timestamp" },
+            "statement": { "type": "string", "minLength": 1 },
+            "artifact_refs": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } },
+            "limitations": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "relation": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["from_ref", "predicate", "to_ref", "version"],
+          "properties": {
+            "from_ref": { "$ref": "#/$defs/uuid" },
+            "predicate": { "enum": ["calls", "defines", "reads", "writes", "returns", "belongs_to", "protects", "filters", "authenticates", "permits", "denies", "routes_to", "depends_on"] },
+            "to_ref": { "$ref": "#/$defs/uuid" },
+            "version": { "type": "integer", "minimum": 1 },
+            "source_observation_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } }
+          }
+        }
+      ]
+    },
+    "claim": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["proposition", "status", "evidence_refs", "limitations"],
+          "properties": {
+            "proposition": { "type": "string", "minLength": 1 },
+            "status": { "enum": ["proposed", "supported", "contradicted", "inconclusive", "stale"] },
+            "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+            "limitations": { "type": "array", "items": { "type": "string" } },
+            "applicable_scope_ref": { "$ref": "#/$defs/uuid" }
+          }
+        }
+      ]
+    },
+    "workItem": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["title", "status", "acceptance_criteria"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1 },
+            "status": { "enum": ["queued", "in_progress", "blocked", "completed", "cancelled"] },
+            "acceptance_criteria": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "depends_on": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+            "risk_class": { "enum": ["informational", "finding", "action"] }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["artifact_ref", "observed_at", "limitations"],
+          "properties": {
+            "artifact_ref": { "$ref": "#/$defs/artifactReference" },
+            "observed_at": { "$ref": "#/$defs/timestamp" },
+            "limitations": { "type": "array", "items": { "type": "string" } },
+            "resource_ref": { "$ref": "#/$defs/uuid" }
+          }
+        }
+      ]
+    },
+    "finding": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["title", "claim_refs", "evidence_refs", "review_ref", "status"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1 },
+            "claim_refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/uuid" } },
+            "evidence_refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/uuid" } },
+            "review_ref": { "$ref": "#/$defs/uuid" },
+            "status": { "enum": ["draft", "verified", "retracted", "stale"] },
+            "severity": { "enum": ["informational", "low", "medium", "high", "critical"] }
+          }
+        }
+      ]
+    },
+    "coverageCell": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["resource_ref", "test_category", "status", "limitations"],
+          "properties": {
+            "resource_ref": { "$ref": "#/$defs/uuid" },
+            "test_category": { "type": "string", "minLength": 1 },
+            "identity_ref": { "$ref": "#/$defs/uuid" },
+            "operation": { "type": "string" },
+            "status": { "enum": ["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"] },
+            "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } },
+            "limitations": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "proposal": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["subject_type", "content_hash", "status", "base_version"],
+          "properties": {
+            "subject_type": { "enum": ["observation", "resource", "relation", "claim", "work_item", "evidence", "finding", "coverage"] },
+            "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "status": { "enum": ["pending", "rejected", "admitted", "needs_evidence"] },
+            "base_version": { "type": "integer", "minimum": 0 },
+            "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" } }
+          }
+        }
+      ]
+    },
+    "review": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        {
+          "type": "object",
+          "required": ["proposal_ref", "reviewer_id", "reviewer_kind", "input_hash", "verdict"],
+          "properties": {
+            "proposal_ref": { "$ref": "#/$defs/uuid" },
+            "reviewer_id": { "type": "string", "minLength": 1 },
+            "reviewer_kind": { "enum": ["deterministic", "model", "reviewer"] },
+            "input_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "verdict": { "enum": ["pass", "reject", "needs_evidence", "defer"] },
+            "policy_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          }
+        }
+      ]
+    }
+  }
+}

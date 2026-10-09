@@ -1,0 +1,23 @@
+{
+  "name": "@taric/schemas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./schemas/v1/core.schema.json": "./dist/schemas/v1/core.schema.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp -R schemas dist/schemas",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
