@@ -4,3 +4,4 @@ node_modules/
 *.pyc
 **/.agents/
 **/reference/
+.DS_Store
