@@ -1,9 +1,13 @@
 # Spec Delta
 
+## Scope
+
+本变更交付单机默认 Markdown Brief/Index、字段白名单、L0/L1 trust gating、generation manifest、原子发布、Engagement 权限和本地 Git checkpoint。完整攻击面图、关系投影与跨主机共享属于后续 engagement-memory/authority 变更。
+
 ## MODIFIED Requirements
 
 ### Requirement: Generate allowlisted Markdown projections
-The system SHALL generate Markdown projections from committed authority state by default. Projections SHALL use an explicit field allowlist and exclude raw Artifact contents, SecretRef, tokens, private paths, unreviewed proposals, and sensitive drafts. L0 and unrequested L1 candidates SHALL NOT appear as ordinary facts in default Brief/Index output; any explicit candidate view SHALL label trust and limitations. Complete generations SHALL include manifest hashes and authority sequence; publication SHALL atomically switch the current generation without deleting a generation still used by readers. Brief and index SHALL expose their distinct documented views, including scope, task/handoff state, typed attack-surface navigation, stale/conflict/coverage gaps, and watermarks.
+系统 SHALL 默认从已提交 authority 生成 Markdown projection。projection 使用显式字段白名单，排除 Artifact 原文、SecretRef、token、私有路径、未审 proposal 和敏感 draft。L0 和未请求的 L1 candidate 不得进入默认 Brief/Index 普通事实；显式 candidate view 必须标出 trust、provenance、limitations。完整 generation 必须包含 manifest hash、authority sequence、projected watermark 和文件 hash；发布必须原子切换 current，保留仍被 reader pin 的旧 generation。Brief 至少展示 scope、active WorkItem、阻塞和 handoff；Index 至少展示 Engagement 内资源/coverage gap 的白名单索引。完整 typed attack-surface graph、stale/conflict 影响传播在后续变更交付。
 
 #### Scenario: Generate a projection
 - **WHEN** an authority generation is committed
@@ -29,7 +33,7 @@ The system SHALL enforce Taric engagement permissions when serving or sharing Ma
 - **THEN** Taric denies the request without reading that file
 
 ### Requirement: Local Git checkpoint by default
-The system SHALL create local Git checkpoints by default when Git checkpointing is enabled for the installation. Remote push SHALL require explicit per-engagement enablement and configured private repository access, retention policy, access control, and secret scanning. Git checkpoints SHALL bind the projection manifest and authority sequence. Failure SHALL mark a retryable checkpoint status without undoing authority state.
+系统 SHALL 默认启用并为每个 authority generation 创建本地 Git checkpoint；operator 可显式关闭并在状态中标明。checkpoint 绑定 projection manifest、authority sequence 和文件 hash，失败标记为 pending/failed 并可重试，不回滚 authority。远端 push 只在每 Engagement 显式配置私有 repository、access control、retention policy 和成功 secrets-scan callback 后允许，不根据布尔自报声明安全。
 
 #### Scenario: Local checkpoint
 - **WHEN** a committed authority generation is checkpointed under default settings
@@ -42,3 +46,7 @@ The system SHALL create local Git checkpoints by default when Git checkpointing 
 #### Scenario: Checkpoint or scan fails
 - **WHEN** local commit fails or a required secrets scan does not pass
 - **THEN** Taric retains the authority generation, records pending or blocked checkpoint status, and does not push remotely
+
+## Follow-up Boundary
+
+`evolve-engagement-memory` 承接完整关系图、ResourceRevision/PatchSet/ImpactEvent 的 Markdown 导航和 stale/conflict 传播。本期远端 Git push 仅在已配置的 callback 可执行且通过全部防护时支持，不实现远端仓库管理或 Artifact scanner。

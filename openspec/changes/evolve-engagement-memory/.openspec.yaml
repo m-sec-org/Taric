@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-09
+goal: 在单机 Core 基础上提供可追溯的资源修订、受界限合并、影响传播和快照迁移。

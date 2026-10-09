@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Defines reproducible release evidence for Taric's contracts, isolation, recovery, projection safety, adapter compatibility, and penetration-testing memory quality. These checks are acceptance gates, not a new runtime decision-maker.
+定义 Phase 1 单机首发的可重复契约、隔离、恢复、投影和 writer 安全验收。质量研究、盲测和统计评估不是本变更的 runtime gate。
 
 ## ADDED Requirements
 
-### Requirement: Provide reproducible conformance and fault evaluation
-The project SHALL provide repeatable tests for every versioned API/CLI/MCP operation, shared admission behavior, model/host/operator isolation, writer bypass resistance, idempotency, CAS conflicts, display identifier allocation, projection allowlists, and adapter capability reporting. The suite SHALL include concurrent writes, forced failures at transaction boundaries, lease takeover, stale generations, snapshot round-trip, and replay/reconcile cases.
+### Requirement: Provide reproducible Phase 1 conformance and fault evaluation
+项目 SHALL 提供可重复测试，覆盖本期 versioned API/CLI/MCP 操作、admission、model/host/operator/writer 隔离、writer bypass、幂等、CAS、display ID、Engagement isolation、projection allowlist、Pi capability、lease takeover、stale generation、checkpoint/action fencing 和 doctor marker。测试必须覆盖事务边界故障、投影发布故障和未知 action 对账；snapshot import、完整 replay/rebuild 和多机 backend 不属于本期。
 
 #### Scenario: Run the clean-checkout suite
 - **WHEN** a clean checkout installs dependencies and runs the documented build-then-test command
@@ -21,8 +21,8 @@ The project SHALL provide repeatable tests for every versioned API/CLI/MCP opera
 - **WHEN** the test terminates the process at each declared commit, outbox, checkpoint, or projection publication boundary
 - **THEN** restart either recovers a complete state or reports an explicit repair state, with no silent partial success
 
-### Requirement: Evaluate poisoning and finding quality
-The project SHALL maintain versioned known-positive and known-negative penetration-testing fixtures, representative web and host scenarios, and prompt-injection/memory-poisoning cases. Release reports SHALL include sample counts, finding precision and recall against a human baseline, retrieval precision/recall, unsupported-claim rate, erroneous memory propagation, coverage miss rate, review agreement, guard false-positive/negative results, write latency, and recovery success; statistical metrics SHALL include 95% confidence intervals.
+### Requirement: Run minimum trust and poisoning regressions
+本期 SHALL 至少使用 canary 字段、恶意 proposal/Markdown/tool response、作者自审、模型 `accept=true`、edge block 和 bounded negative fixtures 验证：它们不能改变 writer capability、trust level、host authorization、projection allowlist 或 origin coverage。样本统计、人工基线、precision/recall、unsupported-claim rate、误报/漏报置信区间和大规模 poisoning benchmark 归入 `validate-memory-quality`。
 
 #### Scenario: Run a known-positive case
 - **WHEN** a representative fixture contains a supported finding and evidence
@@ -36,8 +36,8 @@ The project SHALL maintain versioned known-positive and known-negative penetrati
 - **WHEN** malicious instructions appear in an Artifact reference, tool response, Markdown draft, or proposal
 - **THEN** they cannot alter policy, trust level, writer capability, host authorization, or projection allowlists
 
-### Requirement: Enforce release gates
-The release report SHALL state whether all documented gates pass: zero duplicate IDs in a 100-worker single-engagement concurrency run, a unique event for every successful commit, zero unauthorized L1-to-L2 promotions, no unsupported claims for high/critical findings, known-positive recall no worse than the recorded human baseline, visible untested and blocked coverage, adapter contract compatibility for each pinned host version, and patch-to-query visibility p95 at most two seconds for the documented single-host baseline. Every active recoverable WorkRun SHALL have a checkpoint, lease/owner, context manifest, and action state. Missing/unavailable model review SHALL remain proposal-only and SHALL NOT fail open. A failed required gate SHALL prevent a passing release report.
+### Requirement: Enforce Phase 1 release gates
+release report SHALL 明确以下本期 gate：单 Engagement 100 worker 并发写入无重复/回退 display ID；每个成功 commit 有唯一审计事件；L1→L2 未授权升级为 0；高危 Finding 缺少必需证据或独立 reviewer 时不得进入 L2；所有 active 可恢复 WorkRun 都有 checkpoint、lease/owner、context manifest 和 action state；未测和 blocked coverage 在白名单 projection/report 中可见，L0 仍只在获授权 proposal/review 工具可见；Pi/MCP/CLI contract tests 通过；单机 proposal/CAS mutation 到 query 可见的 p95 目标不高于 2 秒（以 Phase 0 基线确认）；模型审核不可用时保持 proposal-only，不 fail open。完整质量指标不作为本期 gate。
 
 #### Scenario: Gate fails
 - **WHEN** a required release metric or security/conformance test fails
@@ -46,3 +46,7 @@ The release report SHALL state whether all documented gates pass: zero duplicate
 #### Scenario: Gate passes
 - **WHEN** all required tests and documented thresholds pass for the pinned versions and configuration
 - **THEN** the report records the exact commit, schema/policy digests, fixture versions, sample sizes, and pass result
+
+## Follow-up Boundary
+
+`validate-memory-quality` 承接 known-positive/negative 分层语料、人工基线、finding/retrieval precision-recall、unsupported-claim/coverage miss、95% CI、异构 review agreement、规模化 poisoning 和恢复/延迟统计。其未交付不作为本期发布 gate；本期最小安全、功能和性能 gate 必须独立报告，不能用延期掩盖失败。

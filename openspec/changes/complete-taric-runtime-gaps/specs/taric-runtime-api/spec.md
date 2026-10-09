@@ -2,12 +2,12 @@
 
 ## Purpose
 
-Defines executable, versioned access to Taric Core through operator CLI, MCP, and host adapter APIs, with explicit privilege boundaries and stable error behavior.
+定义 Phase 1 单机首发的 versioned Core service、operator CLI、model-facing MCP 和 authenticated Pi adapter API。所有入口共享同一 authority、schema、权限和错误码；未列入本期的高级操作必须返回 unsupported capability。
 
 ## ADDED Requirements
 
 ### Requirement: Versioned Core service operations
-The system SHALL expose JSON Schema request and response contracts for every documented CLI/API operation: engagement init/status, context build, query with `as_of`, capture proposal-only, proposal list, review, admission, control list/observe, access observe, revise/draft/patch/relation/claim/impact, work checkpoint/resume, action recommendation/result, audit verify/reconcile, snapshot export, and adapter list/install/remove/config/health/version. Every operation SHALL use the shared schema validator and return a structured success or error response.
+本期系统 SHALL 暴露 JSON Schema request/response/error contracts：`engagement.init/status`、`context.build`、`query(as_of)`、`capture/proposal.submit/proposal.list`、`review`、`admission`、最小 `control.list/control.observe/access.observe`、`work.claim/renew/reclaim/checkpoint.propose/checkpoint.commit/resume`、`action.recommend/host-decision/host-result/reconcile`、`audit.verify/doctor/reconcile`、`snapshot.export` 以及 adapter capability/status。每个操作必须使用共享 validator 并返回结构化成功或错误响应。`resource.revise/draft/patch/relation/claim/impact`、snapshot import、adapter install/remove/config 和 PostgreSQL 管理在本期返回稳定 `unsupported_capability`，不得产生部分写入。
 
 #### Scenario: Call a supported operation
 - **WHEN** a client sends a valid request with a supported contract version
@@ -16,6 +16,10 @@ The system SHALL expose JSON Schema request and response contracts for every doc
 #### Scenario: Call an unsupported operation version
 - **WHEN** a client sends an unsupported contract version or malformed request
 - **THEN** the service rejects it with a structured error and makes no state change
+
+#### Scenario: Call a deferred operation
+- **WHEN** caller 请求本期未交付的 resource patch/impact、snapshot import、DeepSeek/Hermes 专属管理或 multi-host backend
+- **THEN** 服务返回 `unsupported_capability` 和 follow-up 标识，不改变 authority 或暴露内部路径
 
 ### Requirement: Separate model, host, and operator privileges
 The system SHALL expose separate model-facing, authenticated host-adapter, and operator API capabilities. Each request SHALL be authorized from a transport-verified principal and Taric engagement permissions; callers SHALL NOT grant themselves a role by setting request fields. Model-facing operations SHALL NOT expose canonical writes, direct store access, host-only checkpoints, credentials, or target-tool execution. Taric SHALL NOT create or manage the host's human identity or HITL approval system.
@@ -41,7 +45,7 @@ The system SHALL expose separate model-facing, authenticated host-adapter, and o
 - **THEN** Taric returns a stable authorization error without disclosing whether protected records exist
 
 ### Requirement: Provide an executable operator CLI
-The system SHALL provide an executable CLI for every documented operator operation, including init/status, context/query, proposal/review/admission, capture, control/access observation, revise/draft/patch/relation/claim/impact, work/checkpoint/resume, action recommendation, audit verify/reconcile, snapshot export, and adapter management/diagnostics. The CLI SHALL invoke the shared Core service and SHALL NOT implement separate policy logic.
+系统 SHALL 为本期 inventory 提供 executable CLI：init/status、context/query-as_of、proposal/review/admission/capture、control/access observe、work claim/renew/reclaim/checkpoint/resume、action recommend/host decision/result/reconcile、audit verify/doctor/reconcile、snapshot export 和 adapter capability/status。CLI 只调用同一 Core service，不复制 policy；resource revise/patch/impact、snapshot import、宿主 install/remove/config 和多机管理不得进入本期 CLI 可用命令清单。
 
 #### Scenario: Run an operator command
 - **WHEN** an operator invokes a supported CLI command with valid arguments

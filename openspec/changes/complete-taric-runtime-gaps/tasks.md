@@ -1,125 +1,122 @@
 # Tasks
 
-## 1. Baseline, contracts, and release evidence
+本清单只覆盖 `proposal.md` 和 `design.md` 定义的 Phase 0–1 单机首发。所有任务保持未完成状态，直到对应验证证据产生；不能通过修改 normative docs、main specs 或 README 把未实现能力标记为完成。每项任务均要求实现代码、测试和支持文档同步落地。
 
-- [ ] 1.1 Freeze the supported reference/tools/kb, reference/link, PTES, and pentest-skills source commits in a machine-readable baseline manifest, and verify the manifest is included in diagnostics and release reports.
-- [ ] 1.2 Freeze the Pi, DeepSeek Harness, and Hermes host version/commit compatibility matrix, and verify an unlisted version is reported as unsupported rather than inferred compatible.
-- [ ] 1.3 Define the Taric API, error, capability, adapter, and schema version registry from `docs/taric-api.md` and `docs/taric-design.md`, and verify every documented operation has a request, response, and error contract.
-- [ ] 1.4 Add versioned known-positive, known-negative, blocked-by-control, stale, conflict, and poisoning fixtures for representative web and host scenarios, and verify fixture metadata includes expected coverage and trust outcomes.
-- [ ] 1.5 Add a clean-checkout script that installs dependencies, builds all workspaces, then runs tests, and verify it passes without pre-existing `dist` directories.
+依赖关系：1→2；2→3/4；3+4→5/6/8；5+6+8→7/9；3+7+8+9→10；4+5+7→11；10+11→12；1–12→13。同一依赖层中互不写同一模块的任务可并行，所有写路径必须经过 3–5 的公共 guard。任务组 13 是跨组 release gate；组 14 仅登记 follow-up 依赖，不属于本 change 的实现。
 
-## 2. Schema and validation foundation
+## 1. Phase 0 baseline and contract registry
 
-- [ ] 2.1 Expand `packages/schemas` with strict contracts for TestHypothesis, ResourceRevision, ProtectiveControl and revision, ControlObservation, AccessDecisionObservation, PatchSet, Conflict, ImpactEvent, AttackPath, authentication metadata/session revision, WorkRun, Attempt, Checkpoint, ActionIntent, AuditEvent, and all API envelopes, and verify Ajv rejects missing, extra, malformed, and invalid-enum fields.
-- [ ] 2.2 Add cross-field and cross-reference validators for engagement ownership, reference kind, time ranges, state transitions, origin/control semantics, evidence limitations, trust-level transitions, and required provenance, and verify every documented invalid example returns a structured validation error.
-- [ ] 2.3 Route every Core write path through the shared validator before persistence, including direct internal calls, and verify bypassing the transport cannot persist an invalid record.
-- [ ] 2.4 Add schema migration identifiers and compatibility checks, and verify an unsupported schema version fails before any write.
-- [ ] 2.5 Generate TypeScript types and Python-facing contract fixtures from the same schemas, and verify Pi, DeepSeek, Hermes, CLI, and MCP contract tests consume identical field definitions.
+- [ ] 1.1 Freeze the supported single-host profile and Pi host version/commit in a machine-readable compatibility manifest; list DeepSeek, Hermes, PostgreSQL, remote push, and full evaluation as `unsupported_capability`, and verify diagnostics expose the same manifest.
+- [ ] 1.2 Freeze the supported reference/tools/kb, reference/link, PTES, and pentest-skills source commits for design input only; verify no old KB/Link runtime, schema, CLI, or format compatibility is advertised.
+- [ ] 1.3 Define the Phase 1 API, error, capability, schema, trust, coverage, and adapter version registry from `docs/taric-design.md`; verify every supported operation has request, response, error, and unsupported behavior contracts.
+- [ ] 1.4 Define the non-goal registry and security invariants: no platform, model provider, agent loop, worker scheduler, target execution, action grant, HITL identity, credential/Artifact-content management, cross-Engagement auto-sharing, or legacy format compatibility; verify poisoning input cannot change these flags.
+- [ ] 1.5 Add a clean-checkout command that installs dependencies, builds all workspaces, then runs tests without pre-existing `dist`; verify stdout/stderr and nonzero failures are deterministic.
+
+## 2. Phase 0 schema and validation foundation
+
+- [ ] 2.1 Add strict Phase 1 contracts for Engagement, Scope, Resource, Observation, Claim, Evidence, Finding, ProtectiveControl, ControlObservation, AccessDecisionObservation, Coverage, WorkItem, WorkRun, Attempt, Checkpoint, ActionIntent, Proposal, Review, AuditEvent, API envelopes, and unsupported-capability errors; verify missing, extra, malformed, and invalid-enum fields are rejected.
+- [ ] 2.2 Add cross-field and cross-reference validators for engagement ownership, reference kinds, time ranges, provenance, scope, evidence limitations, trust transitions, legal WorkRun/action states, and `decision_layer/origin_reached/origin_outcome`; verify invalid examples fail closed with structured errors.
+- [ ] 2.3 Route every Core write path, including internal writer calls, through the shared validator; verify direct transport bypass cannot persist invalid records or caller-supplied trust/admission/display IDs.
+- [ ] 2.4 Add schema version identifiers and compatibility checks for the local SQLite authority; verify unsupported schema versions fail before writes and no legacy format is imported or migrated implicitly.
+- [ ] 2.5 Generate TypeScript types and Python-facing fixtures from the same Phase 1 schemas; verify Pi, CLI, MCP, and Core tests consume identical field definitions.
 
 ## 3. Core service and authority boundary
 
-- [ ] 3.1 Implement a versioned Core service facade for every operation in the runtime API spec, and verify each operation returns its declared success or structured error envelope.
-- [ ] 3.2 Introduce transport-verified principals and Taric engagement capability checks for model, host adapter, reviewer, writer, and operator operations, and verify self-asserted role fields cannot grant access.
-- [ ] 3.3 Remove public model/adapter access to the database handle and canonical writer; expose only scoped clients, and verify an integration test cannot reach `AuthorityStore.commit` or `.db` from a model-facing client.
-- [ ] 3.4 Add idempotency records bound to operation, principal, engagement, and normalized request hash, and verify retries return the original result while key reuse with a different payload returns a conflict.
-- [ ] 3.5 Add stable error codes for validation, authorization, stale version, conflict, unavailable host, unsupported capability, migration, and internal failures, and verify CLI/MCP/native adapters preserve those codes.
+- [ ] 3.1 Implement the versioned single-host Core service for every supported Phase 1 operation and return declared success or structured error envelopes; verify deferred operations return `unsupported_capability`.
+- [ ] 3.2 Introduce transport-verified principals and engagement capabilities for model, Pi host, reviewer, writer, and operator operations; verify self-asserted role/host/engagement fields cannot grant access.
+- [ ] 3.3 Remove public model/Pi access to `AuthorityStore.db` and canonical writer; expose scoped clients only; verify no model-facing integration can reach `.db` or `commit`.
+- [ ] 3.4 Add idempotency records bound to operation, principal, engagement, and normalized request hash; verify retries return the original result and key reuse with another payload returns a conflict.
+- [ ] 3.5 Add stable validation, authorization, stale-version, conflict, unsupported-capability, unsupported-schema-version, unavailable-host, and internal error codes; verify CLI/MCP/Pi preserve codes and do not fail open.
 
-## 4. Durable storage, IDs, and recovery
+## 4. SQLite authority, IDs, snapshots, and audit
 
-- [ ] 4.1 Refactor record, proposal, review, admission, revision, event, idempotency, display-ID, and outbox writes into short atomic transactions, and verify forced process termination yields complete commit or no visible commit.
-- [ ] 4.2 Enforce installation-wide unique monotonic display identifiers allocated only by Core and keep the alias stable across revisions, and verify 100 concurrent writers across engagements produce no duplicate or reset sequence.
-- [ ] 4.3 Move expected-version, scope, owner, lease, and generation checks into the same transaction as each mutation, and verify concurrent CAS tests never silently use last-write-wins.
-- [ ] 4.4 Implement true as-of snapshots with pinned authority sequence, stable ordering, indexed/projected watermarks, and read-your-writes behavior, and verify writes are visible at returned commit sequence while stale indexes are labeled.
-- [ ] 4.5 Implement versioned canonical audit event encoding with actor/host/worker/dispatch/WorkItem/Attempt/proposal/review/entity/policy/input/evidence/idempotency/changed-field metadata, and verify all governance and canonical transitions emit one attributable event.
-- [ ] 4.6 Implement outbox consumption, doctor, replay, reconcile, materialized-view drift reporting, and explicit rebuild actions, and verify rebuild never edits authoritative history silently.
-- [ ] 4.7 Implement versioned JSON/JSONL snapshot export/import with integrity metadata and conflict checks, and verify a round trip preserves records, revisions, provenance, and source sequence while malformed imports leave the destination unchanged.
-- [ ] 4.8 Implement local schema migrations and backup/restore verification for the default SQLite store, and verify upgrade, restart, and restore reports the recovered sequence and validation result.
+- [ ] 4.1 Refactor record, proposal, review, admission, canonical mutation, event, idempotency, display-ID, and outbox writes into short atomic SQLite WAL transactions; inject failures and verify complete commit or no visible commit.
+- [ ] 4.2 Enforce installation-wide unique monotonic display IDs allocated only by Core; preserve aliases across revisions and reject caller IDs; verify 100 concurrent workers across multiple engagements produce no duplicates or resets.
+- [ ] 4.3 Move expected-version, scope, owner, lease, and generation checks into the same transaction as every mutation; verify concurrent CAS and fencing never silently last-write-wins.
+- [ ] 4.4 Implement true as-of snapshots and fixed-sequence continuation with stable ordering, read-your-writes, committed/projected watermarks, and no gaps/duplicates; verify a query never mixes current state into an older sequence.
+- [ ] 4.5 Implement versioned append-only audit events with actor/host/worker/dispatch/WorkItem/Attempt/proposal/review/entity/policy/input/evidence/idempotency/changed-field metadata; verify every governance/canonical transition emits an attributable event without Artifact or credential contents.
+- [ ] 4.6 Implement local outbox consumption, doctor/reconcile status, startup verification, and consistent snapshot export sufficient to inspect single-host state; verify failures are explicit and import/migration/backup/restore requests return `unsupported_capability` without altering authority history.
 
 ## 5. Governance and writer isolation
 
-- [ ] 5.1 Make model-facing capture, observation, patch, and draft operations proposal-only and reject caller-supplied trust level, admission status, policy result, or display ID, and verify canonical records remain unchanged.
-- [ ] 5.2 Make proposal submission, review, rejection, admission, canonical mutation, audit, idempotency, and outbox updates atomic, and verify a failure at each boundary leaves a retryable proposal and no partial admission.
-- [ ] 5.3 Implement deterministic admission checks for schema, references, scope, base version, evidence, provenance, policy digest, and legal state transition, and verify missing checks fail closed and remain auditable.
-- [ ] 5.4 Implement service-verified reviewer capability, fixed proposal/evidence snapshot binding, reviewer/worker/author independence, and independent review context without earlier verdict text, and verify self-review and unbound reviewer promotion fail.
-- [ ] 5.5 Implement atomic L2 promotion with evidence freshness, limitations, reproducibility, applicability, review input hash, and policy digest checks, and verify unauthorized L1-to-L2 promotion rate is zero in the release suite.
-- [ ] 5.6 Implement retract, supersede, archive, stale, review-after, and expiry transitions with append-only audit events and recall filters, and verify historical as-of queries retain the prior state while ordinary recall excludes it.
+- [ ] 5.1 Make model-facing capture, observation, proposal, and draft operations proposal-only; reject caller trust level, admission status, policy result, display ID, or direct Markdown/database writes; verify canonical records remain unchanged.
+- [ ] 5.2 Make proposal submission, review, rejection, admission, canonical mutation, audit, idempotency, and outbox updates atomic; inject failure at each boundary and verify retryable proposal/no partial admission.
+- [ ] 5.3 Implement deterministic admission checks for schema, references, scope, base version, evidence/provenance, policy digest, and legal transition; verify missing checks fail closed and remain auditable.
+- [ ] 5.4 Implement the minimum independent L2 review gate: service-verified reviewer capability, fixed proposal/evidence snapshot, author/worker/reviewer independence, reviewer context without earlier verdict text, and retained model/policy/input hashes; verify self-review/unbound reviewer promotion fails.
+- [ ] 5.5 Implement atomic L2 promotion with evidence freshness, limitations, reproducibility, applicability, review hash, policy digest, and explicit finding status; verify unauthorized L1→L2 promotion is zero.
+- [ ] 5.6 Implement retract, supersede, archive, stale, review-after, and expiry recall filters needed by Phase 1; verify current recall excludes them while authorized as-of history retains prior state and audit.
 
-## 6. Domain revisions, patches, controls, and coverage
+## 6. Minimum controls and coverage
 
-- [ ] 6.1 Implement stable logical resource identity, immutable ResourceRevision, variant identity, content hash, source observation, and validity metadata, and verify changed bundle/API content creates a new revision without rewriting the old observation.
-- [ ] 6.2 Implement typed Relation revisions with source observations, validity, dependency criticality, and legal removal semantics, and verify relation history is queryable as-of a pinned sequence.
-- [ ] 6.3 Implement PatchSet base generation, object base versions, read/write sets, three-way merge for non-overlapping changes, and conflict records for overlapping or destructive changes, and verify no conflicting field is silently lost.
-- [ ] 6.4 Implement ImpactEvent dependency traversal with bounded batches, continuation state, criticality ordering, and revalidation WorkItem creation, and verify critical premise withdrawal stales dependent findings/actions while unrelated descriptions do not fan out globally.
-- [ ] 6.5 Implement ProtectiveControl and revision persistence plus immutable ControlObservation and AccessDecisionObservation contracts, and verify control outcome and access decision remain separate and bind to resource/identity/operation/condition versions.
-- [ ] 6.6 Implement hard guards for unknown layer, missing origin evidence, edge block with origin not reached, and suspected fingerprint attribution, and verify no unknown response is attributed to a specific control or origin.
-- [ ] 6.7 Implement dimensioned Coverage Matrix cells and bounded negative observations with baseline, method, conditions, identity, operation, limitations, and evidence references, and verify one identity/operation result does not close other cells.
-- [ ] 6.8 Implement blocked-by-control and coverage-close gates that expose untested, blocked, negative-only, unverified-positive, conflicting, and un-ingested external results, and verify a protective edge block never closes origin coverage.
+- [ ] 6.1 Implement minimal ProtectiveControl, ControlObservation, AccessDecisionObservation, and non-secret authentication/session metadata contracts; verify control outcome and access decision stay separate and bind to resource/identity/operation/conditions.
+- [ ] 6.2 Add hard guards for unknown layer, missing origin evidence, edge block with origin not reached, and suspected fingerprint attribution; verify unknown responses cannot be attributed to a specific control/origin.
+- [ ] 6.3 Implement dimension-preserving Coverage cells for resource, test category, identity, operation/parameter, conditions, status, limitations, evidence, and time; verify one identity/operation result leaves other cells open.
+- [ ] 6.4 Implement bounded negative observations with method, baseline/control, conditions, identity, limitations, and evidence references; verify no string heuristic converts a negative observation into universal absence.
+- [ ] 6.5 Implement the minimum coverage close gate exposing untested, blocked, blocked-by-control, negative-only, unverified-positive, conflicting, and un-ingested external results; verify edge blocks never close origin coverage and the gate never grants action authorization.
 
-## 7. Context and retrieval
+## 7. Context, recall, and trust filtering
 
-- [ ] 7.1 Implement Context Pack selection priority for scope/ROE, WorkItem acceptance, latest checkpoint, relevant deltas, direct entities, evidence references, and background summaries, and verify mandatory constraints are retained before optional material.
-- [ ] 7.2 Add token/character budget declaration, builder/policy manifest, source hashes, omitted/truncated ranges, and explicit unexamined markers, and verify over-budget requests return a structured continuation or minimum-budget error.
-- [ ] 7.3 Implement signed/opaque continuation cursors bound to principal, engagement, filters, pinned sequence, ordering, and budget, and verify continuation has no gaps or duplicates and cannot be reused for another engagement.
-- [ ] 7.4 Implement candidate/trust/permission filtering for query, context, Brief, Index, and model-facing outputs, and verify L0 and unrequested L1 never appear as ordinary facts.
-- [ ] 7.5 Add context cache invalidation and resume delta generation from ImpactEvents and authority sequence changes, and verify a resumed attempt receives all relevant changes since its checkpoint without unrelated noise.
+- [ ] 7.1 Build fixed-sequence Context Packs that prioritize scope/ROE, worker role/risk budget, WorkItem goals/acceptance, latest checkpoint, relevant direct changes, entities/evidence, then background; verify mandatory constraints survive budget pressure.
+- [ ] 7.2 Add context snapshot ID, declared token/character budget, adapter/builder/policy manifest, source IDs/hashes/times/versions, authorized slice byte/line/HTTP locations and permission metadata, omitted/truncated ranges, and explicit unexamined markers; verify over-budget requests return structured continuation/minimum-budget errors.
+- [ ] 7.3 Implement opaque continuation cursors bound to principal, engagement, filters, pinned sequence, ordering, and budget; verify continuation has no gaps/duplicates and cannot cross engagements.
+- [ ] 7.4 Apply trust/permission filtering to query, Context Pack, Brief, Index, and model-facing output: L0 and unrequested L1 are absent from ordinary facts; explicit L1 candidates carry provenance, limitations, and evidence refs.
+- [ ] 7.5 Preserve independent reviewer context from a fixed sequence without earlier verdict text; verify context/query results never expose raw Artifact, credentials, private paths, unreviewed proposals, or sensitive drafts.
 
-## 8. WorkRun, Attempt, checkpoint, and fencing
+## 8. WorkRun, Attempt, checkpoint, and fencing baseline
 
-- [ ] 8.1 Add explicit Attempt records, WorkItem reference validation, and the documented WorkRun state transition table, and verify illegal terminal, active-lease, and reclaim transitions are rejected.
-- [ ] 8.2 Implement atomic claim, heartbeat, lease renewal, expiry, reclaim, owner change, and old-Attempt-lost transitions with fencing generation, and verify an expired owner cannot renew or claim current state.
-- [ ] 8.3 Implement strict Checkpoint schema and reference validation for progress, unresolved work, evidence, external action state, next steps, source sequence, owner, Attempt, lease, and generation, and verify arbitrary hidden reasoning or invalid refs are rejected.
-- [ ] 8.4 Bind proposal, observation, evidence, patch, checkpoint, ActionIntent, decision, and result writes to the active Attempt/generation in one transaction, and verify stale writes are quarantined with original attribution.
-- [ ] 8.5 Implement resume packets with checkpoint, pinned sequence, relevant delta, changed scope/dependencies, pending actions, context manifest, and sealed old drafts, and verify scope or authorization changes yield blocked/replan-required advice.
-- [ ] 8.6 Implement external action idempotency and unknown-result reconciliation without automatic replay, and verify result reconciliation is audited before an unknown intent becomes resolved.
+- [ ] 8.1 Add WorkItem reference validation, explicit Attempt records, and legal queued/claimed/running/checkpointed/blocked/completed/failed/cancelled/lost transitions; verify terminal or actively leased runs cannot be reclaimed illegally.
+- [ ] 8.2 Implement atomic claim, heartbeat, renewal, expiry, reclaim, owner change, and old-Attempt-lost transitions with fencing generation; verify expired owners cannot renew or claim current state.
+- [ ] 8.3 Implement the complete minimum Checkpoint schema: WorkItem/scope/target version, completed steps, observations/evidence refs, negative results, unresolved hypotheses/work, host decision refs, external action state, next steps, budget, draft/handoff refs, context manifest, source `read_seq`, owner, Attempt, lease, and generation; reject hidden reasoning and invalid refs.
+- [ ] 8.4 Bind proposal, observation, evidence, restricted patch, checkpoint, ActionIntent, host decision, and result writes to active Attempt/generation in one transaction; verify stale writes are rejected/quarantined with original attribution.
+- [ ] 8.5 Implement resume with latest checkpoint, fixed source sequence, pending actions, current scope/WorkItem/authorization checks, and blocked/replan advice when current premises cannot be confirmed; do not claim full dependency delta or draft rebase support.
+- [ ] 8.6 Implement external action idempotency and unknown-result reconciliation without automatic replay; verify reconciliation is audited before unknown state is resolved.
 
 ## 9. Action recommendation and host outcomes
 
-- [ ] 9.1 Implement structured `action.recommend` input/output with target/method, rationale, uncertainty, constraints, memory references, and no execution/grant fields, and verify recommendations cannot mutate authorization or invoke tools.
-- [ ] 9.2 Implement host-selected `llm_recommend`, `authorized_autonomous`, and `host_hitl` mode validation without a Taric global default, and verify Taric records mode and opaque host references only.
-- [ ] 9.3 Implement legal ActionIntent decision/result transitions with owner/Attempt/generation, idempotency, target/method metadata, and atomic audit, and verify denied, authorized, executed, failed, and unknown states cannot skip required transitions.
-- [ ] 9.4 Add late-result quarantine and explicit review/rebase promotion into current state, and verify a late host result never appears as a new Attempt observation automatically.
+- [ ] 9.1 Implement structured `action.recommend` input/output with target/method, rationale, uncertainty, constraints, memory refs, and no execution/grant fields; verify recommendation cannot invoke tools or mutate authorization.
+- [ ] 9.2 Validate host-selected `llm_recommend`, `authorized_autonomous`, and `host_hitl` modes without a Taric global default; store only opaque host decision/authorization references.
+- [ ] 9.3 Implement legal ActionIntent transitions with owner/Attempt/generation, idempotency, target/method metadata, and atomic audit; verify denied/authorized/executed/failed/unknown states cannot skip required transitions.
+- [ ] 9.4 Quarantine late results under the old Attempt/generation; verify they cannot appear as current observations or trigger automatic target action replay.
 
-## 10. Executable CLI and MCP
+## 10. Executable CLI, MCP, and Pi adapter
 
-- [ ] 10.1 Implement the CLI package binary, configuration discovery, argument parsing, JSON input/output, stderr diagnostics, and nonzero error exits, and verify `taric --help` and an invalid command behave predictably.
-- [ ] 10.2 Dispatch all documented operator operations: init/status, context/query/as-of, capture/proposal/review/admission, control/access, resource revise/draft/patch/relation/claim/impact, work claim/renew/checkpoint/resume, action recommend/decision/result/reconcile, audit/reconcile, snapshot, and adapter management/diagnostics, and verify each command reaches the matching Core operation.
-- [ ] 10.3 Implement CLI adapter install/remove/config/health/version diagnostics from the compatibility manifest, and verify an unsupported host version returns a diagnostic without installation or capability inflation.
-- [ ] 10.4 Implement an MCP stdio process with initialize, tools/list, and tools/call using protocol JSON only on stdout and diagnostics only on stderr, and verify a subprocess handshake succeeds.
-- [ ] 10.5 Register only model-facing read/context/proposal/checkpoint.propose/control-proposal/action.recommend tools in MCP, and verify canonical commit, admission, checkpoint commit, credentials, arbitrary paths, and target tools are unavailable.
-- [ ] 10.6 Add subprocess tests that run CLI and MCP from a clean build, and verify repeated calls with idempotency keys and unauthorized calls produce stable responses without partial writes.
+- [ ] 10.1 Implement the CLI binary, configuration discovery, JSON input/output, stderr diagnostics, nonzero exits, and Phase 1 dispatch; verify `taric --help`, invalid commands, and `unsupported_capability` behave predictably.
+- [ ] 10.2 Implement MCP stdio initialize/tools/list/tools/call through the model capability boundary; verify stdout contains protocol JSON only and canonical commit/admission/checkpoint commit, credentials, arbitrary paths, and target tools are unavailable.
+- [ ] 10.3 Implement authenticated local Core client transport for Pi with no store/DB handle exposure; verify engagement capabilities and host identity are checked before writes.
+- [ ] 10.4 Implement real Pi lifecycle hooks for session/context/proposal/checkpoint/action/result/error paths for the pinned supported host version; verify callbacks run in a host contract test and reload is idempotent.
+- [ ] 10.5 Register only the documented Phase 1 model tools; verify DeepSeek/Hermes adapter operations and their lifecycle hooks return `unsupported_capability` and do not simulate support.
+- [ ] 10.6 Run CLI/MCP/Pi subprocess/host contract tests from a clean build; verify repeated idempotent calls and unauthorized calls produce stable responses with no partial writes.
 
-## 11. Projection, sharing, and Git
+## 11. Projection and local Git
 
-- [ ] 11.1 Implement distinct Engagement Brief and Attack Surface Index views with explicit field allowlists, trust labels, watermarks, manifest, and file hashes, and verify raw Artifact, SecretRef, token, private path, unreviewed proposal, and sensitive draft canary values are absent.
-- [ ] 11.2 Implement complete generation staging and atomic current-pointer publication without deleting reader-pinned generations, and verify concurrent readers see either a complete old generation or complete new generation.
-- [ ] 11.3 Replace boolean/path projection authorization with principal/engagement/generation permission checks, and verify cross-engagement and arbitrary-path reads are denied without metadata leakage.
-- [ ] 11.4 Implement default local Git checkpoint commits bound to manifest and authority sequence with pending/retry status, and verify local commit failure leaves authority intact and retryable.
-- [ ] 11.5 Implement explicit per-Engagement remote push configuration requiring private repository, access control, retention policy, and successful secrets scan callback, and verify missing or failed safeguards prevent push.
-- [ ] 11.6 Document host-owned Artifact retention/redaction and Taric-owned projection filtering, and verify the agent guide does not imply Taric stores or sanitizes Artifact bodies.
+- [ ] 11.1 Generate distinct Engagement Brief and Attack Surface Index views with explicit field allowlists, trust labels, watermarks, generation manifest, file hashes, and authority sequence; verify canaries for raw Artifact, SecretRef, token, private path, unreviewed proposal, and sensitive draft are absent.
+- [ ] 11.2 Stage complete immutable generations and atomically switch a current pointer without deleting reader-pinned generations; verify concurrent readers see complete old or new generations only.
+- [ ] 11.3 Enforce principal/engagement/generation projection permissions; reject cross-engagement and arbitrary-path reads without metadata leakage.
+- [ ] 11.4 Create local Git checkpoints by default when enabled, binding commit to manifest and authority sequence; verify commit failure leaves authority intact with pending/retry status.
+- [ ] 11.5 Keep remote push and external secrets scanner unsupported; verify no boolean configuration can claim a remote scan or push succeeded.
+- [ ] 11.6 Document host-owned Artifact retention/redaction and Taric-owned projection filtering without changing normative design docs or implying Artifact storage.
 
-## 12. Native adapters and Hermes integration
+## 12. Documentation and unsupported surface
 
-- [ ] 12.1 Implement authenticated local Core client transport for native adapters with no store/DB handle exposure, and verify transport credentials and engagement capabilities are checked before any write.
-- [ ] 12.2 Implement a real Pi extension entry point for tested session/context/proposal/checkpoint/action/result/error hooks, and verify callbacks execute in an actual Pi runtime contract test.
-- [ ] 12.3 Implement a pinned DeepSeek Harness Cordis adapter with tested lifecycle/tool hooks and explicit preview compatibility metadata, and verify an untested release falls back to MCP/CLI with missing capabilities reported.
-- [ ] 12.4 Implement Hermes Python general plugin RPC hooks for pre-LLM, pre-tool, post-tool, and session end, and verify it coexists without replacing the configured external MemoryProvider.
-- [ ] 12.5 Implement adapter install/remove/config/health/version behavior and cancellation/reload error mapping, and verify reload retrieves committed state without duplicate proposal/checkpoint writes.
-- [ ] 12.6 Run one shared adapter conformance suite against native and MCP fallback paths, and verify state, identity attribution, pinned reads, action mode, and errors are equivalent where capabilities overlap.
+- [ ] 12.1 Update only change-local proposal/design/tasks and implementation-facing package documentation to describe the single-host profile; do not modify `docs/taric-design.md` or main specs to hide deferred behavior.
+- [ ] 12.2 Publish the supported capability matrix and explicit follow-up references: `integrate-native-host-adapters`, `evolve-engagement-memory`, `validate-memory-quality`, and `add-shared-authority-backend`; verify diagnostics, CLI, MCP, and Pi report identical unsupported names.
+- [ ] 12.3 Verify no example claims full `taric-design.md` implementation, cross-Engagement sharing, native DeepSeek/Hermes support, complete graph/Impact, statistical quality completion, PostgreSQL, or target action execution.
+- [ ] 12.4 Verify every deferred design requirement is mapped to an existing follow-up proposal/spec/task with prerequisites and release gate in the handoff register; fail handoff validation for missing capability coverage, missing files, ambiguous owner, or completion claims.
 
-## 13. Quality, security, and release gates
+## 13. Single-host release gates
 
-- [ ] 13.1 Add concurrency tests for 100 workers, multiple engagements, display IDs, idempotency, CAS, reader pinning, and generation publication, and verify zero duplicate IDs, lost events, and partial projections.
-- [ ] 13.2 Add crash/fault injection at transaction, outbox, checkpoint, action, migration, and projection boundaries, and verify restart recovers or reports explicit repair state with no silent success.
-- [ ] 13.3 Add poisoning and permission-bypass tests using HTTP/tool/Markdown/proposal instructions and malicious reviewer/model payloads, and verify policy, trust, writer capability, host authorization, and allowlists remain unchanged.
-- [ ] 13.4 Run representative known-positive/negative web/host fixtures through query, review, coverage, projection, and report flows, and verify negative and blocked results remain bounded.
-- [ ] 13.5 Produce a quality evaluation report with sample counts, human baseline, retrieval/finding precision and recall, unsupported-claim rate, coverage miss rate, review agreement, recovery success, latency, and 95% confidence intervals, and verify the report names fixture/schema/policy commits.
-- [ ] 13.6 Enforce release gates for zero unauthorized L2 promotions, zero high/critical unsupported claims, known-positive recall no worse than baseline, visible coverage gaps, adapter compatibility, and single-host patch visibility p95 at most two seconds, and verify a failed gate blocks a passing release report.
-- [ ] 13.7 Update `docs/taric-api.md`, `docs/agent-integration.md`, `docs/taric-design.md`, package READMEs, and support diagnostics with only implemented commands/capabilities, and verify every documented example runs in the clean-checkout environment.
+- [ ] 13.1 Run 100-worker, multi-engagement concurrency tests for UUID/display IDs, idempotency, CAS, fixed-sequence reads, fencing, and generation publication; require zero duplicate IDs, lost events, stale writes, or partial projections.
+- [ ] 13.2 Inject crashes at SQLite transaction, outbox, checkpoint, action, schema-compatibility rejection, projection, and local Git boundaries; require complete recovery or explicit repair state with no silent success.
+- [ ] 13.3 Run deterministic poisoning and permission-bypass tests over HTTP/tool/Markdown/proposal inputs and malicious reviewer/model payloads; require unchanged policy, trust, writer capability, host authorization, scope, and allowlists.
+- [ ] 13.4 Verify the minimum independent L2 gate, bounded negative/blocked coverage, active WorkRun checkpoint/lease/context/action state, and no automatic target action replay.
+- [ ] 13.5 Enforce single-host patch-to-query visibility p95 ≤2 seconds only after a documented Phase 0 baseline; if it fails, block the release report. Do not substitute this gate for deferred precision/recall/95% CI evaluation.
+- [ ] 13.6 Produce a single-host release report naming code/schema/policy/fixture commits and every pass/fail/unsupported capability; a failed required gate prevents an implementation-complete report.
 
-## 14. Conditional multi-host authority
+## 14. Follow-up handoff register (not part of this change)
 
-- [ ] 14.1 Define the PostgreSQL backend configuration and deployment guard so it is enabled only when multi-host authority is explicitly selected, and verify the default single-host deployment has no PostgreSQL dependency.
-- [ ] 14.2 Implement PostgreSQL transactions, unique display-ID sequence, server-side lease/fencing, event ordering, and outbox behavior behind the storage interface, and verify the storage conformance suite matches SQLite for externally visible behavior.
-- [ ] 14.3 Implement multi-host snapshot, backup, restore, and migration verification, and verify a failed restore/import leaves the destination unchanged and reports the recovered sequence.
-- [ ] 14.4 Run multi-host failure and reader-pinning tests, and verify shared SQLite files, NFS locks, shared Git clones, and independent SQLite replicas are rejected as unsupported deployments.
-- [ ] 14.5 Publish the multi-host compatibility and operational runbook only after the conditional conformance gates pass, and verify the single-host release report clearly marks this phase enabled or not enabled.
+| Follow-up change | 本 change 提供的前置契约 | 后续交付与验收范围 |
+|---|---|---|
+| `integrate-native-host-adapters` | Core transport、capability/adapter registry、Pi/MCP conformance baseline | DeepSeek/Hermes 原生 adapter、installation/diagnostics、真实 host version CI 与 native/MCP 等价测试 |
+| `evolve-engagement-memory` | authority versions、固定 read sequence、受限 CAS proposal、checkpoint/action baseline、local projection | revisions/variants、typed graph、PatchSet merge/conflict、ImpactEvent、resume delta、advanced retrieval/cache、snapshot import/round-trip、migration/backup/restore、remote Git push/真实 secrets scan |
+| `validate-memory-quality` | stable governance/independent L2 gate、query/context/coverage/projection、versioned security fixtures | 完整 corpus、poisoning benchmark、human baseline、precision/recall/unsupported-claim metrics、95% CI、mature replay/reconcile evaluation |
+| `add-shared-authority-backend` | SQLite storage interface、ID/CAS/lease/event/outbox conformance fixtures | PostgreSQL、multi-host lease/event ordering、shared backup/restore、deployment runbook 与跨后端 conformance |

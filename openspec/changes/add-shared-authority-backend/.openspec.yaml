@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-09
+goal: 通过共享存储一致性验证交付可选多主机 authority，不改变单机默认部署。

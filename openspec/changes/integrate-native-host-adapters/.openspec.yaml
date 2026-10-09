@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-09
+goal: 交付真实宿主适配器契约、传输、生命周期、诊断和回退能力。

@@ -1,5 +1,18 @@
 # Spec Delta
 
+## ADDED Requirements
+
+### Requirement: Trust-level boundary
+系统 SHALL 明确区分 L0 `proposal`、L1 `machine_approved` 和 L2 `independently_verified`。L0 只进入审核/提交者可见的 quarantine；L1 只能在显式 candidate 查询中作为带 provenance、evidence 状态和 limitations 的待验证线索；L2 只能由 non-LLM writer 在固定 proposal/evidence 输入上，经 service-verified 独立 reviewer 和确定性硬门后产生。任何模型 verdict、host action mode 或普通 `accept` 字段都不能提升 trust level。
+
+#### Scenario: Candidate is not an ordinary fact
+- **WHEN** 普通 query/context/projection 未显式请求 candidate leads
+- **THEN** L0 和 L1 均不作为普通事实返回；L2 结果保留 reviewer/provenance/evidence refs
+
+#### Scenario: Trust escalation is attempted by a model
+- **WHEN** model submission 携带 L1/L2、admitted、verified、reviewed 或 `accept=true`
+- **THEN** service 拒绝或降为 L0 proposal，并记录原因，不授予 writer capability
+
 ## MODIFIED Requirements
 
 ### Requirement: Proposal-only model writes
@@ -33,7 +46,7 @@ The system SHALL revalidate schema, references, scope, base version, state trans
 - **THEN** at most one commits and the other remains a recorded conflict for rebase
 
 ### Requirement: Independent finding review
-The system SHALL require an independent review record bound to a fixed proposal/evidence snapshot before promoting a finding to L2. A proposal author or validating worker SHALL NOT approve its own result under the same reviewer identity. The reviewer SHALL possess a service-verified review capability, and promotion SHALL validate evidence freshness, limitations, reproducibility, applicable scope/time, and policy digest before an atomic transition. Independent reviewer context SHALL contain claim, evidence, counter-evidence, limitations, and rubric without the earlier reviewer's conclusion text; reviewer/model versions and input hashes SHALL be retained.
+本期 SHALL 要求独立 reviewer service capability、固定 proposal/evidence input hash、作者/验证 worker 排除、evidence refs/limitations/scope/time/policy digest 和原子 promotion。Reviewer context 至少包含 claim、evidence、counter-evidence、limitations 与 rubric，不得读取先前 reviewer 的结论正文；model/version/input hash 必须保留。异构模型、多 Auditor 编排和质量统计归入 `validate-memory-quality`，但不得降低本期 L2 硬门。
 
 #### Scenario: Independent review passes
 - **WHEN** a distinct reviewer examines the fixed claim, evidence, counter-evidence, and limitations and records a passing verdict
@@ -57,6 +70,10 @@ The system SHALL append an audit event for every governance and canonical state 
 #### Scenario: Verify audit continuity
 - **WHEN** an operator verifies the event ledger
 - **THEN** the system reports sequence, hash-chain, and materialized-view inconsistencies without silently repairing authoritative history
+
+#### Scenario: Verify the startup doctor marker
+- **WHEN** operator 执行 `audit.doctor` 或服务启动发现 pending operation marker
+- **THEN** 服务报告受影响 operation/sequence、可重试或需人工修复状态，不把未完成派生工作标为成功
 
 #### Scenario: Record a proposal or review transition
 - **WHEN** a proposal is submitted, a review is recorded, or admission is rejected
