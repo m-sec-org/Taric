@@ -1,4 +1,5 @@
 import { Ajv2020, type AnySchema, type ValidateFunction } from "ajv/dist/2020.js";
+import { coreSchema, contractNames, SCHEMA_VERSION, type ContractName } from "@taric/schemas";
 
 /** Shared JSON Schema validator used at Taric API boundaries. */
 export const schemaValidator = new Ajv2020({ allErrors: true, strict: true });
@@ -7,4 +8,280 @@ schemaValidator.addFormat("date-time", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\
 
 export function compileSchema<T>(schema: AnySchema): ValidateFunction<T> {
   return schemaValidator.compile<T>(schema);
+}
+
+export type ValidationCode = "validation_error" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability";
+export class ContractValidationError extends Error {
+  readonly code: ValidationCode;
+  readonly details: unknown;
+  constructor(code: ValidationCode, message: string, details?: unknown) {
+    super(message);
+    this.name = "ContractValidationError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
+const validators = new Map<ContractName, ValidateFunction>();
+const contractSchemaValidator = new Ajv2020({ allErrors: true, strict: true });
+contractSchemaValidator.addFormat("uuid", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i);
+contractSchemaValidator.addFormat("date-time", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/);
+contractSchemaValidator.addSchema(coreSchema);
+for (const name of contractNames) {
+  const validator = contractSchemaValidator.getSchema(`${coreSchema.$id}#/$defs/${name}`);
+  if (validator) validators.set(name, validator);
+}
+
+/**
+ * 参考类型 -> 必须指向的记录 kind。用于阻止跨种类引用（例如把 WorkItem 当 Evidence 用）。
+ * 未列出的字段不做种类推断，保持 Phase 1 的最小契约。
+ */
+export const referenceKinds: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  scope_ref: ["scope", "engagement"],
+  applicable_scope_ref: ["scope"],
+  resource_ref: ["resource"],
+  resource_revision_ref: ["resource"],
+  tested_resource_refs: ["resource"],
+  baseline_ref: ["resource", "observation", "claim"],
+  from_ref: ["resource", "service", "endpoint"],
+  to_ref: ["resource", "service", "endpoint"],
+  claim_refs: ["claim"],
+  observation_refs: ["observation"],
+  source_observation_refs: ["observation"],
+  evidence_refs: ["evidence", "observation", "coverage"],
+  work_item_ref: ["work_item"],
+  depends_on: ["work_item"],
+  attempt_ref: ["attempt", "work_run"],
+  work_run_ref: ["work_run"],
+  control_ref: ["protective_control", "control_observation"],
+  control_observation_ref: ["control_observation"],
+  identity_ref: ["resource"],
+  review_ref: ["review"],
+  draft_refs: [],
+  handoff_refs: [],
+  memory_refs: [],
+});
+
+/** 引用字段名 -> 该字段的合法状态取值集合，用于阻止引用已撤回/归档的历史对象。 */
+const referenceMustBeCurrent = true;
+const nonCurrentRecallStatuses = new Set(["stale", "retracted", "superseded", "archived", "expired"]);
+
+export interface AuthorityReferenceIndex {
+  /** id -> 该 id 的归属 Engagement。 */
+  engagement: ReadonlyMap<string, string>;
+  /** id -> 该 id 的记录 kind。 */
+  kind: ReadonlyMap<string, string>;
+  /** id -> 该 id 当前的 recall 状态（可选；缺失视为 active）。 */
+  status?: ReadonlyMap<string, string>;
+}
+
+function referenceFields(record: Record<string, unknown>): Array<[string, string]> {
+  const refs: Array<[string, string]> = [];
+  for (const [field, value] of Object.entries(record)) {
+    if (typeof value === "string") refs.push([field, value]);
+    else if (Array.isArray(value)) for (const item of value) if (typeof item === "string") refs.push([field, item]);
+  }
+  return refs;
+}
+
+/**
+ * 跨引用校验：归属、种类和 recall 状态。Core store 在同一事务里用真实索引调用它，
+ * 所以缺失引用、跨 Engagement 引用和指向已撤回对象的引用都会 fail closed。
+ */
+export function validateAuthorityReferences(record: Record<string, unknown>, index: AuthorityReferenceIndex, engagementId: string): void {
+  for (const [field, ref] of referenceFields(record)) {
+    const owner = index.engagement.get(ref);
+    if (!owner) throw new ContractValidationError("validation_error", `invalid or cross-engagement reference: ${ref}`);
+    if (owner !== engagementId) throw new ContractValidationError("validation_error", `invalid or cross-engagement reference: ${ref}`);
+    const expected = referenceKinds[field];
+    const actual = index.kind.get(ref);
+    if (expected && actual && !expected.includes(actual)) {
+      throw new ContractValidationError("validation_error", `reference kind mismatch for ${field}: ${ref} is ${actual}, expected ${expected.join("|")}`);
+    }
+    if (referenceMustBeCurrent && index.status) {
+      const status = index.status.get(ref);
+      if (status && nonCurrentRecallStatuses.has(status)) {
+        throw new ContractValidationError("validation_error", `reference ${field}: ${ref} is ${status} and cannot anchor current state`);
+      }
+    }
+  }
+}
+
+/** 校验 Phase 1 合同，并执行跨字段安全约束。 */
+export function validateContract(name: ContractName, value: unknown): asserts value {
+  if (!value || typeof value !== "object") throw new ContractValidationError("validation_error", `${name} must be an object`);
+  const candidate = value as Record<string, unknown>;
+  if (candidate.schema_version !== SCHEMA_VERSION) {
+    throw new ContractValidationError("unsupported_schema_version", `unsupported schema version for ${name}`, { expected: SCHEMA_VERSION, received: candidate.schema_version });
+  }
+  const validate = validators.get(name);
+  if (validate && !validate(value)) throw new ContractValidationError("validation_error", `invalid ${name} contract`, validate.errors);
+  validateCanonicalRecord(candidate);
+}
+
+/**
+ * 跨字段安全护栏：对每一条进入权威的记录执行，不依赖调用方是否声明 schema_version。
+ * 这些规则覆盖归属、时间范围、信任迁移、证据限制与 control/origin 语义。
+ */
+export function validateCanonicalRecord(candidate: Record<string, unknown>, trustLevel?: string): void {
+  if (candidate.engagement_id !== undefined && typeof candidate.engagement_id !== "string") {
+    throw new ContractValidationError("validation_error", "engagement ownership is required");
+  }
+  if ("valid_from" in candidate && "valid_until" in candidate && String(candidate.valid_from) > String(candidate.valid_until)) {
+    throw new ContractValidationError("validation_error", "valid_from must not be after valid_until");
+  }
+  if (candidate.created_at !== undefined && typeof candidate.created_at !== "string") {
+    throw new ContractValidationError("validation_error", "created_at must be a timestamp string");
+  }
+  const provenance = candidate.provenance as Record<string, unknown> | undefined;
+  if (provenance !== undefined) {
+    if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) throw new ContractValidationError("validation_error", "provenance must be an object");
+    if (typeof provenance.host_id !== "string" || typeof provenance.producer_id !== "string" || typeof provenance.source_kind !== "string") {
+      throw new ContractValidationError("validation_error", "provenance requires host_id, producer_id and source_kind");
+    }
+    if (["L1", "L2"].includes(trustLevel ?? "") && provenance.source_kind === "worker") {
+      throw new ContractValidationError("validation_error", "worker provenance cannot assert machine-approved or verified trust");
+    }
+  }
+  if (candidate.trust_level === "L2" && provenance?.source_kind === "worker") {
+    throw new ContractValidationError("validation_error", "worker input cannot self-assert L2 trust");
+  }
+  // 证据限制：声称有证据却没有 evidence 引用属于不可验证的断言。
+  for (const field of ["evidence_refs", "observation_refs"] as const) {
+    const refs = candidate[field];
+    if (refs !== undefined && (!Array.isArray(refs) || refs.some((item) => typeof item !== "string"))) {
+      throw new ContractValidationError("validation_error", `${field} must be an array of identifiers`);
+    }
+  }
+  if (candidate.evidence_claimed === true && !(candidate.evidence_refs as unknown[] | undefined)?.length) {
+    throw new ContractValidationError("validation_error", "evidence_claimed requires evidence references");
+  }
+  const status = String(candidate.status ?? "");
+  if (["retracted", "superseded", "archived", "stale", "expired"].includes(status) && candidate.recall_excluded !== true) {
+    throw new ContractValidationError("validation_error", `status ${status} must be excluded from current recall`);
+  }
+  if (candidate.decision_layer === "unknown" && candidate.origin_outcome && candidate.origin_outcome !== "unknown") {
+    throw new ContractValidationError("validation_error", "unknown decision layer cannot carry a resolved origin outcome");
+  }
+  if (candidate.origin_reached === false && candidate.origin_outcome && !["unknown", "not_reached"].includes(String(candidate.origin_outcome))) {
+    throw new ContractValidationError("validation_error", "unreached origin cannot carry a resolved reached outcome");
+  }
+  validateTrustTransition(candidate, trustLevel);
+  validateScopeBounds(candidate);
+  validateEvidenceLimitations(candidate);
+  validateDecisionSemantics(candidate);
+}
+
+/**
+ * 信任迁移（tasks 2.2）。信任只能由 Core 的确定性流程提升：proposal -> L1 需要
+ * admission/policy 证据，L1 -> L2 需要独立 review 引用。worker/model 来源永远不能
+ * 自行断言 L1/L2。
+ */
+function validateTrustTransition(candidate: Record<string, unknown>, trustLevel?: string): void {
+  const declared = typeof candidate.trust_level === "string" ? candidate.trust_level : undefined;
+  if (trustLevel && declared && trustLevel !== declared) {
+    throw new ContractValidationError("validation_error", "trust level does not match the writer-assigned trust level");
+  }
+  const effective = trustLevel ?? declared;
+  if (!effective) return;
+  const provenance = candidate.provenance as Record<string, unknown> | undefined;
+  // L1/L2 是 writer 的结论，worker 或 model 来源只能产生 L0 proposal。
+  if (["L1", "L2"].includes(effective) && provenance?.source_kind === "worker") {
+    throw new ContractValidationError("validation_error", "worker provenance cannot assert machine-approved or verified trust");
+  }
+  // 已验证状态的记录必须能追溯到独立复核与 policy。L1 候选线索本身不要求复核，
+  // 真正的 L2 晋级硬门在 promoteFinding/admission 路径上执行。
+  if (["verified", "supported"].includes(String(candidate.status ?? "")) && effective === "L2") {
+    if (!candidate.review_ref) {
+      throw new ContractValidationError("validation_error", "L2 verified records require a bound independent review reference");
+    }
+    if (candidate.policy_digest === undefined) {
+      throw new ContractValidationError("validation_error", "L2 verified records require the policy digest that admitted them");
+    }
+  }
+}
+
+/** Scope 边界（tasks 2.2）：目标必须落在 allowed_targets 内，且不得命中 excluded_targets。 */
+function validateScopeBounds(candidate: Record<string, unknown>): void {
+  const allowed = candidate.allowed_targets;
+  const excluded = candidate.excluded_targets;
+  if (allowed !== undefined && (!Array.isArray(allowed) || allowed.some((item) => typeof item !== "string"))) {
+    throw new ContractValidationError("validation_error", "allowed_targets must be an array of strings");
+  }
+  if (excluded !== undefined && (!Array.isArray(excluded) || excluded.some((item) => typeof item !== "string"))) {
+    throw new ContractValidationError("validation_error", "excluded_targets must be an array of strings");
+  }
+  if (Array.isArray(allowed) && Array.isArray(excluded)) {
+    for (const target of allowed) {
+      if (excluded.includes(target)) {
+        throw new ContractValidationError("validation_error", `scope target is both allowed and excluded: ${target}`);
+      }
+    }
+  }
+}
+
+/**
+ * 证据限制（tasks 2.2）。声称 verified/positive 的结论必须同时携带 evidence 与
+ * limitations；否则它无法被复核，属于不可验证断言。
+ */
+function validateEvidenceLimitations(candidate: Record<string, unknown>): void {
+  const evidence = candidate.evidence_refs;
+  if (evidence !== undefined && (!Array.isArray(evidence) || evidence.some((item) => typeof item !== "string"))) {
+    throw new ContractValidationError("validation_error", "evidence_refs must be an array of identifiers");
+  }
+  const limitations = candidate.limitations;
+  if (limitations !== undefined && (!Array.isArray(limitations) || limitations.some((item) => typeof item !== "string"))) {
+    throw new ContractValidationError("validation_error", "limitations must be an array of strings");
+  }
+  const status = String(candidate.status ?? "");
+  if (["verified", "supported"].includes(status)) {
+    if (!Array.isArray(evidence) || evidence.length === 0) {
+      throw new ContractValidationError("validation_error", `${status} claims require evidence references`);
+    }
+    if (!Array.isArray(limitations) || limitations.length === 0) {
+      throw new ContractValidationError("validation_error", `${status} claims require explicit limitations`);
+    }
+  }
+  // Finding 进入 verified 必须绑定 review 与 policy，这两条与 L2 迁移规则一致。
+  if (candidate.kind === "finding" && status === "verified" && (!candidate.review_ref || candidate.policy_digest === undefined)) {
+    throw new ContractValidationError("validation_error", "verified findings require a review reference and policy digest");
+  }
+}
+
+/**
+ * decision_layer / origin_reached / origin_outcome 三元组必须自洽（tasks 2.2）。
+ * unknown 层不能声称具体控制，edge 未达源站必须是 not_reached，指纹归因只能是 suspected。
+ */
+function validateDecisionSemantics(candidate: Record<string, unknown>): void {
+  const layer = candidate.decision_layer;
+  const outcome = candidate.origin_outcome;
+  const reached = candidate.origin_reached;
+  if (layer !== undefined && !["edge", "network", "origin", "unknown"].includes(String(layer))) {
+    throw new ContractValidationError("validation_error", "unknown decision layer value");
+  }
+  if (outcome !== undefined && !["reached", "not_reached", "unknown"].includes(String(outcome))) {
+    throw new ContractValidationError("validation_error", "unknown origin outcome value");
+  }
+  if (layer === "unknown" && candidate.control_ref) {
+    throw new ContractValidationError("validation_error", "unknown decision layer cannot name a specific control");
+  }
+  if ((layer === "edge" || layer === "network") && reached === false && outcome !== undefined && outcome !== "not_reached") {
+    throw new ContractValidationError("validation_error", "edge or network block before origin must use origin_outcome=not_reached");
+  }
+  if (candidate.fingerprint && candidate.outcome !== undefined && candidate.outcome !== "suspected") {
+    throw new ContractValidationError("validation_error", "fingerprint attribution is only ever suspected");
+  }
+  // blocked_by_control 绝不能声称已到达源站。
+  if (candidate.status === "blocked_by_control" && reached === true) {
+    throw new ContractValidationError("validation_error", "blocked_by_control cannot claim origin_reached=true");
+  }
+  if (reached === true && Array.isArray(candidate.evidence_refs) && candidate.evidence_refs.length === 0) {
+    throw new ContractValidationError("validation_error", "origin_reached=true requires evidence references");
+  }
+}
+
+export function validationErrors(name: ContractName, value: unknown): unknown[] {
+  const validate = validators.get(name);
+  if (!validate || validate(value)) return [];
+  return validate.errors ?? [];
 }

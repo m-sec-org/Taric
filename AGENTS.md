@@ -8,9 +8,10 @@
 - MUST USE LOOP TO RECHECK ORIGIN REQUIREMENTS AND TODO
 - MUST USE MULTIPLE SUBAGENT TO IMPLEMENT THE REQUIREMENTS AND TO COOPERATE WITH EACH OTHER AND VERIFY EACH OTHER TO REALIZE THE REQUIREMENTS.
 - REMEMBER YOUR ARE TOP GUIDER, DO NOT IMPLEMENT THE REQUIREMENTS YOURSELF
-- Before writing any code, it is essential to re-evaluate the overall rationality from a global perspective.
-- EXCLUSIVELY `zh-CN` for ALL user interactions, terminal logs, and code comments.
-- NO monolithic A/B/C plans; resolve details step-by-step. NEVER output choices as plain text. EXCLUSIVELY invoke the provided UI/options rendering tool, matching its injected JSON Schema EXACTLY.
-- Before ANY prompt or UI tool, execute sequence: 1) `Exa search` -> 2) Review codebase context -> 3) Evaluate necessity (silently self-resolve if obvious) -> 4) Interact ONLY if genuinely ambiguous.
-- Do not write fallback code in any instance where an LLM Agent function.
-- IF YOU FOUND SOMETHING IMPORTANT, WRITE TO MEMORY, DO NOT FORGET IT, IT MUST BE SIMPLIFIED
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now andis meant to be replaced later.
+- Study how established products solve the problem before designing a solution. Adopt their proven patterns and conventions rather than inventing an approach from scratch.

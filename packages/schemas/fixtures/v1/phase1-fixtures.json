@@ -1,0 +1,1357 @@
+{
+  "fixture_version": "1.0.0",
+  "schema_version": "1.0.0",
+  "api_contract_version": "1.0.0",
+  "change": "complete-taric-runtime-gaps",
+  "description": "Phase 1 版本化 fixture 语料：正例、负例、安全不变量与状态机迁移。",
+  "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+  "valid": {
+    "scope": {
+      "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "host"
+      },
+      "kind": "scope",
+      "allowed_targets": [
+        "https://example.test"
+      ],
+      "excluded_targets": [
+        "https://internal.test"
+      ],
+      "rules_of_engagement_ref": "roe-1",
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "valid_until": "2026-10-31T00:00:00.000Z"
+    },
+    "engagement": {
+      "id": "fcdfdd1e-5577-4173-870e-79d917388bc1",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "host"
+      },
+      "kind": "engagement",
+      "name": "phase-one",
+      "scope_ref": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+      "status": "active",
+      "action_mode": "host_hitl",
+      "trust_level": "L2"
+    },
+    "resource": {
+      "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "host"
+      },
+      "kind": "resource",
+      "asset_type": "endpoint",
+      "identity": {
+        "origin": "https://example.test",
+        "method": "GET",
+        "path": "/admin"
+      },
+      "revision": 1,
+      "name": "/admin",
+      "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "observation": {
+      "id": "e92e5633-40b5-4568-9062-01df070067c1",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "tool-b",
+        "source_kind": "tool"
+      },
+      "kind": "observation",
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "observed_at": "2026-10-09T00:00:00.000Z",
+      "statement": "admin returns 200 for user",
+      "artifact_refs": [
+        {
+          "host_ref": "host-artifact:1",
+          "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "limitations": [
+        "single identity"
+      ],
+      "trust_level": "L1"
+    },
+    "relation": {
+      "id": "9efcfc42-07b2-41e7-9048-8d8a4a3314f4",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "relation",
+      "from_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "predicate": "protects",
+      "to_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "version": 1,
+      "source_observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ]
+    },
+    "claim": {
+      "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "claim",
+      "proposition": "/admin is reachable without authorization",
+      "status": "proposed",
+      "evidence_refs": [
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "limitations": [
+        "single identity"
+      ]
+    },
+    "workItem": {
+      "id": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "host"
+      },
+      "kind": "work_item",
+      "title": "verify admin access",
+      "status": "queued",
+      "acceptance_criteria": [
+        "evidence recorded"
+      ],
+      "goal": "verify admin access",
+      "risk_class": "finding",
+      "risk_budget": {
+        "actions": 1
+      }
+    },
+    "evidence": {
+      "id": "5eee9386-a285-40b9-8ce5-995fafcc348c",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "tool-b",
+        "source_kind": "tool"
+      },
+      "kind": "evidence",
+      "artifact_ref": {
+        "host_ref": "host-artifact:1",
+        "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "observed_at": "2026-10-09T00:00:00.000Z",
+      "limitations": [
+        "single identity"
+      ],
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "trust_level": "L1"
+    },
+    "finding": {
+      "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "finding",
+      "title": "admin exposure",
+      "claim_refs": [
+        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+      ],
+      "evidence_refs": [
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+      "status": "draft",
+      "severity": "high",
+      "limitations": [
+        "single identity"
+      ]
+    },
+    "coverageCell": {
+      "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "coverage",
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "test_category": "authz",
+      "status": "blocked_by_control",
+      "limitations": [
+        "edge control blocked before origin"
+      ],
+      "conditions": [
+        "role=user"
+      ],
+      "operation": "GET /admin",
+      "evidence_refs": [],
+      "origin_reached": false
+    },
+    "negativeObservation": {
+      "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "negative_observation",
+      "statement": "no bypass observed in this run",
+      "method": "GET /admin",
+      "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "tested_resource_refs": [
+        "702c37b3-7267-4a6e-a660-05026635f9d7"
+      ],
+      "conditions": [
+        "role=user"
+      ],
+      "limitations": [
+        "single identity"
+      ],
+      "evidence_refs": [],
+      "bounded": true
+    },
+    "proposal": {
+      "id": "414d7114-9278-4ea2-a41b-f0ec4269738f",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "proposal",
+      "subject_type": "finding",
+      "content_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "status": "pending",
+      "base_version": 0,
+      "evidence_refs": []
+    },
+    "review": {
+      "id": "0d6fc404-aeac-40f5-8fe7-a3895d48c24b",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "reviewer-b",
+        "source_kind": "reviewer"
+      },
+      "kind": "review",
+      "proposal_ref": "b6cc709d-9d5b-4eb1-b132-b615f4e4d30c",
+      "reviewer_id": "reviewer-b",
+      "reviewer_kind": "reviewer",
+      "input_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "verdict": "pass",
+      "policy_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "protectiveControl": {
+      "id": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "host"
+      },
+      "kind": "protective_control",
+      "name": "edge WAF",
+      "layer": "edge",
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "control_kind": "waf"
+    },
+    "controlObservation": {
+      "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "kind": "control_observation",
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "operation": "GET /admin",
+      "conditions": [
+        "role=user"
+      ],
+      "outcome": "blocked",
+      "decision_layer": "edge",
+      "origin_reached": false,
+      "origin_outcome": "not_reached",
+      "observed_at": "2026-10-09T00:00:00.000Z",
+      "evidence_refs": [
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "limitations": [
+        "single identity"
+      ]
+    },
+    "accessDecisionObservation": {
+      "id": "cdc4f81c-6fcc-4f72-a8f4-8aafa25cc531",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "access_decision_observation",
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "identity_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf",
+      "operation": "GET /admin",
+      "decision": "deny",
+      "observed_at": "2026-10-09T00:00:00.000Z",
+      "decision_layer": "edge",
+      "origin_reached": false,
+      "origin_outcome": "not_reached",
+      "evidence_refs": [],
+      "limitations": [
+        "single identity"
+      ],
+      "auth_metadata": {
+        "scheme": "basic",
+        "principal_class": "user"
+      }
+    },
+    "attempt": {
+      "id": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "attempt",
+      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "status": "running",
+      "generation": 1,
+      "owner": {
+        "host_id": "pi",
+        "agent_id": "worker-a",
+        "dispatch_id": "dispatch-1"
+      },
+      "lease_expires_at": "2026-10-09T00:02:00.000Z"
+    },
+    "workRun": {
+      "id": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "work_run",
+      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "status": "running",
+      "generation": 1,
+      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "owner": {
+        "host_id": "pi",
+        "agent_id": "worker-a",
+        "dispatch_id": "dispatch-1"
+      },
+      "read_seq": 1,
+      "lease_expires_at": "2026-10-09T00:02:00.000Z"
+    },
+    "checkpoint": {
+      "id": "39451de3-2d97-4292-bbd4-a5c29fbac543",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "checkpoint",
+      "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
+      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "generation": 1,
+      "source_read_seq": 1,
+      "completed_steps": [
+        "inventory"
+      ],
+      "next_steps": [
+        "verify"
+      ],
+      "observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "evidence_refs": [
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "negative_results": [],
+      "unresolved_work": [],
+      "host_decision_refs": [],
+      "external_action_state": "none",
+      "budget": {
+        "actions": 1
+      },
+      "context_manifest": {
+        "context_snapshot_id": "17d1229b-0d62-4676-983b-8660bcc94816",
+        "read_seq": 1,
+        "budget_unit": "characters",
+        "budget": 4000,
+        "builder_version": "context/1.0",
+        "sources": [
+          {
+            "id": "e92e5633-40b5-4568-9062-01df070067c1",
+            "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ]
+      }
+    },
+    "actionIntent": {
+      "id": "dee24c64-5865-449c-ac77-597652c714e5",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "kind": "action_intent",
+      "target": "https://example.test/admin",
+      "method": "inspect",
+      "status": "recommended",
+      "mode": "llm_recommend",
+      "rationale": "verify reachability",
+      "uncertainty": "single identity",
+      "constraints": [
+        "read-only"
+      ],
+      "memory_refs": [
+        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+      ],
+      "evidence_refs": [
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
+      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "generation": 1,
+      "owner": {
+        "host_id": "pi",
+        "agent_id": "worker-a"
+      }
+    },
+    "auditEvent": {
+      "event_id": "a87ba61f-7097-490b-b4f1-086a191c9255",
+      "commit_seq": 1,
+      "event_type": "record.commit",
+      "subject_id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "prev_hash": null,
+      "actor_id": "core",
+      "host_id": "pi",
+      "changed_fields": [
+        "kind"
+      ]
+    },
+    "apiSuccess": {
+      "ok": true,
+      "data": {
+        "read_seq": 1
+      }
+    },
+    "apiError": {
+      "ok": false,
+      "error": {
+        "code": "validation_error",
+        "message": "invalid record"
+      }
+    }
+  },
+  "negatives": {
+    "missing_required": {
+      "reason": "缺失 required 字段",
+      "record": {
+        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "finding",
+        "title": "admin exposure",
+        "claim_refs": [
+          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        ],
+        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "status": "draft",
+        "severity": "high",
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "extra_field": {
+      "reason": "额外字段必须被拒绝",
+      "record": {
+        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "finding",
+        "title": "admin exposure",
+        "claim_refs": [
+          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        ],
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "status": "draft",
+        "severity": "high",
+        "limitations": [
+          "single identity"
+        ],
+        "unexpected_field": true
+      }
+    },
+    "malformed_uuid": {
+      "reason": "引用不是 UUID",
+      "record": {
+        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "claim",
+        "proposition": "/admin is reachable without authorization",
+        "status": "proposed",
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "limitations": [
+          "single identity"
+        ],
+        "applicable_scope_ref": "not-a-uuid"
+      }
+    },
+    "malformed_timestamp": {
+      "reason": "时间戳格式错误",
+      "record": {
+        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "yesterday",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "resource",
+        "identity": {
+          "origin": "https://example.test",
+          "method": "GET",
+          "path": "/admin"
+        },
+        "revision": 1,
+        "name": "/admin",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "bad_enum_status": {
+      "reason": "非法枚举值",
+      "record": {
+        "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "coverage",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "test_category": "authz",
+        "status": "DONE",
+        "limitations": [
+          "edge control blocked before origin"
+        ],
+        "conditions": [
+          "role=user"
+        ],
+        "operation": "GET /admin",
+        "evidence_refs": [],
+        "origin_reached": false
+      }
+    },
+    "bad_enum_trust": {
+      "reason": "非法 trust level",
+      "record": {
+        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "finding",
+        "title": "admin exposure",
+        "claim_refs": [
+          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        ],
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "status": "draft",
+        "severity": "high",
+        "limitations": [
+          "single identity"
+        ],
+        "trust_level": "L9"
+      }
+    },
+    "bad_schema_version": {
+      "reason": "不支持的 schema 版本",
+      "record": {
+        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "schema_version": "0.9.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "resource",
+        "identity": {
+          "origin": "https://example.test",
+          "method": "GET",
+          "path": "/admin"
+        },
+        "revision": 1,
+        "name": "/admin",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "bad_hash": {
+      "reason": "hash 不符合 sha256 格式",
+      "record": {
+        "id": "0d6fc404-aeac-40f5-8fe7-a3895d48c24b",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "reviewer-b",
+          "source_kind": "reviewer"
+        },
+        "kind": "review",
+        "proposal_ref": "b6cc709d-9d5b-4eb1-b132-b615f4e4d30c",
+        "reviewer_id": "reviewer-b",
+        "reviewer_kind": "reviewer",
+        "input_hash": "md5:abc",
+        "verdict": "pass",
+        "policy_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    "cross_engagement": {
+      "reason": "记录属于其他 Engagement",
+      "record": {
+        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "schema_version": "1.0.0",
+        "engagement_id": "deadbeef-dead-dead-dead-deaddeaddead",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "resource",
+        "identity": {
+          "origin": "https://example.test",
+          "method": "GET",
+          "path": "/admin"
+        },
+        "revision": 1,
+        "name": "/admin",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "claim_without_evidence": {
+      "reason": "verified claim 缺少 evidence",
+      "record": {
+        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "claim",
+        "proposition": "/admin is reachable without authorization",
+        "status": "verified",
+        "evidence_refs": [],
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "claim_without_limitations": {
+      "reason": "verified claim 缺少 limitations",
+      "record": {
+        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "claim",
+        "proposition": "/admin is reachable without authorization",
+        "status": "verified",
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "limitations": []
+      }
+    },
+    "l2_worker_self_assert": {
+      "reason": "worker 来源不能自行断言 L1/L2",
+      "record": {
+        "id": "e92e5633-40b5-4568-9062-01df070067c1",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "statement": "admin returns 200 for user",
+        "artifact_refs": [
+          {
+            "host_ref": "host-artifact:1",
+            "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "limitations": [
+          "single identity"
+        ],
+        "trust_level": "L2"
+      }
+    },
+    "unknown_layer_with_control": {
+      "reason": "unknown 层不能指向具体控制",
+      "record": {
+        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "tool"
+        },
+        "kind": "control_observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "operation": "GET /admin",
+        "conditions": [
+          "role=user"
+        ],
+        "outcome": "blocked",
+        "decision_layer": "unknown",
+        "origin_reached": false,
+        "origin_outcome": "not_reached",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "edge_block_reached_origin": {
+      "reason": "edge 未达源站却声称 reached",
+      "record": {
+        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "tool"
+        },
+        "kind": "control_observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "operation": "GET /admin",
+        "conditions": [
+          "role=user"
+        ],
+        "outcome": "blocked",
+        "decision_layer": "edge",
+        "origin_reached": false,
+        "origin_outcome": "reached",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "origin_reached_without_evidence": {
+      "reason": "origin_reached=true 缺少证据",
+      "record": {
+        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "tool"
+        },
+        "kind": "control_observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "operation": "GET /admin",
+        "conditions": [
+          "role=user"
+        ],
+        "outcome": "blocked",
+        "decision_layer": "edge",
+        "origin_reached": true,
+        "origin_outcome": "not_reached",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "evidence_refs": [],
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "fingerprint_confirmed": {
+      "reason": "指纹归因只能是 suspected",
+      "record": {
+        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "tool"
+        },
+        "kind": "control_observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "operation": "GET /admin",
+        "conditions": [
+          "role=user"
+        ],
+        "outcome": "observed",
+        "decision_layer": "edge",
+        "origin_reached": false,
+        "origin_outcome": "not_reached",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "limitations": [
+          "single identity"
+        ],
+        "fingerprint": "waf-v1"
+      }
+    },
+    "blocked_by_control_reached": {
+      "reason": "blocked_by_control 不能声称已到达源站",
+      "record": {
+        "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "coverage",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "test_category": "authz",
+        "status": "blocked_by_control",
+        "limitations": [
+          "edge control blocked before origin"
+        ],
+        "conditions": [
+          "role=user"
+        ],
+        "operation": "GET /admin",
+        "evidence_refs": [],
+        "origin_reached": true
+      }
+    },
+    "negative_unbounded": {
+      "reason": "阴性观察必须声明 bounded",
+      "record": {
+        "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "negative_observation",
+        "statement": "no bypass observed in this run",
+        "method": "GET /admin",
+        "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "tested_resource_refs": [
+          "702c37b3-7267-4a6e-a660-05026635f9d7"
+        ],
+        "conditions": [
+          "role=user"
+        ],
+        "limitations": [
+          "single identity"
+        ],
+        "evidence_refs": [],
+        "bounded": false
+      }
+    },
+    "negative_no_limitations": {
+      "reason": "阴性观察必须声明 limitations",
+      "record": {
+        "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "negative_observation",
+        "statement": "no bypass observed in this run",
+        "method": "GET /admin",
+        "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "tested_resource_refs": [
+          "702c37b3-7267-4a6e-a660-05026635f9d7"
+        ],
+        "conditions": [
+          "role=user"
+        ],
+        "limitations": [],
+        "evidence_refs": [],
+        "bounded": true
+      }
+    },
+    "scope_allows_and_excludes": {
+      "reason": "scope 目标同时允许和排除",
+      "record": {
+        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "scope",
+        "allowed_targets": [
+          "https://example.test"
+        ],
+        "excluded_targets": [
+          "https://example.test"
+        ],
+        "rules_of_engagement_ref": "roe-1",
+        "valid_from": "2026-10-09T00:00:00.000Z",
+        "valid_until": "2026-10-31T00:00:00.000Z"
+      }
+    },
+    "scope_inverted_window": {
+      "reason": "valid_from 晚于 valid_until",
+      "record": {
+        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "scope",
+        "allowed_targets": [
+          "https://example.test"
+        ],
+        "excluded_targets": [
+          "https://internal.test"
+        ],
+        "rules_of_engagement_ref": "roe-1",
+        "valid_from": "2026-12-01T00:00:00.000Z",
+        "valid_until": "2026-10-01T00:00:00.000Z"
+      }
+    },
+    "finding_without_review": {
+      "reason": "finding 缺少 review_ref",
+      "record": {
+        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "finding",
+        "title": "admin exposure",
+        "claim_refs": [
+          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        ],
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "status": "draft",
+        "severity": "high",
+        "limitations": [
+          "single identity"
+        ]
+      }
+    },
+    "empty_scope_targets": {
+      "reason": "allowed_targets 不能为空",
+      "record": {
+        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "scope",
+        "allowed_targets": [],
+        "excluded_targets": [
+          "https://internal.test"
+        ],
+        "rules_of_engagement_ref": "roe-1",
+        "valid_from": "2026-10-09T00:00:00.000Z",
+        "valid_until": "2026-10-31T00:00:00.000Z"
+      }
+    },
+    "secret_in_auth_metadata": {
+      "reason": "auth_metadata 不允许凭据",
+      "record": {
+        "id": "cdc4f81c-6fcc-4f72-a8f4-8aafa25cc531",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "access_decision_observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "identity_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf",
+        "operation": "GET /admin",
+        "decision": "deny",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "decision_layer": "edge",
+        "origin_reached": false,
+        "origin_outcome": "not_reached",
+        "evidence_refs": [],
+        "limitations": [
+          "single identity"
+        ],
+        "auth_metadata": {
+          "token": "sk-live-secret"
+        }
+      }
+    },
+    "caller_display_id": {
+      "reason": "调用者不得设置 display_id",
+      "record": {
+        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "host"
+        },
+        "kind": "resource",
+        "identity": {
+          "origin": "https://example.test",
+          "method": "GET",
+          "path": "/admin"
+        },
+        "revision": 1,
+        "name": "/admin",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "display_id": "TAR-000001"
+      }
+    },
+    "secret_ref_in_projection": {
+      "reason": "Artifact 内容不得进入记录",
+      "record": {
+        "id": "e92e5633-40b5-4568-9062-01df070067c1",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "tool-b",
+          "source_kind": "tool"
+        },
+        "kind": "observation",
+        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "observed_at": "2026-10-09T00:00:00.000Z",
+        "statement": "admin returns 200 for user",
+        "artifact_refs": [
+          {
+            "host_ref": "host-artifact:1",
+            "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "limitations": [
+          "single identity"
+        ],
+        "trust_level": "L1",
+        "artifact_body": "raw secret bytes"
+      }
+    },
+    "denied_to_executed": {
+      "reason": "denied 不能进入执行态",
+      "record": {
+        "from": "denied",
+        "to": "executed"
+      }
+    },
+    "terminal_workrun_reclaim": {
+      "reason": "terminal WorkRun 不能回到 running",
+      "record": {
+        "from": "completed",
+        "to": "running"
+      }
+    },
+    "missing_checkpoint_lists": {
+      "reason": "checkpoint 空结果列表必须显式为空",
+      "record": {
+        "id": "39451de3-2d97-4292-bbd4-a5c29fbac543",
+        "schema_version": "1.0.0",
+        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "created_at": "2026-10-09T00:00:00.000Z",
+        "provenance": {
+          "host_id": "pi",
+          "producer_id": "worker-a",
+          "source_kind": "worker"
+        },
+        "kind": "checkpoint",
+        "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
+        "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+        "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+        "generation": 1,
+        "source_read_seq": 1,
+        "completed_steps": [
+          "inventory"
+        ],
+        "next_steps": [
+          "verify"
+        ],
+        "observation_refs": [
+          "e92e5633-40b5-4568-9062-01df070067c1"
+        ],
+        "evidence_refs": [
+          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        ],
+        "external_action_state": "none",
+        "budget": {
+          "actions": 1
+        },
+        "context_manifest": {
+          "context_snapshot_id": "17d1229b-0d62-4676-983b-8660bcc94816",
+          "read_seq": 1,
+          "budget_unit": "characters",
+          "budget": 4000,
+          "builder_version": "context/1.0",
+          "sources": [
+            {
+              "id": "e92e5633-40b5-4568-9062-01df070067c1",
+              "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "state_machines": {
+    "actionIntent": {
+      "recommended": [
+        "authorized",
+        "denied"
+      ],
+      "authorized": [
+        "executed",
+        "failed",
+        "unknown"
+      ],
+      "unknown": [
+        "executed",
+        "failed"
+      ],
+      "executed": [],
+      "failed": [],
+      "denied": []
+    },
+    "workRun": {
+      "queued": [
+        "claimed",
+        "cancelled"
+      ],
+      "claimed": [
+        "running",
+        "blocked",
+        "cancelled",
+        "lost"
+      ],
+      "running": [
+        "checkpointed",
+        "blocked",
+        "completed",
+        "failed",
+        "cancelled",
+        "lost"
+      ],
+      "checkpointed": [
+        "running",
+        "blocked",
+        "completed",
+        "failed",
+        "cancelled",
+        "lost"
+      ],
+      "blocked": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "lost"
+      ],
+      "completed": [],
+      "failed": [],
+      "cancelled": [],
+      "lost": []
+    },
+    "terminal_workrun": [
+      "completed",
+      "failed",
+      "cancelled",
+      "lost"
+    ],
+    "terminal_actionIntent": [
+      "executed",
+      "failed",
+      "denied"
+    ],
+    "active_leased_status": [
+      "claimed",
+      "running",
+      "checkpointed"
+    ]
+  },
+  "security_invariants": [
+    "poisoning_input_cannot_change_policy_or_trust",
+    "worker_cannot_self_assert_l1_l2",
+    "caller_cannot_set_display_id_or_trust_level",
+    "cross_engagement_reference_rejected",
+    "unknown_layer_cannot_be_attributed_to_a_control",
+    "edge_block_keeps_origin_coverage_open",
+    "fingerprint_attribution_is_only_suspected",
+    "negative_observation_requires_limitations",
+    "verified_claims_require_evidence_and_limitations",
+    "auth_metadata_must_be_non_secret",
+    "denied_action_cannot_transition_to_execution",
+    "terminal_workrun_cannot_be_reclaimed",
+    "artifact_content_stays_host_owned"
+  ],
+  "counts": {
+    "valid": 23,
+    "negatives": 29
+  }
+}

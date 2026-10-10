@@ -6,26 +6,26 @@
 
 ## 1. Phase 0 baseline and contract registry
 
-- [ ] 1.1 Freeze the supported single-host profile and Pi host version/commit in a machine-readable compatibility manifest; list DeepSeek, Hermes, PostgreSQL, remote push, and full evaluation as `unsupported_capability`, and verify diagnostics expose the same manifest.
-- [ ] 1.2 Freeze the supported reference/tools/kb, reference/link, PTES, and pentest-skills source commits for design input only; verify no old KB/Link runtime, schema, CLI, or format compatibility is advertised.
-- [ ] 1.3 Define the Phase 1 API, error, capability, schema, trust, coverage, and adapter version registry from `docs/taric-design.md`; verify every supported operation has request, response, error, and unsupported behavior contracts.
-- [ ] 1.4 Define the non-goal registry and security invariants: no platform, model provider, agent loop, worker scheduler, target execution, action grant, HITL identity, credential/Artifact-content management, cross-Engagement auto-sharing, or legacy format compatibility; verify poisoning input cannot change these flags.
-- [ ] 1.5 Add a clean-checkout command that installs dependencies, builds all workspaces, then runs tests without pre-existing `dist`; verify stdout/stderr and nonzero failures are deterministic.
+- [x] 1.1 Freeze the supported single-host profile and Pi host version/commit in a machine-readable compatibility manifest; list DeepSeek, Hermes, PostgreSQL, remote push, and full evaluation as `unsupported_capability`, and verify diagnostics expose the same manifest.
+- [x] 1.2 Freeze the supported reference/tools/kb, reference/link, PTES, and pentest-skills source commits for design input only; verify no old KB/Link runtime, schema, CLI, or format compatibility is advertised.
+- [x] 1.3 Define the Phase 1 API, error, capability, schema, trust, coverage, and adapter version registry from `docs/taric-design.md`; verify every supported operation has request, response, error, and unsupported behavior contracts.
+- [x] 1.4 Define the non-goal registry and security invariants: no platform, model provider, agent loop, worker scheduler, target execution, action grant, HITL identity, credential/Artifact-content management, cross-Engagement auto-sharing, or legacy format compatibility; verify poisoning input cannot change these flags.
+- [x] 1.5 Add a clean-checkout command that installs dependencies, builds all workspaces, then runs tests without pre-existing `dist`; verify stdout/stderr and nonzero failures are deterministic.
 
 ## 2. Phase 0 schema and validation foundation
 
-- [ ] 2.1 Add strict Phase 1 contracts for Engagement, Scope, Resource, Observation, Claim, Evidence, Finding, ProtectiveControl, ControlObservation, AccessDecisionObservation, Coverage, WorkItem, WorkRun, Attempt, Checkpoint, ActionIntent, Proposal, Review, AuditEvent, API envelopes, and unsupported-capability errors; verify missing, extra, malformed, and invalid-enum fields are rejected.
+- [x] 2.1 Add strict Phase 1 contracts for Engagement, Scope, Resource, Observation, Claim, Evidence, Finding, ProtectiveControl, ControlObservation, AccessDecisionObservation, Coverage, WorkItem, WorkRun, Attempt, Checkpoint, ActionIntent, Proposal, Review, AuditEvent, API envelopes, and unsupported-capability errors; verify missing, extra, malformed, and invalid-enum fields are rejected.
 - [ ] 2.2 Add cross-field and cross-reference validators for engagement ownership, reference kinds, time ranges, provenance, scope, evidence limitations, trust transitions, legal WorkRun/action states, and `decision_layer/origin_reached/origin_outcome`; verify invalid examples fail closed with structured errors.
-- [ ] 2.3 Route every Core write path, including internal writer calls, through the shared validator; verify direct transport bypass cannot persist invalid records or caller-supplied trust/admission/display IDs.
-- [ ] 2.4 Add schema version identifiers and compatibility checks for the local SQLite authority; verify unsupported schema versions fail before writes and no legacy format is imported or migrated implicitly.
-- [ ] 2.5 Generate TypeScript types and Python-facing fixtures from the same Phase 1 schemas; verify Pi, CLI, MCP, and Core tests consume identical field definitions.
+- [x] 2.3 Route every Core write path, including internal writer calls, through the shared validator; verify direct transport bypass cannot persist invalid records or caller-supplied trust/admission/display IDs.
+- [x] 2.4 Add schema version identifiers and compatibility checks for the local SQLite authority; verify unsupported schema versions fail before writes and no legacy format is imported or migrated implicitly.
+- [x] 2.5 Generate TypeScript types and Python-facing fixtures from the same Phase 1 schemas; verify Pi, CLI, MCP, and Core tests consume identical field definitions.
 
 ## 3. Core service and authority boundary
 
 - [ ] 3.1 Implement the versioned single-host Core service for every supported Phase 1 operation and return declared success or structured error envelopes; verify deferred operations return `unsupported_capability`.
 - [ ] 3.2 Introduce transport-verified principals and engagement capabilities for model, Pi host, reviewer, writer, and operator operations; verify self-asserted role/host/engagement fields cannot grant access.
-- [ ] 3.3 Remove public model/Pi access to `AuthorityStore.db` and canonical writer; expose scoped clients only; verify no model-facing integration can reach `.db` or `commit`.
-- [ ] 3.4 Add idempotency records bound to operation, principal, engagement, and normalized request hash; verify retries return the original result and key reuse with another payload returns a conflict.
+- [x] 3.3 Remove public model/Pi access to `AuthorityStore.db` and canonical writer; expose scoped clients only; verify no model-facing integration can reach `.db` or `commit`.
+- [x] 3.4 Add idempotency records bound to operation, principal, engagement, and normalized request hash; verify retries return the original result and key reuse with another payload returns a conflict.
 - [ ] 3.5 Add stable validation, authorization, stale-version, conflict, unsupported-capability, unsupported-schema-version, unavailable-host, and internal error codes; verify CLI/MCP/Pi preserve codes and do not fail open.
 
 ## 4. SQLite authority, IDs, snapshots, and audit
@@ -39,7 +39,7 @@
 
 ## 5. Governance and writer isolation
 
-- [ ] 5.1 Make model-facing capture, observation, proposal, and draft operations proposal-only; reject caller trust level, admission status, policy result, display ID, or direct Markdown/database writes; verify canonical records remain unchanged.
+- [x] 5.1 Make model-facing capture, observation, proposal, and draft operations proposal-only; reject caller trust level, admission status, policy result, display ID, or direct Markdown/database writes; verify canonical records remain unchanged.
 - [ ] 5.2 Make proposal submission, review, rejection, admission, canonical mutation, audit, idempotency, and outbox updates atomic; inject failure at each boundary and verify retryable proposal/no partial admission.
 - [ ] 5.3 Implement deterministic admission checks for schema, references, scope, base version, evidence/provenance, policy digest, and legal transition; verify missing checks fail closed and remain auditable.
 - [ ] 5.4 Implement the minimum independent L2 review gate: service-verified reviewer capability, fixed proposal/evidence snapshot, author/worker/reviewer independence, reviewer context without earlier verdict text, and retained model/policy/input hashes; verify self-review/unbound reviewer promotion fails.
@@ -48,19 +48,19 @@
 
 ## 6. Minimum controls and coverage
 
-- [ ] 6.1 Implement minimal ProtectiveControl, ControlObservation, AccessDecisionObservation, and non-secret authentication/session metadata contracts; verify control outcome and access decision stay separate and bind to resource/identity/operation/conditions.
-- [ ] 6.2 Add hard guards for unknown layer, missing origin evidence, edge block with origin not reached, and suspected fingerprint attribution; verify unknown responses cannot be attributed to a specific control/origin.
-- [ ] 6.3 Implement dimension-preserving Coverage cells for resource, test category, identity, operation/parameter, conditions, status, limitations, evidence, and time; verify one identity/operation result leaves other cells open.
-- [ ] 6.4 Implement bounded negative observations with method, baseline/control, conditions, identity, limitations, and evidence references; verify no string heuristic converts a negative observation into universal absence.
-- [ ] 6.5 Implement the minimum coverage close gate exposing untested, blocked, blocked-by-control, negative-only, unverified-positive, conflicting, and un-ingested external results; verify edge blocks never close origin coverage and the gate never grants action authorization.
+- [x] 6.1 Implement minimal ProtectiveControl, ControlObservation, AccessDecisionObservation, and non-secret authentication/session metadata contracts; verify control outcome and access decision stay separate and bind to resource/identity/operation/conditions.
+- [x] 6.2 Add hard guards for unknown layer, missing origin evidence, edge block with origin not reached, and suspected fingerprint attribution; verify unknown responses cannot be attributed to a specific control/origin.
+- [x] 6.3 Implement dimension-preserving Coverage cells for resource, test category, identity, operation/parameter, conditions, status, limitations, evidence, and time; verify one identity/operation result leaves other cells open.
+- [x] 6.4 Implement bounded negative observations with method, baseline/control, conditions, identity, limitations, and evidence references; verify no string heuristic converts a negative observation into universal absence.
+- [x] 6.5 Implement the minimum coverage close gate exposing untested, blocked, blocked-by-control, negative-only, unverified-positive, conflicting, and un-ingested external results; verify edge blocks never close origin coverage and the gate never grants action authorization.
 
 ## 7. Context, recall, and trust filtering
 
-- [ ] 7.1 Build fixed-sequence Context Packs that prioritize scope/ROE, worker role/risk budget, WorkItem goals/acceptance, latest checkpoint, relevant direct changes, entities/evidence, then background; verify mandatory constraints survive budget pressure.
-- [ ] 7.2 Add context snapshot ID, declared token/character budget, adapter/builder/policy manifest, source IDs/hashes/times/versions, authorized slice byte/line/HTTP locations and permission metadata, omitted/truncated ranges, and explicit unexamined markers; verify over-budget requests return structured continuation/minimum-budget errors.
-- [ ] 7.3 Implement opaque continuation cursors bound to principal, engagement, filters, pinned sequence, ordering, and budget; verify continuation has no gaps/duplicates and cannot cross engagements.
-- [ ] 7.4 Apply trust/permission filtering to query, Context Pack, Brief, Index, and model-facing output: L0 and unrequested L1 are absent from ordinary facts; explicit L1 candidates carry provenance, limitations, and evidence refs.
-- [ ] 7.5 Preserve independent reviewer context from a fixed sequence without earlier verdict text; verify context/query results never expose raw Artifact, credentials, private paths, unreviewed proposals, or sensitive drafts.
+- [x] 7.1 Build fixed-sequence Context Packs that prioritize scope/ROE, worker role/risk budget, WorkItem goals/acceptance, latest checkpoint, relevant direct changes, entities/evidence, then background; verify mandatory constraints survive budget pressure.
+- [x] 7.2 Add context snapshot ID, declared token/character budget, adapter/builder/policy manifest, source IDs/hashes/times/versions, authorized slice byte/line/HTTP locations and permission metadata, omitted/truncated ranges, and explicit unexamined markers; verify over-budget requests return structured continuation/minimum-budget errors.
+- [x] 7.3 Implement opaque continuation cursors bound to principal, engagement, filters, pinned sequence, ordering, and budget; verify continuation has no gaps/duplicates and cannot cross engagements.
+- [x] 7.4 Apply trust/permission filtering to query, Context Pack, Brief, Index, and model-facing output: L0 and unrequested L1 are absent from ordinary facts; explicit L1 candidates carry provenance, limitations, and evidence refs.
+- [x] 7.5 Preserve independent reviewer context from a fixed sequence without earlier verdict text; verify context/query results never expose raw Artifact, credentials, private paths, unreviewed proposals, or sensitive drafts.
 
 ## 8. WorkRun, Attempt, checkpoint, and fencing baseline
 
@@ -80,37 +80,37 @@
 
 ## 10. Executable CLI, MCP, and Pi adapter
 
-- [ ] 10.1 Implement the CLI binary, configuration discovery, JSON input/output, stderr diagnostics, nonzero exits, and Phase 1 dispatch; verify `taric --help`, invalid commands, and `unsupported_capability` behave predictably.
-- [ ] 10.2 Implement MCP stdio initialize/tools/list/tools/call through the model capability boundary; verify stdout contains protocol JSON only and canonical commit/admission/checkpoint commit, credentials, arbitrary paths, and target tools are unavailable.
+- [x] 10.1 Implement the CLI binary, configuration discovery, JSON input/output, stderr diagnostics, nonzero exits, and Phase 1 dispatch; verify `taric --help`, invalid commands, and `unsupported_capability` behave predictably.
+- [x] 10.2 Implement MCP stdio initialize/tools/list/tools/call through the model capability boundary; verify stdout contains protocol JSON only and canonical commit/admission/checkpoint commit, credentials, arbitrary paths, and target tools are unavailable.
 - [ ] 10.3 Implement authenticated local Core client transport for Pi with no store/DB handle exposure; verify engagement capabilities and host identity are checked before writes.
 - [ ] 10.4 Implement real Pi lifecycle hooks for session/context/proposal/checkpoint/action/result/error paths for the pinned supported host version; verify callbacks run in a host contract test and reload is idempotent.
-- [ ] 10.5 Register only the documented Phase 1 model tools; verify DeepSeek/Hermes adapter operations and their lifecycle hooks return `unsupported_capability` and do not simulate support.
+- [x] 10.5 Register only the documented Phase 1 model tools; verify DeepSeek/Hermes adapter operations and their lifecycle hooks return `unsupported_capability` and do not simulate support.
 - [ ] 10.6 Run CLI/MCP/Pi subprocess/host contract tests from a clean build; verify repeated idempotent calls and unauthorized calls produce stable responses with no partial writes.
 
 ## 11. Projection and local Git
 
-- [ ] 11.1 Generate distinct Engagement Brief and Attack Surface Index views with explicit field allowlists, trust labels, watermarks, generation manifest, file hashes, and authority sequence; verify canaries for raw Artifact, SecretRef, token, private path, unreviewed proposal, and sensitive draft are absent.
-- [ ] 11.2 Stage complete immutable generations and atomically switch a current pointer without deleting reader-pinned generations; verify concurrent readers see complete old or new generations only.
-- [ ] 11.3 Enforce principal/engagement/generation projection permissions; reject cross-engagement and arbitrary-path reads without metadata leakage.
-- [ ] 11.4 Create local Git checkpoints by default when enabled, binding commit to manifest and authority sequence; verify commit failure leaves authority intact with pending/retry status.
-- [ ] 11.5 Keep remote push and external secrets scanner unsupported; verify no boolean configuration can claim a remote scan or push succeeded.
-- [ ] 11.6 Document host-owned Artifact retention/redaction and Taric-owned projection filtering without changing normative design docs or implying Artifact storage.
+- [x] 11.1 Generate distinct Engagement Brief and Attack Surface Index views with explicit field allowlists, trust labels, watermarks, generation manifest, file hashes, and authority sequence; verify canaries for raw Artifact, SecretRef, token, private path, unreviewed proposal, and sensitive draft are absent.
+- [x] 11.2 Stage complete immutable generations and atomically switch a current pointer without deleting reader-pinned generations; verify concurrent readers see complete old or new generations only.
+- [x] 11.3 Enforce principal/engagement/generation projection permissions; reject cross-engagement and arbitrary-path reads without metadata leakage.
+- [x] 11.4 Create local Git checkpoints by default when enabled, binding commit to manifest and authority sequence; verify commit failure leaves authority intact with pending/retry status.
+- [x] 11.5 Keep remote push and external secrets scanner unsupported; verify no boolean configuration can claim a remote scan or push succeeded.
+- [x] 11.6 Document host-owned Artifact retention/redaction and Taric-owned projection filtering without changing normative design docs or implying Artifact storage.
 
 ## 12. Documentation and unsupported surface
 
-- [ ] 12.1 Update only change-local proposal/design/tasks and implementation-facing package documentation to describe the single-host profile; do not modify `docs/taric-design.md` or main specs to hide deferred behavior.
-- [ ] 12.2 Publish the supported capability matrix and explicit follow-up references: `integrate-native-host-adapters`, `evolve-engagement-memory`, `validate-memory-quality`, and `add-shared-authority-backend`; verify diagnostics, CLI, MCP, and Pi report identical unsupported names.
-- [ ] 12.3 Verify no example claims full `taric-design.md` implementation, cross-Engagement sharing, native DeepSeek/Hermes support, complete graph/Impact, statistical quality completion, PostgreSQL, or target action execution.
-- [ ] 12.4 Verify every deferred design requirement is mapped to an existing follow-up proposal/spec/task with prerequisites and release gate in the handoff register; fail handoff validation for missing capability coverage, missing files, ambiguous owner, or completion claims.
+- [x] 12.1 Update only change-local proposal/design/tasks and implementation-facing package documentation to describe the single-host profile; do not modify `docs/taric-design.md` or main specs to hide deferred behavior.
+- [x] 12.2 Publish the supported capability matrix and explicit follow-up references: `integrate-native-host-adapters`, `evolve-engagement-memory`, `validate-memory-quality`, and `add-shared-authority-backend`; verify diagnostics, CLI, MCP, and Pi report identical unsupported names.
+- [x] 12.3 Verify no example claims full `taric-design.md` implementation, cross-Engagement sharing, native DeepSeek/Hermes support, complete graph/Impact, statistical quality completion, PostgreSQL, or target action execution.
+- [x] 12.4 Verify every deferred design requirement is mapped to an existing follow-up proposal/spec/task with prerequisites and release gate in the handoff register; fail handoff validation for missing capability coverage, missing files, ambiguous owner, or completion claims.
 
 ## 13. Single-host release gates
 
-- [ ] 13.1 Run 100-worker, multi-engagement concurrency tests for UUID/display IDs, idempotency, CAS, fixed-sequence reads, fencing, and generation publication; require zero duplicate IDs, lost events, stale writes, or partial projections.
-- [ ] 13.2 Inject crashes at SQLite transaction, outbox, checkpoint, action, schema-compatibility rejection, projection, and local Git boundaries; require complete recovery or explicit repair state with no silent success.
-- [ ] 13.3 Run deterministic poisoning and permission-bypass tests over HTTP/tool/Markdown/proposal inputs and malicious reviewer/model payloads; require unchanged policy, trust, writer capability, host authorization, scope, and allowlists.
-- [ ] 13.4 Verify the minimum independent L2 gate, bounded negative/blocked coverage, active WorkRun checkpoint/lease/context/action state, and no automatic target action replay.
-- [ ] 13.5 Enforce single-host patch-to-query visibility p95 ≤2 seconds only after a documented Phase 0 baseline; if it fails, block the release report. Do not substitute this gate for deferred precision/recall/95% CI evaluation.
-- [ ] 13.6 Produce a single-host release report naming code/schema/policy/fixture commits and every pass/fail/unsupported capability; a failed required gate prevents an implementation-complete report.
+- [x] 13.1 Run 100-worker, multi-engagement concurrency tests for UUID/display IDs, idempotency, CAS, fixed-sequence reads, fencing, and generation publication; require zero duplicate IDs, lost events, stale writes, or partial projections.
+- [x] 13.2 Inject crashes at SQLite transaction, outbox, checkpoint, action, schema-compatibility rejection, projection, and local Git boundaries; require complete recovery or explicit repair state with no silent success.
+- [x] 13.3 Run deterministic poisoning and permission-bypass tests over HTTP/tool/Markdown/proposal inputs and malicious reviewer/model payloads; require unchanged policy, trust, writer capability, host authorization, scope, and allowlists.
+- [x] 13.4 Verify the minimum independent L2 gate, bounded negative/blocked coverage, active WorkRun checkpoint/lease/context/action state, and no automatic target action replay.
+- [x] 13.5 Enforce single-host patch-to-query visibility p95 ≤2 seconds only after a documented Phase 0 baseline; if it fails, block the release report. Do not substitute this gate for deferred precision/recall/95% CI evaluation.
+- [x] 13.6 Produce a single-host release report naming code/schema/policy/fixture commits and every pass/fail/unsupported capability; a failed required gate prevents an implementation-complete report.
 
 ## 14. Follow-up handoff register (not part of this change)
 
