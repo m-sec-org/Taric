@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCoreService } from "@taric/core";
 import { AuthorityStore } from "@taric/core/dist/store.js";
-import { cliCommands, cliSubcommands, discoverCliConfig, normalizeCliOperation, runCli } from "../dist/cli.js";
+import { cliCommands, cliSubcommands, discoverCliConfig, normalizeCliOperation, resolveCliStartup, runCli } from "../dist/cli.js";
 
 test("CLI help lists deterministic Phase 1 commands", async () => {
   const store = new AuthorityStore();
@@ -71,6 +71,30 @@ test("configuration discovery validates a deterministic JSON file", async () => 
     assert.equal(found.path, configPath);
     assert.equal(found.config.principal_role, "host");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("CLI startup resolves default SQLite and blocks explicit or pseudo multi-host deployment", () => {
+  const defaults = resolveCliStartup({}, {}, "/tmp/taric-home");
+  assert.equal(defaults.diagnostics.ok, true);
+  assert.equal(defaults.diagnostics.backend, "sqlite");
+  assert.equal(defaults.dbPath, "/tmp/taric-home/.taric/authority.sqlite");
+
+  const shared = resolveCliStartup({ authority: { profile: "multi_host_authority", postgresql: { connection_string: "postgres://authority/db" }, host_id: "host-a", lease_mode: "server_side" } }, {}, "/tmp/taric-home");
+  assert.equal(shared.diagnostics.ok, false);
+  assert.equal(shared.diagnostics.backend, "postgresql");
+  assert.match(shared.diagnostics.message, /unavailable/);
+
+  for (const deployment of [
+    { multi_host: true },
+    { shared_sqlite_path: true },
+    { nfs_lock: true },
+    { sqlite_replica_count: 2 },
+    { shared_git_clone: true },
+  ]) {
+    const blocked = resolveCliStartup({ deployment }, {}, "/tmp/taric-home");
+    assert.equal(blocked.diagnostics.ok, false, JSON.stringify(deployment));
+    assert.equal(blocked.diagnostics.code, "unsupported_deployment", JSON.stringify(deployment));
+  }
 });
 
 test("adapter management only changes its own config and unsupported hooks stay unavailable", async () => {

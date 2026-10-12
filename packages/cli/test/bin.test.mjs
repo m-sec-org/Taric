@@ -38,6 +38,42 @@ test("taric capability.status reports the shared compatibility manifest", async 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test("explicit multi-host authority blocks before opening the SQLite path", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-multi-host-blocked-"));
+  try {
+    const dbPath = join(dir, "must-not-open.sqlite");
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ db_path: dbPath, authority: { profile: "multi_host_authority", postgresql: { connection_string: "postgres://authority/db" }, host_id: "host-a", lease_mode: "server_side" } }));
+    let stdout = ""; let stderr = ""; let code = 0;
+    try { ({ stdout, stderr } = await execFileAsync(process.execPath, [cliPath, "capability.status", "{}"], { env: { ...process.env, TARIC_CONFIG: configPath } })); }
+    catch (error) { code = error.code; stdout = error.stdout; stderr = error.stderr; }
+    assert.notEqual(code, 0);
+    assert.equal(stdout, "");
+    const diagnostic = JSON.parse(stderr);
+    assert.equal(diagnostic.data.backend, "postgresql");
+    assert.equal(diagnostic.data.enabled, false);
+    assert.equal(diagnostic.error.code, "postgresql_unavailable");
+    assert.match(diagnostic.error.message, /unavailable/);
+    await assert.rejects(import("node:fs/promises").then(({ access }) => access(dbPath)));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("pseudo multi-host SQLite declaration blocks before opening SQLite", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-pseudo-multi-host-"));
+  try {
+    const dbPath = join(dir, "must-not-open.sqlite");
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ db_path: dbPath, deployment: { multi_host: true } }));
+    let stdout = ""; let stderr = ""; let code = 0;
+    try { ({ stdout, stderr } = await execFileAsync(process.execPath, [cliPath, "capability.status", "{}"], { env: { ...process.env, TARIC_CONFIG: configPath } })); }
+    catch (error) { code = error.code; stdout = error.stdout; stderr = error.stderr; }
+    assert.notEqual(code, 0);
+    assert.equal(stdout, "");
+    assert.equal(JSON.parse(stderr).error.code, "unsupported_deployment");
+    await assert.rejects(import("node:fs/promises").then(({ access }) => access(dbPath)));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test("adapter version and health examples run in subprocesses", async () => {
   const version = await execFileAsync(process.execPath, [cliPath, "adapter", "version"], { env: { ...process.env, TARIC_DB: ":memory:" } });
   assert.equal(JSON.parse(version.stdout).data.contract_version, "1.0");

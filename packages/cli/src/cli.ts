@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, createCoreServiceForPath, createPrincipal, type CoreService, type Principal } from "@taric/core";
+import { API_CONTRACT_VERSION, AuthorityConfigurationError, authorityStartupDiagnostics, createCoreServiceForPath, createPrincipal, resolveAuthorityConfiguration, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type SharedAuthorityConfiguration } from "@taric/core";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -20,6 +20,29 @@ export interface CliConfig {
   principal_id?: string;
   principal_role?: "operator" | "model" | "host";
   engagement_id?: string;
+  authority?: SharedAuthorityConfiguration;
+  deployment?: DeploymentGuardInput;
+}
+
+export interface CliStartupResolution {
+  dbPath: string;
+  diagnostics: AuthorityStartupDiagnostics;
+}
+
+/** Validate authority selection before opening any SQLite database. */
+export function resolveCliStartup(config: CliConfig, env: NodeJS.ProcessEnv = process.env, home = homedir()): CliStartupResolution {
+  const authorityInput = config.authority ?? (env.TARIC_AUTHORITY_PROFILE
+    ? {
+        profile: env.TARIC_AUTHORITY_PROFILE,
+        ...(env.TARIC_DATABASE_URL ? { postgresql: { connection_string: env.TARIC_DATABASE_URL } } : {}),
+        ...(env.TARIC_HOST_ID ? { host_id: env.TARIC_HOST_ID } : {}),
+        ...(env.TARIC_LEASE_MODE ? { lease_mode: env.TARIC_LEASE_MODE } : {}),
+      } as unknown as SharedAuthorityConfiguration
+    : undefined);
+  const authority = resolveAuthorityConfiguration(authorityInput);
+  const diagnostics = authorityStartupDiagnostics(authority, authority.backend === "postgresql" ? false : undefined, config.deployment);
+  const configuredSqlitePath = authorityInput && authority.backend === "sqlite" ? authority.sqlite?.path : undefined;
+  return { dbPath: env.TARIC_DB ?? config.db_path ?? configuredSqlitePath ?? join(home, ".taric", "authority.sqlite"), diagnostics };
 }
 
 /**
@@ -38,7 +61,9 @@ export function discoverCliConfig(env: NodeJS.ProcessEnv = process.env, cwd = pr
     const role = config.principal_role;
     if (role !== undefined && role !== "operator" && role !== "model" && role !== "host") throw new Error(`invalid principal_role in Taric config: ${path}`);
     for (const key of ["db_path", "principal_id", "engagement_id"]) if (config[key] !== undefined && typeof config[key] !== "string") throw new Error(`invalid ${key} in Taric config: ${path}`);
-    return { config: { db_path: config.db_path as string | undefined, principal_id: config.principal_id as string | undefined, principal_role: role as CliConfig["principal_role"], engagement_id: config.engagement_id as string | undefined }, path };
+    if (config.authority !== undefined && (!config.authority || typeof config.authority !== "object" || Array.isArray(config.authority))) throw new Error(`invalid authority in Taric config: ${path}`);
+    if (config.deployment !== undefined && (!config.deployment || typeof config.deployment !== "object" || Array.isArray(config.deployment))) throw new Error(`invalid deployment in Taric config: ${path}`);
+    return { config: { db_path: config.db_path as string | undefined, principal_id: config.principal_id as string | undefined, principal_role: role as CliConfig["principal_role"], engagement_id: config.engagement_id as string | undefined, authority: config.authority as SharedAuthorityConfiguration | undefined, deployment: config.deployment as DeploymentGuardInput | undefined }, path };
   }
   return { config: {} };
 }
@@ -109,8 +134,20 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     return 2;
   }
   const config = discovered.config;
-  const dbPath = process.env.TARIC_DB ?? config.db_path ?? join(homedir(), ".taric", "authority.sqlite");
-  const service = createCliService(dbPath);
+  let startup: CliStartupResolution;
+  try { startup = resolveCliStartup(config); }
+  catch (cause) {
+    const message = cause instanceof Error ? cause.message : "invalid authority configuration";
+    const code = cause instanceof AuthorityConfigurationError ? cause.code : "validation_error";
+    process.stderr.write(`${JSON.stringify({ ok: false, error: { code, message } })}\n`);
+    return 2;
+  }
+  if (!startup.diagnostics.ok) {
+    const diagnostic = startup.diagnostics;
+    process.stderr.write(`${JSON.stringify({ ok: false, error: { code: diagnostic.code, message: diagnostic.message, follow_up: diagnostic.follow_up }, data: diagnostic })}\n`);
+    return 1;
+  }
+  const service = createCliService(startup.dbPath);
   const role = (process.env.TARIC_PRINCIPAL_ROLE ?? config.principal_role ?? "operator") as "operator" | "model" | "host";
   const engagement_id = process.env.TARIC_ENGAGEMENT_ID ?? config.engagement_id;
   const result = await runCli(argv, service, { id: process.env.TARIC_PRINCIPAL_ID ?? config.principal_id ?? "operator-local", role, engagement_id: engagement_id === "" ? undefined : engagement_id });
