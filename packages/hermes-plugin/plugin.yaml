@@ -1,0 +1,12 @@
+name: taric
+version: "0.19.0"
+description: "Taric lifecycle integration through authenticated Core RPC; does not replace Hermes MemoryProvider."
+author: "Taric"
+hooks:
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset

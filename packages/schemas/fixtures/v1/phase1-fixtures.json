@@ -107,7 +107,11 @@
       "version": 1,
       "source_observation_refs": [
         "e92e5633-40b5-4568-9062-01df070067c1"
-      ]
+      ],
+      "from_type": "resource",
+      "to_type": "protective_control",
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "criticality": "high"
     },
     "claim": {
       "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
@@ -316,7 +320,7 @@
       "conditions": [
         "role=user"
       ],
-      "outcome": "blocked",
+      "outcome": "observed",
       "decision_layer": "edge",
       "origin_reached": false,
       "origin_outcome": "not_reached",
@@ -415,6 +419,14 @@
       "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
       "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
       "generation": 1,
+      "target_version": 1,
+      "work_item_version": 1,
+      "scope_version": 0,
+      "owner": {
+        "host_id": "pi",
+        "agent_id": "worker-a"
+      },
+      "lease_expires_at": "2026-10-09T00:02:00.000Z",
       "source_read_seq": 1,
       "completed_steps": [
         "inventory"
@@ -432,6 +444,10 @@
       "unresolved_work": [],
       "host_decision_refs": [],
       "external_action_state": "none",
+      "draft_refs": [],
+      "handoff_refs": [],
+      "action_refs": [],
+      "tool_result_refs": [],
       "budget": {
         "actions": 1
       },
@@ -509,6 +525,231 @@
         "code": "validation_error",
         "message": "invalid record"
       }
+    },
+    "resourceRevision": {
+      "id": "018f47a1-7c00-7000-8000-000000000001",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "revision": 2,
+      "logical_identity": {
+        "origin": "https://example.test",
+        "method": "GET",
+        "path_template": "/admin"
+      },
+      "variant": {
+        "method": "GET",
+        "path_template": "/admin",
+        "principal_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf"
+      },
+      "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "supersedes": "018f47a1-7c00-7000-8000-000000000002"
+    },
+    "testHypothesis": {
+      "id": "018f47a1-7c00-7000-8000-000000000003",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "title": "Authorization bypass",
+      "proposition": "A user may access the admin route",
+      "status": "proposed",
+      "version": 1,
+      "source_observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "resource_revision_refs": [
+        "018f47a1-7c00-7000-8000-000000000001"
+      ],
+      "limitations": [
+        "one identity"
+      ],
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "criticality": "high"
+    },
+    "attackPath": {
+      "id": "018f47a1-7c00-7000-8000-000000000004",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "title": "Reach admin data",
+      "status": "proposed",
+      "version": 1,
+      "steps": [
+        {
+          "subject_type": "resource_revision",
+          "subject_ref": "018f47a1-7c00-7000-8000-000000000001"
+        }
+      ],
+      "source_observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "criticality": "critical"
+    },
+    "patchSet": {
+      "id": "018f47a1-7c00-7000-8000-000000000005",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "worker"
+      },
+      "base_generation": 1,
+      "read_set": [
+        {
+          "entity_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+          "version": 1
+        }
+      ],
+      "write_set": [
+        {
+          "entity_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+          "base_version": 1,
+          "fields": [
+            "name"
+          ]
+        }
+      ],
+      "operations": [
+        "replace_property"
+      ],
+      "source_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "merge_status": "pending"
+    },
+    "conflict": {
+      "id": "018f47a1-7c00-7000-8000-000000000006",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "subject_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "field_path": "name",
+      "base_version": 1,
+      "current_version": 2,
+      "candidates": [
+        {
+          "value": "portal-a",
+          "source_refs": [
+            "e92e5633-40b5-4568-9062-01df070067c1"
+          ]
+        },
+        {
+          "value": "portal-b",
+          "source_refs": [
+            "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          ]
+        }
+      ],
+      "source_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1",
+        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+      ],
+      "diff": {
+        "name": [
+          "portal-a",
+          "portal-b"
+        ]
+      },
+      "merge_status": "open"
+    },
+    "impactEvent": {
+      "id": "018f47a1-7c00-7000-8000-000000000007",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "source_ref": "018f47a1-7c00-7000-8000-000000000001",
+      "changed_dependency_ref": "018f47a1-7c00-7000-8000-000000000001",
+      "affected_refs": [
+        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+      ],
+      "criticality": "high",
+      "disposition": "requires_revalidation",
+      "reason_code": "resource_changed",
+      "continuation": "cursor:1",
+      "pending_watermark": 10
+    },
+    "protectiveControlRevision": {
+      "id": "018f47a1-7c00-7000-8000-000000000008",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "revision": 1,
+      "layer": "edge",
+      "protected_resource_revision_refs": [
+        "018f47a1-7c00-7000-8000-000000000001"
+      ],
+      "identity_conditions": [
+        "role=user"
+      ],
+      "network_conditions": [],
+      "valid_from": "2026-10-09T00:00:00.000Z",
+      "source_observation_refs": [
+        "e92e5633-40b5-4568-9062-01df070067c1"
+      ],
+      "policy_snapshot_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "controlApplicabilityEvent": {
+      "id": "018f47a1-7c00-7000-8000-000000000009",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": {
+        "host_id": "pi",
+        "producer_id": "worker-a",
+        "source_kind": "tool"
+      },
+      "subject_refs": [
+        "3bb376bf-8608-4600-bb78-c71fa7a7639f"
+      ],
+      "changed_dependency_ref": "018f47a1-7c00-7000-8000-000000000008",
+      "previous_policy_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "current_policy_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "affected_current_view_refs": [
+        "d96b8d61-41cc-4bd0-897a-130af0d6cd2a"
+      ],
+      "disposition": "requires_revalidation",
+      "reason_code": "policy_changed",
+      "committed_at": "2026-10-09T00:00:00.000Z"
     }
   },
   "negatives": {
@@ -1227,6 +1468,14 @@
         "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
         "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
         "generation": 1,
+        "target_version": 1,
+        "work_item_version": 1,
+        "scope_version": 0,
+        "owner": {
+          "host_id": "pi",
+          "agent_id": "worker-a"
+        },
+        "lease_expires_at": "2026-10-09T00:02:00.000Z",
         "source_read_seq": 1,
         "completed_steps": [
           "inventory"
@@ -1240,7 +1489,14 @@
         "evidence_refs": [
           "5eee9386-a285-40b9-8ce5-995fafcc348c"
         ],
+        "negative_results": [],
+        "unresolved_work": [],
+        "host_decision_refs": [],
         "external_action_state": "none",
+        "draft_refs": [],
+        "handoff_refs": [],
+        "action_refs": [],
+        "tool_result_refs": [],
         "budget": {
           "actions": 1
         },
@@ -1351,7 +1607,7 @@
     "artifact_content_stays_host_owned"
   ],
   "counts": {
-    "valid": 23,
+    "valid": 31,
     "negatives": 29
   }
 }

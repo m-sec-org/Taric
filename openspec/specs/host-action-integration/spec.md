@@ -6,7 +6,7 @@ Defines the boundary for Taric's action recommendations and host decision record
 ## Requirements
 
 ### Requirement: Support host-selected action modes
-The system SHALL support recording one of three host-selected action modes: `llm_recommend`, `authorized_autonomous`, and `host_hitl`. Taric SHALL NOT choose a mode as a global default or infer authorization from an LLM recommendation.
+系统 SHALL 支持记录 host 选择的 `llm_recommend`、`authorized_autonomous`、`host_hitl` 三种 mode。Taric 不设置全局默认，不从 LLM 建议推断授权。`action.recommend` 响应必须是结构化 advisory 数据，至少包含 target/method、rationale、uncertainty、scope/limitations 和 memory/evidence refs；不得包含执行字段、授权 grant 或调用目标工具。
 
 #### Scenario: LLM recommendation mode
 - **WHEN** an engagement uses `llm_recommend`
@@ -21,8 +21,16 @@ The system SHALL support recording one of three host-selected action modes: `llm
 - **THEN** Taric records the host-provided authorization outcome without implementing user identity or approval interaction
 
 ### Requirement: Record host action outcomes
-The system SHALL associate host decision and execution-result references with an ActionIntent and its WorkRun. The system SHALL represent denied, authorized, executed, failed, and unknown outcomes without changing them into Taric-issued grants.
+系统 SHALL 将 host decision/result opaque refs 绑定 ActionIntent、Engagement、WorkRun、Attempt、owner 和 active generation。记录必须包含 target/method、稳定 action idempotency key、mode、host attribution、scope/authorization reference 和结果状态。`recommended` 可进入 `authorized` 或 `denied`；`authorized` 可进入 `executed`、`failed` 或 `unknown`；`denied` 不能进入执行状态。相同幂等 payload 重试不得重复转移。所有决策/结果写入须与 audit event 原子提交；`unknown` 只能经 host reconcile 和结果引用进入 resolved 状态，不能自动重放或清除。
 
 #### Scenario: Host reports an execution outcome
 - **WHEN** the adapter submits a host result for an ActionIntent
 - **THEN** Taric stores the result state and opaque host reference with attempt attribution
+
+#### Scenario: Retry host outcome
+- **WHEN** the host repeats the same action result with the same idempotency key
+- **THEN** Taric returns the original result without another state transition
+
+#### Scenario: Wrong host or expired Attempt
+- **WHEN** a host result does not match the active owner, lease, or generation
+- **THEN** Taric rejects the current-state update and preserves any late result with original attribution

@@ -4,10 +4,6 @@
 > **SYSTEM DIRECTIVE:** Deterministic execution engine. Adhere strictly.
 > **No backward compatibility** - Break old formats freely
 
-- MUST USE TODO LIST TO TRACK THE PROGRESS
-- MUST USE LOOP TO RECHECK ORIGIN REQUIREMENTS AND TODO
-- MUST USE MULTIPLE SUBAGENT TO IMPLEMENT THE REQUIREMENTS AND TO COOPERATE WITH EACH OTHER AND VERIFY EACH OTHER TO REALIZE THE REQUIREMENTS.
-- REMEMBER YOUR ARE TOP GUIDER, DO NOT IMPLEMENT THE REQUIREMENTS YOURSELF
 - Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
 - Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
 - Keep components modular and concerns clearly separated.

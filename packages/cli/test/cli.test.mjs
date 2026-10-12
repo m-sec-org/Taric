@@ -59,7 +59,7 @@ test("normalizeCliOperation only resolves documented verbs", () => {
   assert.equal(normalizeCliOperation(["action", "host-result"]), "action.host-result");
   assert.equal(normalizeCliOperation(["audit", "doctor"]), "audit.doctor");
   assert.equal(normalizeCliOperation(["audit", "delete-everything"]), "audit.invalid");
-  assert.deepEqual(Object.keys(cliSubcommands).sort(), ["action", "audit", "context"]);
+  assert.deepEqual(Object.keys(cliSubcommands).sort(), ["action", "adapter", "audit", "context"]);
 });
 
 test("configuration discovery validates a deterministic JSON file", async () => {
@@ -71,4 +71,22 @@ test("configuration discovery validates a deterministic JSON file", async () => 
     assert.equal(found.path, configPath);
     assert.equal(found.config.principal_role, "host");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("adapter management only changes its own config and unsupported hooks stay unavailable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-adapter-config-"));
+  const prior = process.env.TARIC_ADAPTER_CONFIG;
+  process.env.TARIC_ADAPTER_CONFIG = join(dir, "adapters.json");
+  try {
+    const store = new AuthorityStore(); const service = createCoreService(store);
+    const operator = { id: "operator", role: "operator" };
+    const installed = await runCli(["adapter", "install", JSON.stringify({ host: "hermes" })], service, operator);
+    assert.equal(installed.exitCode, 0); assert.equal(JSON.parse(installed.stdout).data.installed, true);
+    const configPath = JSON.parse(installed.stdout).data.config_path;
+    const config = JSON.parse(await (await import("node:fs/promises")).readFile(configPath, "utf8"));
+    assert.equal(config.adapters.hermes.enabled, true);
+    const removed = await runCli(["adapter", "remove", JSON.stringify({ host: "hermes" })], service, operator);
+    assert.equal(removed.exitCode, 0); assert.deepEqual(JSON.parse(await (await import("node:fs/promises")).readFile(configPath, "utf8")).adapters, {});
+    store.close();
+  } finally { if (prior === undefined) delete process.env.TARIC_ADAPTER_CONFIG; else process.env.TARIC_ADAPTER_CONFIG = prior; await rm(dir, { recursive: true, force: true }); }
 });

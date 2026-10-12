@@ -27,6 +27,7 @@ export type AccessDecision = "allow" | "deny" | "challenge" | "filtered" | "unkn
 export type Verdict = "pass" | "reject" | "needs_evidence" | "defer";
 export type ReviewerKind = "deterministic" | "model" | "reviewer";
 export type ProposalStatus = "pending" | "rejected" | "admitted" | "needs_evidence";
+export type DependencyCriticality = "low" | "medium" | "high" | "critical";
 
 export interface ArtifactReference {
   host_ref: string;
@@ -133,6 +134,33 @@ export interface Resource extends RecordBase, CoreManagedFields {
   tags?: string[];
 }
 
+/** Immutable snapshot of one variant of a stable logical resource. */
+export interface ResourceRevision extends RecordBase, CoreManagedFields {
+  resource_ref: Uuid;
+  revision: number;
+  logical_identity: Record<string, unknown>;
+  variant: ResourceVariant;
+  content_hash: Sha256;
+  source_observation_refs: Uuid[];
+  observed_at?: Timestamp;
+  valid_from: Timestamp;
+  valid_until?: Timestamp;
+  supersedes?: Uuid;
+  raw_refs?: Array<{ object_hash: Sha256; start?: number; end?: number }>;
+}
+
+export interface ResourceVariant {
+  method?: string;
+  path_template?: string;
+  parameter_set_hash?: Sha256;
+  parameters?: string[];
+  content_type?: string;
+  principal_ref?: Uuid;
+  tenant_ref?: Uuid;
+  identity_ref?: Uuid;
+  authentication_session_revision_ref?: Uuid;
+}
+
 export interface Observation extends RecordBase, CoreManagedFields {
   resource_ref: Uuid;
   observed_at: Timestamp;
@@ -144,10 +172,104 @@ export interface Observation extends RecordBase, CoreManagedFields {
 
 export interface Relation extends RecordBase, CoreManagedFields {
   from_ref: Uuid;
-  predicate: "calls" | "defines" | "reads" | "writes" | "returns" | "belongs_to" | "protects" | "filters" | "authenticates" | "permits" | "denies" | "routes_to" | "depends_on";
+  from_type: "resource" | "resource_revision" | "relation" | "claim" | "test_hypothesis" | "attack_path" | "work_item" | "evidence" | "observation" | "finding" | "coverage" | "protective_control" | "protective_control_revision" | "control_observation" | "access_decision_observation" | "capability";
+  predicate: "calls" | "defines" | "reads" | "writes" | "returns" | "belongs_to" | "protects" | "filters" | "authenticates" | "permits" | "denies" | "routes_to" | "depends_on" | "derived_from" | "implements" | "uses" | "supported_by" | "contradicted_by" | "tests";
   to_ref: Uuid;
+  to_type: Relation["from_type"];
   version: number;
-  source_observation_refs?: Uuid[];
+  source_observation_refs: Uuid[];
+  valid_from: Timestamp;
+  valid_until?: Timestamp;
+  criticality: DependencyCriticality;
+  status?: "active" | "disputed" | "stale" | "retracted";
+  confidence?: number;
+  applicable_scope_ref?: Uuid;
+}
+
+export interface TestHypothesis extends RecordBase, CoreManagedFields {
+  title: string;
+  proposition: string;
+  status: "proposed" | "supported" | "contradicted" | "inconclusive" | "stale" | "replan_required" | "retracted" | "superseded";
+  version: number;
+  source_observation_refs: Uuid[];
+  resource_revision_refs?: Uuid[];
+  claim_refs?: Uuid[];
+  coverage_refs?: Uuid[];
+  depends_on?: Uuid[];
+  evidence_refs?: Uuid[];
+  limitations: string[];
+  valid_from: Timestamp;
+  valid_until?: Timestamp;
+  criticality: DependencyCriticality;
+  applicable_scope_ref?: Uuid;
+}
+
+export interface AttackPathStep {
+  subject_type: "resource_revision" | "relation" | "claim" | "finding" | "capability";
+  subject_ref: Uuid;
+  label?: string;
+}
+
+export interface AttackPath extends RecordBase, CoreManagedFields {
+  title: string;
+  status: "proposed" | "active" | "stale" | "retracted" | "superseded";
+  version: number;
+  steps: AttackPathStep[];
+  source_observation_refs: Uuid[];
+  depends_on?: Uuid[];
+  valid_from: Timestamp;
+  valid_until?: Timestamp;
+  criticality: DependencyCriticality;
+  applicable_scope_ref?: Uuid;
+}
+
+export interface PatchSetEntry {
+  entity_ref: Uuid;
+  base_version: number;
+  fields?: string[];
+}
+
+export interface PatchSet extends RecordBase, CoreManagedFields {
+  base_generation: number;
+  read_set: Array<{ entity_ref: Uuid; version: number }>;
+  write_set: PatchSetEntry[];
+  operations: Array<"upsert_resource" | "upsert_relation" | "replace_property" | "add_relation" | "remove_relation" | "revise_claim" | "revise_hypothesis" | "attach_observation">;
+  source_refs: Uuid[];
+  content_hash: Sha256;
+  merge_status: "pending" | "merged" | "conflict";
+  host_id?: string;
+  agent_id?: string;
+  run_id?: Uuid;
+}
+
+export interface ConflictCandidate {
+  value: unknown;
+  source_refs: Uuid[];
+  patch_ref?: Uuid;
+}
+
+export interface Conflict extends RecordBase, CoreManagedFields {
+  subject_ref: Uuid;
+  field_path: string;
+  base_version: number;
+  current_version: number;
+  base_value: unknown;
+  candidates: ConflictCandidate[];
+  diff: Record<string, unknown>;
+  source_refs: Uuid[];
+  merge_status: "open" | "resolved" | "accepted" | "rejected" | "deferred";
+  resolution_ref?: Uuid;
+}
+
+export interface ImpactEvent extends RecordBase, CoreManagedFields {
+  source_ref: Uuid;
+  changed_dependency_ref: Uuid;
+  affected_refs: Uuid[];
+  criticality: DependencyCriticality;
+  disposition: "stale_for_current_use" | "requires_revalidation" | "revoked";
+  reason_code: "resource_changed" | "relation_changed" | "claim_withdrawn" | "control_changed" | "policy_changed" | "identity_changed" | "other";
+  continuation?: string;
+  pending_watermark?: number;
 }
 
 export interface Claim extends RecordBase, CoreManagedFields {
@@ -162,6 +284,8 @@ export interface Claim extends RecordBase, CoreManagedFields {
 
 export interface WorkItem extends RecordBase, CoreManagedFields {
   title: string;
+  scope_ref?: Uuid;
+  target_version?: number;
   status: WorkStatus;
   acceptance_criteria: string[];
   goal?: string;
@@ -247,15 +371,39 @@ export interface ProtectiveControl extends RecordBase, CoreManagedFields {
   name: string;
   layer: DecisionLayer;
   resource_ref: Uuid;
+  current_revision_ref?: Uuid;
+  protected_resource_refs?: Uuid[];
+  source_observation_refs?: Uuid[];
+  status?: "suspected" | "observed" | "configured" | "changed" | "unknown";
+  valid_from?: Timestamp;
+  valid_until?: Timestamp;
   control_kind?: string;
   control_type?: string;
 }
 
-export interface ControlObservation extends RecordBase, CoreManagedFields {
+export interface ProtectiveControlRevision extends RecordBase, CoreManagedFields {
   control_ref: Uuid;
+  revision: number;
+  layer: DecisionLayer;
+  policy_snapshot_hash?: Sha256 | null;
+  policy_artifact_ref?: Uuid | null;
+  protected_resource_revision_refs: Uuid[];
+  identity_conditions: string[];
+  network_conditions: string[];
+  valid_from: Timestamp;
+  valid_until?: Timestamp;
+  source_observation_refs: Uuid[];
+  supersedes?: Uuid | null;
+}
+
+export interface ControlObservation extends RecordBase, CoreManagedFields {
+  control_ref?: Uuid | null;
+  control_revision_ref?: Uuid | null;
+  policy_snapshot_hash?: Sha256 | null;
   outcome: ControlOutcome;
   observed_at: Timestamp;
   resource_ref?: Uuid;
+  resource_revision_ref?: Uuid;
   operation?: string;
   conditions?: string[];
   decision_layer?: DecisionLayer;
@@ -264,6 +412,7 @@ export interface ControlObservation extends RecordBase, CoreManagedFields {
   evidence_refs?: Uuid[];
   limitations?: string[];
   identity_ref?: Uuid;
+  authentication_session_revision_ref?: Uuid | null;
   auth_metadata?: AuthMetadata;
   network_condition?: string;
   fingerprint?: string;
@@ -275,7 +424,12 @@ export interface AccessDecisionObservation extends RecordBase, CoreManagedFields
   operation: string;
   decision: AccessDecision;
   observed_at: Timestamp;
-  control_ref?: Uuid;
+  control_ref?: Uuid | null;
+  control_revision_refs?: Uuid[];
+  policy_snapshot_hashes?: Array<Sha256 | null>;
+  resource_revision_ref?: Uuid;
+  authentication_session_revision_ref?: Uuid | null;
+  tenant_ref?: Uuid;
   conditions?: string[];
   decision_layer?: DecisionLayer;
   origin_reached?: OriginReached;
@@ -284,6 +438,17 @@ export interface AccessDecisionObservation extends RecordBase, CoreManagedFields
   limitations?: string[];
   auth_metadata?: AuthMetadata;
   network_condition?: string;
+}
+
+export interface ControlApplicabilityEvent extends RecordBase, CoreManagedFields {
+  subject_refs: Uuid[];
+  changed_dependency_ref: Uuid;
+  previous_policy_hash?: Sha256 | null;
+  current_policy_hash?: Sha256 | null;
+  affected_current_view_refs: Uuid[];
+  disposition: "stale_for_current_use" | "requires_revalidation" | "revoked";
+  reason_code: "policy_changed" | "control_changed" | "identity_changed" | "resource_changed" | "other";
+  committed_at: Timestamp;
 }
 
 export interface Attempt extends RecordBase, CoreManagedFields {
@@ -313,8 +478,14 @@ export interface WorkRun extends RecordBase, CoreManagedFields {
 
 export interface Checkpoint extends RecordBase, CoreManagedFields {
   work_item_ref: Uuid;
+  work_run_ref: Uuid;
   attempt_ref: Uuid;
   generation: number;
+  target_version: number;
+  work_item_version: number;
+  scope_version: number;
+  owner: OwnerAttribution;
+  lease_expires_at: Timestamp;
   source_read_seq: number;
   completed_steps: string[];
   next_steps: string[];
@@ -323,16 +494,14 @@ export interface Checkpoint extends RecordBase, CoreManagedFields {
   negative_results: string[];
   unresolved_work: string[];
   host_decision_refs: string[];
+  action_refs: Uuid[];
+  tool_result_refs: string[];
   external_action_state: "none" | "pending" | "unknown" | "executed" | "failed" | "blocked";
-  work_run_ref?: Uuid;
   scope_ref?: Uuid;
-  target_version?: number;
-  owner?: OwnerAttribution;
-  lease_expires_at?: Timestamp;
-  budget?: Budget;
-  draft_refs?: Uuid[];
-  handoff_refs?: Uuid[];
-  context_manifest?: ContextManifest;
+  budget: Budget;
+  draft_refs: Uuid[];
+  handoff_refs: Uuid[];
+  context_manifest: ContextManifest;
 }
 
 export interface ActionIntent extends RecordBase, CoreManagedFields {
@@ -340,6 +509,7 @@ export interface ActionIntent extends RecordBase, CoreManagedFields {
   method: string;
   status: ActionStatus;
   rationale?: string;
+  scope?: string;
   uncertainty?: string;
   constraints?: string[];
   limitations?: string[];
@@ -395,8 +565,14 @@ export interface ContractTypeMap {
   scope: Scope;
   engagement: Engagement;
   resource: Resource;
+  resourceRevision: ResourceRevision;
   observation: Observation;
   relation: Relation;
+  testHypothesis: TestHypothesis;
+  attackPath: AttackPath;
+  patchSet: PatchSet;
+  conflict: Conflict;
+  impactEvent: ImpactEvent;
   claim: Claim;
   workItem: WorkItem;
   evidence: Evidence;
@@ -406,8 +582,10 @@ export interface ContractTypeMap {
   proposal: Proposal;
   review: Review;
   protectiveControl: ProtectiveControl;
+  protectiveControlRevision: ProtectiveControlRevision;
   controlObservation: ControlObservation;
   accessDecisionObservation: AccessDecisionObservation;
+  controlApplicabilityEvent: ControlApplicabilityEvent;
   attempt: Attempt;
   workRun: WorkRun;
   checkpoint: Checkpoint;

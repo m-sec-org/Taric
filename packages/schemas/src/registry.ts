@@ -11,7 +11,7 @@ import { SCHEMA_VERSION } from "./version.js";
 export const API_CONTRACT_VERSION = "1.0.0" as const;
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
 
-export type OperationRole = "model" | "host" | "reviewer" | "operator";
+export type OperationRole = "model" | "host" | "reviewer" | "writer" | "operator";
 export type ContractRef = string;
 /**
  * 稳定操作名：`domain.verb` 形式（`action.host-decision`）或单词形式（例如 `query`）。
@@ -78,6 +78,9 @@ export const operationContracts: OperationContract[] = [
   { operation: "engagement.status", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "capability.status", roles: ["model", "host", "reviewer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "adapter.status", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
+  { operation: "adapter.install", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: false, engagement_scoped: false },
+  { operation: "adapter.remove", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: false, engagement_scoped: false },
+  { operation: "adapter.config", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: false, engagement_scoped: false },
   { operation: "context.build", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "context.query", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "query", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
@@ -88,8 +91,10 @@ export const operationContracts: OperationContract[] = [
   { operation: "capture.observation", roles: ["host", "operator"], request: "observation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "review.submit", roles: ["reviewer"], request: "review", response: "apiSuccess", errors: [...COMMON_WRITE_ERRORS, "conflict"], idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "admission.evaluate", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "admission.commit", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "control.observe", roles: ["host", "operator"], request: "controlObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "access.observe", roles: ["host", "operator"], request: "accessDecisionObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "control.list", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "work.claim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.renew", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.reclaim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
@@ -103,24 +108,20 @@ export const operationContracts: OperationContract[] = [
   { operation: "audit.verify", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "audit.doctor", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "audit.reconcile", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: false },
+  { operation: "error.report", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "snapshot.export", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "resource.revise", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "resource.patch", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "resource.relation", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "resource.impact", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "snapshot.import", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
 ];
 
 /** 本期不交付、必须返回 unsupported_capability 的能力。 */
 export const unsupportedContracts: UnsupportedContract[] = [
-  { capability: "resource.revise", follow_up: "evolve-engagement-memory", reason: "ResourceRevision variants 与 PatchSet merge 属于后续变更" },
-  { capability: "resource.patch", follow_up: "evolve-engagement-memory", reason: "三方合并与冲突队列属于后续变更" },
-  { capability: "resource.relation", follow_up: "evolve-engagement-memory", reason: "typed relation graph 属于后续变更" },
-  { capability: "resource.impact", follow_up: "evolve-engagement-memory", reason: "ImpactEvent 传播属于后续变更" },
-  { capability: "snapshot.import", follow_up: "evolve-engagement-memory", reason: "snapshot import/round-trip 属于后续变更" },
   { capability: "migration", follow_up: "evolve-engagement-memory", reason: "升级迁移属于后续变更" },
   { capability: "backup.restore", follow_up: "evolve-engagement-memory", reason: "备份/恢复属于后续变更" },
   { capability: "remote.push", follow_up: "evolve-engagement-memory", reason: "远端 push 与外部 secrets scan 属于后续变更" },
-  { capability: "adapter.install", follow_up: "integrate-native-host-adapters", reason: "宿主安装管理属于后续变更" },
-  { capability: "adapter.remove", follow_up: "integrate-native-host-adapters", reason: "宿主安装管理属于后续变更" },
-  { capability: "adapter.config", follow_up: "integrate-native-host-adapters", reason: "宿主配置管理属于后续变更" },
-  { capability: "deepseek_adapter", follow_up: "integrate-native-host-adapters", reason: "DeepSeek 原生 adapter 不在本期" },
-  { capability: "hermes_adapter", follow_up: "integrate-native-host-adapters", reason: "Hermes 原生 integration 不在本期" },
   { capability: "storage.postgresql", follow_up: "add-shared-authority-backend", reason: "PostgreSQL authority 属于后续变更" },
   { capability: "full_quality_evaluation", follow_up: "validate-memory-quality", reason: "precision/recall 与 95% CI 属于后续变更" },
 ];

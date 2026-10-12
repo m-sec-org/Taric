@@ -10,7 +10,7 @@ export function compileSchema<T>(schema: AnySchema): ValidateFunction<T> {
   return schemaValidator.compile<T>(schema);
 }
 
-export type ValidationCode = "validation_error" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability";
+export type ValidationCode = "validation_error" | "authorization_error" | "stale_version" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability";
 export class ContractValidationError extends Error {
   readonly code: ValidationCode;
   readonly details: unknown;
@@ -24,7 +24,7 @@ export class ContractValidationError extends Error {
 
 const validators = new Map<ContractName, ValidateFunction>();
 const contractSchemaValidator = new Ajv2020({ allErrors: true, strict: true });
-contractSchemaValidator.addFormat("uuid", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9]{3}-[89ab][0-9]{3}-[0-9a-f]{12}$/i);
+contractSchemaValidator.addFormat("uuid", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 contractSchemaValidator.addFormat("date-time", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/);
 contractSchemaValidator.addSchema(coreSchema);
 for (const name of contractNames) {
@@ -39,26 +39,52 @@ for (const name of contractNames) {
 export const referenceKinds: Readonly<Record<string, readonly string[]>> = Object.freeze({
   scope_ref: ["scope", "engagement"],
   applicable_scope_ref: ["scope"],
-  resource_ref: ["resource"],
-  resource_revision_ref: ["resource"],
-  tested_resource_refs: ["resource"],
-  baseline_ref: ["resource", "observation", "claim"],
-  from_ref: ["resource", "service", "endpoint"],
-  to_ref: ["resource", "service", "endpoint"],
+  resource_ref: ["resource", "endpoint", "service", "note"],
+  resource_revision_ref: ["resource_revision"],
+  resource_revision_refs: ["resource_revision"],
+  supersedes: ["resource_revision", "protective_control_revision"],
+  current_revision_ref: ["protective_control_revision"],
+  control_revision_ref: ["protective_control_revision"],
+  control_revision_refs: ["protective_control_revision"],
+  protected_resource_revision_refs: ["resource_revision"],
+  authentication_session_revision_ref: ["resource_revision", "note"],
+  principal_ref: ["resource", "note", "endpoint", "service"],
+  tenant_ref: ["resource", "note", "endpoint", "service"],
+  identity_ref: ["resource", "note", "endpoint", "service"],
+  tested_resource_refs: ["resource", "endpoint", "service", "note"],
+  baseline_ref: ["resource", "observation", "claim", "endpoint", "service", "note"],
+  from_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "observation", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "service", "endpoint"],
+  to_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "observation", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "service", "endpoint"],
   claim_refs: ["claim"],
+  coverage_refs: ["coverage"],
   observation_refs: ["observation"],
   source_observation_refs: ["observation"],
-  evidence_refs: ["evidence", "observation", "coverage"],
+  source_refs: ["observation", "evidence", "patch_set", "claim", "resource_revision", "relation", "resource", "test_hypothesis", "attack_path", "work_item", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "checkpoint", "action_intent"],
+  evidence_refs: ["evidence", "observation", "coverage", "note"],
+  counter_evidence_refs: ["evidence", "observation"],
   work_item_ref: ["work_item"],
-  depends_on: ["work_item"],
+  depends_on: ["work_item", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "finding", "coverage", "protective_control_revision"],
   attempt_ref: ["attempt", "work_run"],
   work_run_ref: ["work_run"],
-  control_ref: ["protective_control", "control_observation"],
+  control_ref: ["protective_control", "control_observation", "note"],
+  subject_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation"],
+  changed_dependency_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "protective_control", "protective_control_revision", "access_decision_observation"],
+  affected_refs: ["resource_revision", "relation", "claim", "test_hypothesis", "work_item", "coverage", "checkpoint", "finding", "attack_path", "action_intent"],
+  affected_current_view_refs: ["claim", "test_hypothesis", "work_item", "coverage", "checkpoint", "finding", "attack_path", "action_intent"],
+  subject_refs: ["observation", "checkpoint", "control_observation", "access_decision_observation", "claim", "test_hypothesis", "work_item", "coverage", "finding", "attack_path", "action_intent", "resource", "resource_revision", "protective_control", "protective_control_revision"],
+  patch_ref: ["patch_set"],
+  resolution_ref: ["conflict", "review", "claim", "relation"],
+  entity_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "observation", "finding", "coverage", "protective_control", "protective_control_revision"],
+  source_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "observation", "patch_set", "protective_control_revision"],
+  read_set: [],
+  write_set: [],
+  steps: [],
+  candidates: [],
   control_observation_ref: ["control_observation"],
-  identity_ref: ["resource"],
-  review_ref: ["review"],
+  review_ref: ["review", "review_record"],
   draft_refs: [],
   handoff_refs: [],
+  action_refs: ["action_intent"],
   memory_refs: [],
 });
 
@@ -77,10 +103,21 @@ export interface AuthorityReferenceIndex {
 
 function referenceFields(record: Record<string, unknown>): Array<[string, string]> {
   const refs: Array<[string, string]> = [];
-  for (const [field, value] of Object.entries(record)) {
-    if (typeof value === "string") refs.push([field, value]);
-    else if (Array.isArray(value)) for (const item of value) if (typeof item === "string") refs.push([field, item]);
-  }
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    for (const [field, nested] of Object.entries(value)) {
+      if (field in referenceKinds) {
+        if (typeof nested === "string") refs.push([field, nested]);
+        else if (Array.isArray(nested)) for (const item of nested) if (typeof item === "string") refs.push([field, item]);
+      }
+      if (nested && typeof nested === "object") visit(nested);
+    }
+  };
+  visit(record);
   return refs;
 }
 
@@ -105,6 +142,17 @@ export function validateAuthorityReferences(record: Record<string, unknown>, ind
       }
     }
   }
+  if (record.kind === "relation") {
+    for (const endpoint of ["from", "to"] as const) {
+      const ref = record[`${endpoint}_ref`];
+      const declaredKind = record[`${endpoint}_type`];
+      if (typeof ref !== "string" || typeof declaredKind !== "string") continue;
+      const actualKind = index.kind.get(ref);
+      if (actualKind && actualKind !== declaredKind) {
+        throw new ContractValidationError("validation_error", `relation ${endpoint} type does not match its referenced record`);
+      }
+    }
+  }
 }
 
 /** 校验 Phase 1 合同，并执行跨字段安全约束。 */
@@ -124,11 +172,16 @@ export function validateContract(name: ContractName, value: unknown): asserts va
  * 这些规则覆盖归属、时间范围、信任迁移、证据限制与 control/origin 语义。
  */
 export function validateCanonicalRecord(candidate: Record<string, unknown>, trustLevel?: string): void {
-  if (candidate.engagement_id !== undefined && typeof candidate.engagement_id !== "string") {
+  if (candidate.engagement_id === undefined || typeof candidate.engagement_id !== "string" || candidate.engagement_id.length === 0) {
     throw new ContractValidationError("validation_error", "engagement ownership is required");
   }
-  if ("valid_from" in candidate && "valid_until" in candidate && String(candidate.valid_from) > String(candidate.valid_until)) {
+  if ("valid_from" in candidate && "valid_until" in candidate && Date.parse(String(candidate.valid_from)) > Date.parse(String(candidate.valid_until))) {
     throw new ContractValidationError("validation_error", "valid_from must not be after valid_until");
+  }
+  for (const field of ["valid_from", "valid_until", "committed_at", "created_at", "updated_at", "observed_at", "tested_at", "expires_at", "lease_expires_at", "heartbeat_at", "started_at", "ended_at", "recorded_at"]) {
+    if (candidate[field] !== undefined && (typeof candidate[field] !== "string" || Number.isNaN(Date.parse(candidate[field] as string)))) {
+      throw new ContractValidationError("validation_error", `${field} must be an ISO timestamp`);
+    }
   }
   if (candidate.created_at !== undefined && typeof candidate.created_at !== "string") {
     throw new ContractValidationError("validation_error", "created_at must be a timestamp string");
@@ -170,6 +223,36 @@ export function validateCanonicalRecord(candidate: Record<string, unknown>, trus
   validateScopeBounds(candidate);
   validateEvidenceLimitations(candidate);
   validateDecisionSemantics(candidate);
+  // Checkpoint completeness is enforced by the host-only commit path, where
+  // the active Attempt/lease is available. Generic record commits may retain
+  // a lightweight checkpoint summary for context projections.
+  if (candidate.kind !== "checkpoint" || candidate.attempt_ref !== undefined || candidate.source_read_seq !== undefined) validateStateSemantics(candidate);
+}
+
+function validateStateSemantics(candidate: Record<string, unknown>): void {
+  const workStatuses = ["queued", "claimed", "running", "in_progress", "checkpointed", "blocked", "completed", "failed", "cancelled", "lost"];
+  const attemptStatuses = ["claimed", "running", "checkpointed", "blocked", "completed", "failed", "cancelled", "lost"];
+  const actionStatuses = ["recommended", "authorized", "denied", "executed", "failed", "unknown", "late_result_quarantine"];
+  if (candidate.kind === "work_run" && (!workStatuses.includes(String(candidate.status)) || !Number.isInteger(candidate.generation) || Number(candidate.generation) < 1)) {
+    throw new ContractValidationError("validation_error", "work run has an invalid status or generation");
+  }
+  if (candidate.kind === "attempt" && (!attemptStatuses.includes(String(candidate.status)) || !Number.isInteger(candidate.generation) || Number(candidate.generation) < 1)) {
+    throw new ContractValidationError("validation_error", "attempt has an invalid status or generation");
+  }
+  if (candidate.kind === "action_intent" && !actionStatuses.includes(String(candidate.status))) {
+    throw new ContractValidationError("validation_error", "action intent has an invalid status");
+  }
+  if (candidate.kind === "checkpoint") {
+    if (!Number.isInteger(candidate.source_read_seq) || Number(candidate.source_read_seq) < 0) throw new ContractValidationError("validation_error", "checkpoint source_read_seq is required");
+    for (const field of ["completed_steps", "next_steps", "observation_refs", "evidence_refs", "negative_results", "unresolved_work", "host_decision_refs"]) {
+      if (!Array.isArray(candidate[field]) || (candidate[field] as unknown[]).some((item) => typeof item !== "string")) throw new ContractValidationError("validation_error", `checkpoint ${field} must be a string array`);
+    }
+    if (typeof candidate.external_action_state !== "string") throw new ContractValidationError("validation_error", "checkpoint external_action_state is required");
+    if ("hidden_reasoning" in candidate || "chain_of_thought" in candidate || "private_reasoning" in candidate) throw new ContractValidationError("validation_error", "checkpoint cannot contain hidden reasoning");
+  }
+  if (candidate.kind === "action_intent" && ["authorized", "executed", "failed", "unknown"].includes(String(candidate.status)) && !candidate.mode) {
+    throw new ContractValidationError("validation_error", "action mode is required for host action outcomes");
+  }
 }
 
 /**
@@ -262,7 +345,7 @@ function validateDecisionSemantics(candidate: Record<string, unknown>): void {
   if (outcome !== undefined && !["reached", "not_reached", "unknown"].includes(String(outcome))) {
     throw new ContractValidationError("validation_error", "unknown origin outcome value");
   }
-  if (layer === "unknown" && candidate.control_ref) {
+  if (layer === "unknown" && (candidate.control_ref || candidate.control_revision_ref || (Array.isArray(candidate.control_revision_refs) && candidate.control_revision_refs.length > 0))) {
     throw new ContractValidationError("validation_error", "unknown decision layer cannot name a specific control");
   }
   if ((layer === "edge" || layer === "network") && reached === false && outcome !== undefined && outcome !== "not_reached") {
@@ -275,7 +358,7 @@ function validateDecisionSemantics(candidate: Record<string, unknown>): void {
   if (candidate.status === "blocked_by_control" && reached === true) {
     throw new ContractValidationError("validation_error", "blocked_by_control cannot claim origin_reached=true");
   }
-  if (reached === true && Array.isArray(candidate.evidence_refs) && candidate.evidence_refs.length === 0) {
+  if (reached === true && (!Array.isArray(candidate.evidence_refs) || candidate.evidence_refs.length === 0)) {
     throw new ContractValidationError("validation_error", "origin_reached=true requires evidence references");
   }
 }

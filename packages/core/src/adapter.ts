@@ -1,9 +1,9 @@
-import { API_CONTRACT_VERSION, type CoreService, type Principal, type PrincipalRole } from "./service.js";
+import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalRole } from "./service.js";
 
 /** Adapter 契约版本与 Core API 版本分开演进；两者都必须显式声明。 */
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
 
-export const adapterCapabilities = ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result"] as const;
+export const adapterCapabilities = ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"] as const;
 export type AdapterCapability = (typeof adapterCapabilities)[number];
 
 export type AdapterHostId = "pi" | "deepseek-harness" | "hermes";
@@ -18,6 +18,8 @@ export interface AdapterDescriptor {
   capabilities: AdapterCapability[];
   supported: boolean;
   unsupported_capabilities?: string[];
+  test_evidence?: string[];
+  fallback?: string[];
 }
 
 /** 宿主传给 adapter 的事件只作为归属数据，不能自行声明权限或身份。 */
@@ -28,8 +30,40 @@ export interface AdapterResult { accepted: boolean; reason?: string; }
 export type PiLifecycleEventName = "session_start" | "context" | "proposal" | "checkpoint" | "action" | "result" | "cancel" | "error";
 export interface PiHostEvent<T extends PiLifecycleEventName = PiLifecycleEventName> { type: T; context: AdapterContext; payload?: Record<string, unknown>; }
 
-/** Pi 1.x ExtensionAPI 使用 pi.on(event, handler) 注册回调。 */
-export interface PiExtensionApi { on(event: string, handler: (event: unknown) => Promise<unknown>): () => void; }
+export interface PiActionResult {
+  action_id: string;
+  mode: "llm_recommend" | "authorized_autonomous" | "host_hitl";
+  status: "executed" | "failed" | "unknown";
+  result_ref?: string;
+  host_decision_ref?: string;
+}
+
+/** Explicit host-owned runtime facts required for run-scoped writes. */
+export interface PiRuntimeBinding {
+  work_run_id?: string;
+  generation?: number;
+  agent_id?: string;
+  /** Must return a sanitized checkpoint; Pi transcript/reasoning is never persisted by the adapter. */
+  checkpoint?: (event: unknown) => Record<string, unknown> | undefined;
+  /** Maps a host tool invocation to an advisory Taric action recommendation. */
+  recommendationForTool?: (event: unknown) => { target: string; method: string; rationale: string; uncertainty?: string; scope?: string; constraints?: string[]; memory_refs?: string[]; evidence_refs?: string[] } | undefined;
+  /** Supplies the host's actual decision/result metadata for a completed tool call. */
+  resultForTool?: (event: unknown) => PiActionResult | undefined;
+}
+
+export interface PiRegisteredTool {
+  name: string;
+  label: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute(toolCallId: string, params: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
+}
+
+/** Pi 1.1 ExtensionAPI hooks and tool registration used by the pinned host contract. */
+export interface PiExtensionApi {
+  on(event: string, handler: (event: unknown, context?: unknown) => Promise<unknown> | unknown): () => void;
+  registerTool?(tool: PiRegisteredTool): void;
+}
 
 export interface AdapterError { code: string; message: string; follow_up?: string; }
 
@@ -52,7 +86,7 @@ export interface AdapterClient {
   call<T = unknown>(operation: string, request: Record<string, unknown>): Promise<{ ok: true; data: T } | { ok: false; error: AdapterError }>;
   status(): AdapterCapabilityReport;
   /** Pi 扩展入口。DeepSeek/Hermes 返回 unsupported_capability。 */
-  register(extension: PiExtensionApi): Promise<{ loaded: boolean; callbacks: string[]; reload_idempotent: boolean }>;
+  register(extension: PiExtensionApi, binding?: PiRuntimeBinding): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }>;
 }
 
 export function validateAdapter(descriptor: AdapterDescriptor): AdapterResult {
@@ -73,11 +107,13 @@ export class TaricAdapterClient implements AdapterClient {
   readonly #service: CoreService;
   readonly #principal: Principal;
   #loaded = false;
+  #registeredHooks: string[] = [];
+  #availableCapabilities: AdapterCapability[] = [];
 
   constructor(descriptor: AdapterDescriptor, service: CoreService, principal: Principal) {
     this.descriptor = { ...descriptor, capabilities: [...(descriptor.capabilities ?? [])] };
     this.#service = service;
-    this.#principal = { ...principal };
+    this.#principal = principal;
   }
 
   async call<T = unknown>(operation: string, request: Record<string, unknown>): Promise<{ ok: true; data: T } | { ok: false; error: AdapterError }> {
@@ -100,26 +136,119 @@ export class TaricAdapterClient implements AdapterClient {
       capabilities: this.descriptor.supported ? [...this.descriptor.capabilities] : [],
       unsupported_capabilities: [...(this.descriptor.unsupported_capabilities ?? [])],
       service_connected: true,
-      missing_capabilities: adapterCapabilities.filter((capability) => !this.descriptor.capabilities.includes(capability)),
+      missing_capabilities: adapterCapabilities.filter((capability) => !(this.#availableCapabilities.length ? this.#availableCapabilities : this.descriptor.capabilities).includes(capability)),
     };
   }
 
-  async register(extension: PiExtensionApi): Promise<{ loaded: boolean; callbacks: string[]; reload_idempotent: boolean }> {
+  async register(extension: PiExtensionApi, binding: PiRuntimeBinding = {}): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }> {
     if (this.descriptor.host_id !== "pi" || !this.descriptor.supported) throw new Error("unsupported_capability");
-    if (this.#principal.role !== "host" || !this.#principal.engagement_id) throw new Error("authorization_error");
+    if (this.#principal.role !== "host" || !this.#principal.id || this.#principal.transport_verified !== true || !this.#principal.engagement_id) throw new Error("authorization_error");
     // /reload 会重新调用工厂。这里保证同一实例重复注册不会产生第二次业务副作用。
-    if (this.#loaded) return { loaded: true, callbacks: [], reload_idempotent: true };
-    // Keep the stable Taric lifecycle names for the contract while also
-    // subscribing to the real Pi 1.x event names. Pi event payloads do not
-    // carry a Taric principal, so handle() derives identity from the
-    // transport-verified principal and only accepts event attribution as a
-    // cross-check.
+    if (this.#loaded) return { loaded: true, callbacks: [], hooks: [], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
+    if (binding.generation !== undefined && (!Number.isInteger(binding.generation) || binding.generation < 1)) throw new Error("validation_error");
+    if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new Error("validation_error");
+
+    const hooks = ["session_start", "context", "before_agent_start", "agent_before_settle", "tool_result", "session_shutdown"];
+    // `callbacks` is the stable Taric lifecycle vocabulary. `hooks` below is
+    // the concrete Pi 1.1.0 registration list; Pi has no native proposal,
+    // checkpoint, action, result, or error event names.
     const callbacks: PiLifecycleEventName[] = ["session_start", "context"];
     extension.on("session_start", async (raw) => this.handle("session_start", raw));
     extension.on("context", async (raw) => this.handle("context", raw));
     extension.on("before_agent_start", async (raw) => this.handle("context", raw));
+    extension.on("agent_before_settle", async (raw) => {
+      const event = raw as { outcome?: unknown };
+      if (binding.checkpoint && binding.work_run_id && binding.generation !== undefined && event?.outcome !== "error") {
+        const checkpoint = binding.checkpoint(raw);
+        if (checkpoint) return this.call("checkpoint.commit", this.runRequest(binding, { checkpoint }));
+      }
+      if (event?.outcome === "error") {
+        return this.call("error.report", { engagement_id: this.#principal.engagement_id, message: "Pi agent run failed" });
+      }
+      return undefined;
+    });
+    extension.on("tool_result", async (raw) => {
+      const event = raw as { toolCallId?: unknown; toolName?: unknown; isError?: unknown };
+      if (event?.isError === true) {
+        return this.call("error.report", { engagement_id: this.#principal.engagement_id, error_ref: typeof event.toolCallId === "string" ? event.toolCallId : undefined, message: `Pi tool ${typeof event.toolName === "string" ? event.toolName : "unknown"} failed` });
+      }
+      if (binding.resultForTool && binding.work_run_id && binding.generation !== undefined) {
+        const result = binding.resultForTool(raw);
+        if (result) return this.call("action.host-result", this.runRequest(binding, { ...result }));
+      }
+      return undefined;
+    });
+    if (extension.registerTool) {
+      extension.registerTool(this.proposalTool(binding));
+      if (binding.recommendationForTool) hooks.push("tool_call");
+      if (binding.recommendationForTool) extension.on("tool_call", async (raw) => {
+        const recommendation = binding.recommendationForTool?.(raw);
+        if (!recommendation) return undefined;
+        return this.call("action.recommend", { ...recommendation, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
+      });
+      extension.registerTool(this.actionRecommendationTool(binding));
+      hooks.push("registerTool:taric_proposal", "registerTool:taric_action_recommend");
+    }
+    extension.on("session_shutdown", async () => undefined);
+    this.#registeredHooks = hooks;
+    this.#availableCapabilities = ["session_lifecycle", "context_injection", ...(extension.registerTool ? ["proposal_submission", "action_mode"] as AdapterCapability[] : []), ...(binding.agent_id ? ["worker_attribution"] as AdapterCapability[] : []), ...(binding.checkpoint ? ["checkpoint"] as AdapterCapability[] : []), ...(binding.resultForTool ? ["host_result"] as AdapterCapability[] : [])];
     this.#loaded = true;
-    return { loaded: true, callbacks, reload_idempotent: true };
+    return { loaded: true, callbacks, hooks: [...hooks], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
+  }
+
+  private runRequest(binding: PiRuntimeBinding, extra: Record<string, unknown>): Record<string, unknown> {
+    // The adapter kind identifies the integration surface; the authenticated
+    // principal identifies the lease owner for every run-scoped write.
+    return { engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, host_id: this.#principal.id, agent_id: binding.agent_id, generation: binding.generation, ...extra };
+  }
+
+  private proposalTool(binding: PiRuntimeBinding): PiRegisteredTool {
+    return {
+      name: "taric_proposal",
+      label: "Submit Taric proposal",
+      description: "Submit a candidate memory record to Taric for review. This does not change canonical memory.",
+      parameters: {
+        type: "object",
+        properties: {
+          subject_type: { type: "string", minLength: 1 },
+          base_version: { type: "integer", minimum: 0 },
+          content: { type: "object" },
+        },
+        required: ["subject_type", "base_version", "content"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const response = await this.call("proposal.submit", { ...params, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
+        return { content: [{ type: "text", text: JSON.stringify(response) }], details: response };
+      },
+    };
+  }
+
+  private actionRecommendationTool(binding: PiRuntimeBinding): PiRegisteredTool {
+    return {
+      name: "taric_action_recommend",
+      label: "Recommend host action",
+      description: "Record an advisory action recommendation in Taric. It does not authorize or execute the action.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", minLength: 1 },
+          method: { type: "string", minLength: 1 },
+          rationale: { type: "string", minLength: 1 },
+          uncertainty: { type: "string" },
+          scope: { type: "string", minLength: 1 },
+          constraints: { type: "array", items: { type: "string" } },
+          memory_refs: { type: "array", items: { type: "string" } },
+          evidence_refs: { type: "array", items: { type: "string" } },
+        },
+        required: ["target", "method", "rationale"],
+        additionalProperties: false,
+      },
+      execute: async (_toolCallId, params) => {
+        const response = await this.call("action.recommend", { ...params, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
+        return { content: [{ type: "text", text: JSON.stringify(response) }], details: response };
+      },
+    };
   }
 
   private async handle(name: PiLifecycleEventName, raw: unknown): Promise<unknown> {
@@ -151,5 +280,13 @@ export class TaricAdapterClient implements AdapterClient {
 }
 
 export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string): Principal {
-  return { id, role, engagement_id: engagementId, transport_verified: true };
+  const defaults: Record<PrincipalRole, Principal["capabilities"]> = {
+    model: ["read", "propose"],
+    host: ["read", "propose", "work", "checkpoint", "action"],
+    reviewer: ["read", "review"],
+    writer: ["read", "propose", "admit", "audit"],
+    operator: ["read", "propose", "admit", "audit", "operator"],
+  };
+  const principal = { id, role, engagement_id: engagementId, capabilities: defaults[role], transport_verified: true } as Principal;
+  return registerTransportPrincipal(principal);
 }

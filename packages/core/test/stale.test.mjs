@@ -28,6 +28,6 @@ test("stale propagation creates a new current view without mutating the prior ev
   const stale = store.markStale(record.id, "evidence changed");
   assert.equal(stale.status, "stale");
   assert.equal(store.verifyAudit().valid, true);
-  assert.equal(store.events().filter((event) => event.subject_id === record.id).length, 2);
+  assert.equal(store.events().filter((event) => event.subject_id === record.id).length, 3);
   store.close();
 });

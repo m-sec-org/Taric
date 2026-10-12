@@ -1,0 +1,10 @@
+{
+  "known": [
+    { "host_id": "deepseek-harness", "version": "0.2.0-rc.2", "commit": "639ed01", "capabilities": ["session_lifecycle"] },
+    { "host_id": "hermes", "version": "0.19.0", "commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a", "capabilities": ["session_lifecycle", "context_injection"] }
+  ],
+  "unknown": [
+    { "host_id": "deepseek-harness", "version": "0.2.1-alpha.1", "commit": "5badb15", "state": "unsupported" },
+    { "host_id": "hermes", "version": "0.19.1", "commit": "unknown", "state": "unsupported" }
+  ]
+}

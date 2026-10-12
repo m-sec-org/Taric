@@ -17,8 +17,8 @@ export interface CompatibilityManifest {
   security_invariants: SecurityInvariant[];
   hosts: {
     pi: { state: "supported" | "unsupported"; package: string; version: string; commit: string; extension_api: string; detail: string; follow_up?: string };
-    "deepseek-harness": ManifestCapability;
-    hermes: ManifestCapability;
+    "deepseek-harness": ManifestCapability & { version?: string; commit?: string; contract?: string };
+    hermes: ManifestCapability & { version?: string; commit?: string; contract?: string };
   };
   capabilities: ManifestCapability[];
 }
@@ -80,10 +80,10 @@ export const TARIC_COMPATIBILITY_MANIFEST: CompatibilityManifest = {
       version: "1.1.0",
       commit: "7c10bd4",
       extension_api: "ExtensionAPI.on",
-      detail: "Pi 1.1.0 session_start 与 before_agent_start 已接入；proposal、checkpoint、action/result hooks 尚未支持。",
+      detail: "Pi 1.1.0 lifecycle hooks and bound proposal/checkpoint/action/result/error paths are supported by the pinned host contract.",
     },
-    "deepseek-harness": { id: "deepseek_native_adapter", state: "unsupported", detail: "Cordis 原生 adapter 未实现。", follow_up: "integrate-native-host-adapters" },
-    hermes: { id: "hermes_native_adapter", state: "unsupported", detail: "Python general plugin RPC 未连接。", follow_up: "integrate-native-host-adapters" },
+    "deepseek-harness": { id: "deepseek_native_adapter", state: "supported", version: "0.2.0-rc.2", commit: "639ed01", contract: "@deepseek-ai/cordis@4.0.4", detail: "Locked DeepSeek Harness/Cordis lifecycle bridge with Core-scoped callbacks." },
+    hermes: { id: "hermes_native_adapter", state: "supported", version: "0.19.0", commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a", contract: "general-plugin-hooks-v1", detail: "Hermes general plugin with Core RPC for context and session/tool observation; no provider replacement." },
   },
   capabilities: [
     { id: "cli.operator", state: "supported", detail: "JSON 输入输出、stderr 诊断与非零退出码。" },
@@ -91,13 +91,13 @@ export const TARIC_COMPATIBILITY_MANIFEST: CompatibilityManifest = {
     { id: "pi_native_adapter", state: "supported", detail: "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。" },
     { id: "pi.session_lifecycle", state: "supported", detail: "session_start 已接入受认证 Core client。" },
     { id: "pi.context_injection", state: "supported", detail: "context 与 before_agent_start 返回 Taric Context Pack。" },
-    { id: "pi.proposal_checkpoint_action_result_hooks", state: "unsupported", detail: "Pi 事件到 proposal/checkpoint/action/result 的完整 host contract 尚未交付。", follow_up: "integrate-native-host-adapters" },
-    { id: "deepseek_native_adapter", state: "unsupported", detail: "follow-up integrate-native-host-adapters。", follow_up: "integrate-native-host-adapters" },
-    { id: "hermes_native_adapter", state: "unsupported", detail: "follow-up integrate-native-host-adapters。", follow_up: "integrate-native-host-adapters" },
+    { id: "pi.proposal_checkpoint_action_result_hooks", state: "supported", detail: "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client." },
+    { id: "deepseek_native_adapter", state: "supported", detail: "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks." },
+    { id: "hermes_native_adapter", state: "supported", detail: "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported." },
     { id: "storage.postgresql", state: "unsupported", detail: "首发只支持 SQLite WAL。", follow_up: "add-shared-authority-backend" },
-    { id: "git.remote_push", state: "unsupported", detail: "只创建本地 checkpoint，不推送远端。", follow_up: "evolve-engagement-memory" },
-    { id: "secrets.external_scanner", state: "unsupported", detail: "外部 secrets 扫描未接入。", follow_up: "evolve-engagement-memory" },
+    { id: "git.remote_push", state: "supported", detail: "仅在 Engagement 明确授权且真实扫描 callback 通过后推送；失败可重试。" },
+    { id: "secrets.external_scanner", state: "supported", detail: "由宿主提供真实 scanner callback，并记录 tool version/result hash。" },
     { id: "quality.full_statistical_evaluation", state: "unsupported", detail: "precision/recall/95% CI 未交付。", follow_up: "validate-memory-quality" },
-    { id: "graph.relation_impact", state: "unsupported", detail: "完整 relation/impact 图未交付。", follow_up: "evolve-engagement-memory" },
+    { id: "graph.relation_impact", state: "supported", detail: "类型化关系、三方 patch、冲突证据和 bounded impact continuation 已交付。" },
   ],
 };

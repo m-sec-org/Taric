@@ -95,3 +95,17 @@ test("fixture corpus records its schema, policy and change provenance", () => {
   assert.equal(fixtures.counts.valid, Object.keys(fixtures.valid).length);
   assert.equal(fixtures.counts.negatives, Object.keys(fixtures.negatives).length);
 });
+
+
+test("evolution memory contracts preserve immutable revisions and typed applicability", () => {
+  const base = { id: "018f47a1-7c00-7000-8000-000000000001", schema_version: "1.0.0", engagement_id: "018f47a1-7c00-7000-8000-000000000002", created_at: "2026-10-12T00:00:00.000Z", provenance: { host_id: "pi", producer_id: "worker-a", source_kind: "tool" } };
+  const revision = { ...base, resource_ref: "018f47a1-7c00-7000-8000-000000000003", revision: 2, logical_identity: { origin: "https://example.test", method: "GET", path_template: "/orders/{id}" }, variant: { method: "GET", path_template: "/orders/{id}", principal_ref: "018f47a1-7c00-7000-8000-000000000004" }, content_hash: "sha256:" + "a".repeat(64), source_observation_refs: ["018f47a1-7c00-7000-8000-000000000005"], valid_from: "2026-10-12T00:00:00.000Z", supersedes: "018f47a1-7c00-7000-8000-000000000006" };
+  assert.equal(validators.get("resourceRevision")(revision), true);
+  const invalidRevision = { ...revision, id: "018f47a1-7c00-4000-8000-000000000001" };
+  assert.equal(validators.get("resourceRevision")(invalidRevision), false, "revision identities must be UUIDv7");
+  const relation = { ...base, from_ref: revision.resource_ref, from_type: "resource", predicate: "calls", to_ref: "018f47a1-7c00-7000-8000-000000000007", to_type: "resource_revision", version: 1, source_observation_refs: [revision.source_observation_refs[0]], valid_from: revision.valid_from, criticality: "critical" };
+  assert.equal(validators.get("relation")(relation), true);
+  assert.equal(validators.get("relation")({ ...relation, criticality: "catastrophic" }), false);
+  const controlObservation = { ...base, resource_ref: revision.resource_ref, control_ref: "018f47a1-7c00-7000-8000-000000000008", outcome: "inconclusive", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", observed_at: revision.valid_from, evidence_refs: [], limitations: ["origin not attributable"] };
+  assert.equal(validators.get("controlObservation")(controlObservation), true);
+});

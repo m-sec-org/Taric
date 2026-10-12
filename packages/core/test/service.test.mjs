@@ -32,13 +32,25 @@ test("Core dispatch keeps proposals private and binds review identity to the ver
   store.close();
 });
 
-test("Core dispatch returns stable unsupported responses for deferred and unknown operations", () => {
+test("Core dispatch distinguishes unauthorized supported operations from unsupported operations", () => {
   const store = new AuthorityStore();
   const service = createCoreService(store);
   const operator = createPrincipal("operator", "operator-a");
-  assert.equal(service.dispatch("work.renew", operator, {}).error.code, "unsupported_capability");
+  assert.equal(service.dispatch("work.renew", operator, {}).error.code, "authorization_error");
   assert.equal(service.dispatch("operation.missing", operator, {}).error.code, "unsupported_capability");
   assert.equal(service.dispatch("query", operator, undefined).error.code, "validation_error");
   assert.equal(service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: "9.9.9" }).error.code, "unsupported_schema_version");
+  store.close();
+});
+
+test("dispatch rejects self-asserted principals and host requests outside the bound engagement", () => {
+  const store = new AuthorityStore();
+  const service = createCoreService(store);
+  const engagement_id = uuidv7();
+  const forged = { id: "forged-host", role: "host", engagement_id, transport_verified: true };
+  assert.equal(service.dispatch("work.claim", forged, { engagement_id, work_item_id: uuidv7(), agent_id: "worker" }).error.code, "authorization_error");
+
+  const host = createPrincipal("host", "pi-host", engagement_id);
+  assert.equal(service.dispatch("work.claim", host, { engagement_id: uuidv7(), work_item_id: uuidv7(), agent_id: "worker" }).error.code, "authorization_error");
   store.close();
 });

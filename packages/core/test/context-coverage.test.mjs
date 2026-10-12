@@ -174,7 +174,7 @@ test("negative observations use structured bounds instead of statement keywords"
     method: "GET /admin",
     baseline_ref: resource_ref,
     tested_resource_refs: [resource_ref],
-    identity_ref: uuidv7(),
+    identity_ref: resource_ref,
     operation: "GET /admin",
     conditions: ["role=user"],
     evidence_refs: [],

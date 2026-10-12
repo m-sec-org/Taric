@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { AuthorityStore, pinProjection, publishProjection, readProjection, unpinProjection, uuidv7 } from "../dist/index.js";
+import { retryProjectionCheckpoint } from "../dist/projection.js";
+const execFileAsync = promisify(execFile);
 
 test("projection allowlist excludes sensitive fields and publishes complete files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "taric-projection-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
@@ -14,6 +18,12 @@ test("projection allowlist excludes sensitive fields and publishes complete file
   assert.equal(result.remotePushAllowed, false); assert.match(body, /test/); assert.doesNotMatch(body, /secret|private|raw|unreviewed canary|sensitive draft/);
   assert.equal(result.manifest.authority_sequence, result.manifest.projected_watermark);
   assert.ok(result.manifest.files["STATE.md"].startsWith("sha256:"));
+  assert.deepEqual(result.manifest.entity_ids, store.snapshot(engagement_id).records.filter((record) => record.trust_level === "L2").map((record) => record.id));
+  assert.ok(result.manifest.policy_digest.startsWith("sha256:"));
+  const manifestContents = await readFile(join(dir, result.generation, "manifest.json"), "utf8");
+  assert.equal(JSON.parse(manifestContents).manifest_hash, result.manifest.manifest_hash);
+  assert.equal(result.localGit.authority_sequence, result.manifest.authority_sequence);
+  assert.equal(result.localGit.manifest_hash, result.manifest.manifest_hash);
   const request = { principalId: "worker", engagementId: engagement_id, outputDir: dir, generation: result.generation, file: "STATE.md" };
   await assert.rejects(() => readProjection(request, () => false), /permission denied/);
   assert.match(await readProjection(request, (principal, engagement) => principal === "worker" && engagement === engagement_id), /Engagement Brief/);
@@ -27,10 +37,59 @@ test("projection allowlist excludes sensitive fields and publishes complete file
 
 test("remote push requires all explicit safeguards", async () => {
   const dir = await mkdtemp(join(tmpdir(), "taric-projection-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
-  let scanCalled = false;
-  const result = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, canPushRemote: true, remote: { privateRepository: true, accessControl: true, retentionPolicy: true, secretScan: true, secretScanCallback: () => { scanCalled = true; return true; } } });
-  assert.equal(scanCalled, false);
-  assert.equal(result.remotePushAllowed, false); await rm(dir, { recursive: true, force: true }); store.close();
+  let scanCalled = false; let pushCalled = false;
+  const config = { repository: "https://example.invalid/private.git", privateRepository: true, accessControl: true, retentionPolicy: "30 days", authorizeRemotePush: () => false, secretScanCallback: () => { scanCalled = true; return { passed: true, scanner_tool_version: "scanner/1", result_hash: "sha256:result" }; }, pushCallback: () => { pushCalled = true; return true; } };
+  const result = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, remote: config });
+  assert.equal(scanCalled, false, "a negative Engagement authorization prevents scanning and pushing");
+  assert.equal(pushCalled, false);
+  assert.equal(result.remote.status, "blocked");
+  assert.equal(result.remotePushAllowed, false);
+  await rm(dir, { recursive: true, force: true }); store.close();
+});
+
+test("remote push needs explicit Engagement authorization and a versioned real scan result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-projection-remote-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
+  let scans = 0; let pushes = 0;
+  const scanHash = `sha256:${"a".repeat(64)}`;
+  const remote = {
+    repository: "https://example.invalid/private.git",
+    privateRepository: true,
+    accessControl: true,
+    retentionPolicy: "30 days",
+    authorizeRemotePush: (id) => id === engagement_id,
+    secretScanCallback: (input) => { scans++; assert.equal(input.engagementId, engagement_id); return { passed: true, scanner_tool_version: "scanner/2.1", result_hash: scanHash }; },
+    pushCallback: (input) => { pushes++; assert.equal(input.scan.scanner_tool_version, "scanner/2.1"); return { pushed: true }; },
+  };
+  const pushed = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, remote, localGit: false });
+  assert.equal(pushed.remotePushAllowed, true);
+  assert.equal(pushed.remote.status, "pushed");
+  assert.equal(pushed.remote.scan.result_hash, scanHash);
+  assert.equal(pushed.remote.configuration.private_repository, true);
+  assert.equal(scans, 1); assert.equal(pushes, 1);
+  const checkpoint = JSON.parse(await readFile(join(dir, "checkpoints", `${pushed.generation}.json`), "utf8"));
+  assert.equal(checkpoint.remote.scan.scanner_tool_version, "scanner/2.1");
+  assert.equal(checkpoint.remote.scan.result_hash, scanHash);
+  assert.equal(checkpoint.manifest_hash, pushed.manifest.manifest_hash);
+  await rm(dir, { recursive: true, force: true }); store.close();
+});
+
+test("failed scanner or remote push never pushes and remains retryable", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-projection-retry-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
+  let pushes = 0; let scans = 0;
+  const remote = {
+    repository: "https://example.invalid/private.git", privateRepository: true, accessControl: true, retentionPolicy: "30 days",
+    authorizeRemotePush: () => true,
+    secretScanCallback: () => { scans++; return scans === 1 ? { passed: false, scanner_tool_version: "scanner/2.1", result_hash: `sha256:${"b".repeat(64)}` } : { passed: true, scanner_tool_version: "scanner/2.1", result_hash: `sha256:${"c".repeat(64)}` }; },
+    pushCallback: () => { pushes++; return true; },
+  };
+  const first = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, remote, localGit: false });
+  assert.equal(first.remote.status, "pending"); assert.equal(first.remote.retryable, true); assert.equal(pushes, 0);
+  const retried = await retryProjectionCheckpoint({ outputDir: dir, generation: first.generation, localGit: false, remote });
+  assert.equal(retried.remote.status, "pushed"); assert.equal(retried.remote.scan.result_hash, `sha256:${"c".repeat(64)}`); assert.equal(pushes, 1);
+  const pushFailureRemote = { ...remote, pushCallback: () => { throw new Error("temporary network error"); } };
+  const failedPush = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, remote: pushFailureRemote, localGit: false });
+  assert.equal(failedPush.remote.status, "pending"); assert.equal(failedPush.remote.retryable, true); assert.equal(pushes, 1);
+  await rm(dir, { recursive: true, force: true }); store.close();
 });
 
 test("local git checkpoint is default-on and a failure keeps the authority generation published", async () => {
@@ -42,6 +101,27 @@ test("local git checkpoint is default-on and a failure keeps the authority gener
   const disabled = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, localGit: false });
   assert.equal(disabled.localGit.status, "disabled");
   assert.match(await readFile(join(dir, "current", "STATE.md"), "utf8"), /checked/);
+  assert.equal(store.verifyAudit().valid, true);
+  await rm(dir, { recursive: true, force: true }); store.close();
+});
+
+test("a pending local Git checkpoint can be retried without changing its pinned generation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-projection-git-retry-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
+  store.commit({ id: uuidv7(), engagement_id, kind: "finding", title: "retry" }, "L2");
+  const pending = await publishProjection(store, { engagementId: engagement_id, outputDir: dir });
+  assert.equal(pending.localGit.status, "pending");
+  await execFileAsync("git", ["init", "-q"], { cwd: dir });
+  await execFileAsync("git", ["config", "user.name", "Taric Tests"], { cwd: dir });
+  await execFileAsync("git", ["config", "user.email", "taric-tests@example.invalid"], { cwd: dir });
+  const retried = await retryProjectionCheckpoint({ outputDir: dir, generation: pending.generation, localGit: true });
+  assert.equal(retried.local_git.status, "committed");
+  assert.equal(retried.manifest_hash, pending.manifest.manifest_hash);
+  assert.equal(retried.authority_sequence, pending.manifest.authority_sequence);
+  const commitMessage = (await execFileAsync("git", ["log", "-1", "--format=%B"], { cwd: dir })).stdout;
+  assert.match(commitMessage, new RegExp(`authority-sequence=${pending.manifest.authority_sequence}`));
+  assert.match(commitMessage, new RegExp(`manifest-hash=${pending.manifest.manifest_hash.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  const persisted = JSON.parse(await readFile(join(dir, "checkpoints", `${pending.generation}.json`), "utf8"));
+  assert.equal(persisted.local_git.status, "committed");
   assert.equal(store.verifyAudit().valid, true);
   await rm(dir, { recursive: true, force: true }); store.close();
 });
@@ -58,5 +138,17 @@ test("reader pins keep a published generation alive across republication", async
   await unpinProjection(dir, first.generation);
   const third = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, localGit: false });
   assert.deepEqual(third.pinned_generations, [], "a released generation is no longer pinned");
+  await rm(dir, { recursive: true, force: true }); store.close();
+});
+
+test("reader rejects a changed generation manifest", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-projection-integrity-")); const store = new AuthorityStore(); const engagement_id = uuidv7();
+  const result = await publishProjection(store, { engagementId: engagement_id, outputDir: dir, localGit: false });
+  const manifestPath = join(dir, result.generation, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const { writeFile } = await import("node:fs/promises");
+  manifest.authority_sequence += 1;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await assert.rejects(() => readProjection({ principalId: "reader", engagementId: engagement_id, outputDir: dir, generation: result.generation, file: "manifest.json" }, () => true), /manifest integrity check failed/);
   await rm(dir, { recursive: true, force: true }); store.close();
 });

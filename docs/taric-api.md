@@ -19,6 +19,12 @@ Model-facing operations never expose `writer.commit`, admission internals, `chec
 
 Native adapters map lifecycle events to the same versioned contract. Authenticated adapters may commit checkpoints for the current WorkRun lease and record host action decisions/results. The supported action modes are `llm_recommend`, `authorized_autonomous`, and `host_hitl`; the host chooses the mode and remains responsible for authorization and execution.
 
+## Evolution and recovery operations
+
+`resource.revise` appends an immutable ResourceRevision with a variant, content hash, source observations, validity window, and supersession link. `resource.relation` stores typed same-Engagement edges with criticality and applicability. `resource.patch` requires a base generation plus read/write sets; independent fields merge, while CAS-sensitive overlap creates an auditable conflict. `resource.impact` processes explicit dependencies in bounded batches and returns a continuation and revalidation WorkItems.
+
+`snapshot.export` produces Taric-native JSON or JSONL with schema, source sequence, revisions, provenance, aliases, and integrity hash metadata. `snapshot.import` validates the complete temporary dataset and atomically rejects malformed, conflicting, cross-Engagement, or tampered input. Context cursors bind principal, Engagement, filters, ordering, read sequence, and budget; resume returns post-checkpoint deltas. Sealed drafts require explicit rebase before a later Attempt can reference them.
+
 ## Projection allowlist
 
 Markdown, Context Pack, query, trace, and export projections exclude raw Artifact contents, `SecretRef`, token/session material, private paths, unreviewed proposals, and sensitive drafts. Artifact retention and redaction are host policies.

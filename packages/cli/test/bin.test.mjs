@@ -34,8 +34,18 @@ test("taric capability.status reports the shared compatibility manifest", async 
     assert.equal(envelope.ok, true);
     assert.equal(envelope.data.compatibility_manifest.profile, "single_host_taric_plugin_v1");
     assert.equal(envelope.data.compatibility_manifest.hosts.pi.version, "1.1.0");
-    assert.equal(envelope.data.compatibility_manifest.hosts.hermes.state, "unsupported");
+    assert.equal(envelope.data.compatibility_manifest.hosts.hermes.state, "supported");
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("adapter version and health examples run in subprocesses", async () => {
+  const version = await execFileAsync(process.execPath, [cliPath, "adapter", "version"], { env: { ...process.env, TARIC_DB: ":memory:" } });
+  assert.equal(JSON.parse(version.stdout).data.contract_version, "1.0");
+  const health = await execFileAsync(process.execPath, [cliPath, "adapter", "health"], { env: { ...process.env, TARIC_DB: ":memory:" } });
+  const manifest = JSON.parse(health.stdout).data;
+  assert.equal(manifest.core_connected, true);
+  assert.equal(manifest.compatibility_manifest.hosts["deepseek-harness"].version, "0.2.0-rc.2");
+  assert.equal(manifest.compatibility_manifest.hosts.hermes.version, "0.19.0");
 });
 
 test("taric exits nonzero and keeps stdout empty for unsupported capability", async () => {

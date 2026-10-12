@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from taric_hermes_plugin import describe_plugin, translate_event
+from taric_hermes_plugin import (CoreUnavailable, TaricIntegrationError, TaricRpcClient,
+    create_hooks, describe_plugin, translate_event)
 
 
 class HermesPluginTests(unittest.TestCase):
@@ -28,6 +29,26 @@ class HermesPluginTests(unittest.TestCase):
         self.assertEqual(record["kind"], "observation")
         self.assertEqual(record["schema_version"], fixtures["schema_version"])
         self.assertRegex(record["engagement_id"], r"^[0-9a-f-]{36}$")
+
+    def test_hooks_use_core_rpc_and_fail_without_claiming_saved_state(self):
+        class Rpc:
+            def __init__(self): self.calls = []
+            def call(self, operation, request):
+                self.calls.append((operation, request))
+                return {"context_snapshot_id": "snapshot-1"}
+        rpc = Rpc()
+        hooks = create_hooks(rpc)
+        result = hooks["pre_llm_call"](context_budget=2048)
+        self.assertIn("snapshot-1", result["context"])
+        self.assertEqual(rpc.calls[0][0], "context.build")
+
+        class Offline:
+            def call(self, *_): raise CoreUnavailable("offline")
+        with self.assertRaises(CoreUnavailable): create_hooks(Offline())["pre_llm_call"]()
+
+    def test_transport_requires_authenticated_configuration(self):
+        with self.assertRaises(CoreUnavailable): TaricRpcClient(socket_path=None, token="x" * 40)
+        with self.assertRaises(TaricIntegrationError): TaricRpcClient(socket_path="/tmp/taric.sock", token="short")
 
 
 if __name__ == "__main__":

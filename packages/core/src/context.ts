@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { AuthorityStore, CanonicalRecord, TrustLevel } from "./store.js";
 
 const BUILDER_VERSION = "context-builder/1";
@@ -14,11 +14,38 @@ const modelFields = new Set([
   "draft_ref", "handoff_ref", "next_steps", "completed_steps", "pending_steps", "unresolved", "read_seq"
 ]);
 
+// Context may carry references and locations, but never the referenced artifact
+// body. Keep this list explicit so a newly added authority field cannot become a
+// model-facing data leak by accident.
+for (const field of [
+  "rule_of_engagement", "scope_constraints", "scope_version", "target_version", "work_item_version",
+  "conflict_refs", "conflict_ids", "stale_refs", "coverage_gaps", "coverage_gap_refs", "delta_refs",
+  "impact_refs", "dependency_refs", "evidence_locations", "evidence_location", "byte_range", "line_range",
+  "http_location", "source_hash", "source_revision", "source_time", "source_version", "permission",
+  "permission_scope", "slice", "slice_metadata", "locator", "artifact_ref", "artifact_refs", "revision",
+  "revision_id", "variant", "variant_id", "applicability", "replan_required", "blocked", "blocked_reason",
+  "attempt_ref", "attempt_id", "work_run_ref", "work_run_id", "generation", "base_read_seq", "source_read_seq",
+  "external_action_state", "action_refs", "tool_result_refs", "observation_refs", "negative_results",
+  "unresolved_work", "budget_consumed", "draft_refs", "handoff_refs"
+]) modelFields.add(field);
+
 /** 强制信息优先级：scope/ROE -> WorkItem(目标/验收/风险预算) -> 最近 checkpoint。预算不足时这些必须先进包。 */
 const mandatoryFields = ["scope", "scope_ref", "rule_of_engagement", "goal", "goals", "acceptance", "acceptance_criteria", "risk_budget", "budget", "limitations", "next_steps", "completed_steps", "pending_steps", "unresolved"];
 export const CONTEXT_MINIMUM_BUDGET = 256;
 
-export interface ContextSource { id: string; hash: string; version?: number; time?: string; trust_level?: TrustLevel; }
+export interface ContextSource {
+  id: string;
+  hash: string;
+  source_hash?: string;
+  version?: number;
+  revision?: string | number;
+  time?: string;
+  trust_level?: TrustLevel;
+  slice?: Record<string, unknown>;
+  permission?: string;
+  source_permission?: string;
+  source_kind?: string;
+}
 export interface ContextPack {
   context_snapshot_id: string;
   read_seq: number;
@@ -43,6 +70,22 @@ export interface ContextPack {
   cursor?: string;
   sources: string[];
   manifest: ContextSource[];
+  token_estimator_version?: string;
+  permission_scope?: string;
+  resume_delta?: ContextResumeSummary;
+}
+export interface ContextResumeSummary {
+  from_read_seq: number;
+  to_read_seq: number;
+  added_ids: string[];
+  updated_ids: string[];
+  removed_ids: string[];
+  scope_changes: string[];
+  dependency_changes: string[];
+  pending_actions: string[];
+  blocked: boolean;
+  replan_required: boolean;
+  reasons: string[];
 }
 export class ContextBudgetError extends Error {
   readonly code = "minimum_budget_required";
@@ -63,30 +106,56 @@ export interface ContextOptions {
   cursor?: string;
   characterBudget?: number;
   reviewerMode?: boolean;
+  ordering?: string;
+  cursorTtlMs?: number;
+  filters?: Record<string, unknown>;
+  checkpoint?: Record<string, unknown>;
+  resumeFromSeq?: number;
+  pendingActions?: Array<Record<string, unknown>>;
 }
 interface CursorState {
-  v: 1; engagement_id: string; principal_id: string; read_seq: number; budget: number; offset: number;
+  v: 1; engagement_id: string; principal_id: string; read_seq: number; budget: number; offset: number; issued_at: number; expires_at: number;
   include_candidates: boolean; policy_version: string; snapshot_id: string; ordering: string;
+  filters: Record<string, unknown>;
   work_item_id: string | null; worker_role: string | null; delivered: string[]; records: CanonicalRecord[];
   reviewer_mode: boolean;
   latest_checkpoint_id: string | null;
+  delta_ids: string[];
+  resume_delta?: ContextResumeSummary;
 }
 const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+const sensitiveField = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|hidden_reasoning|chain_of_thought)/i;
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)]));
+  return value;
+}
+function safeValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(safeValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !sensitiveField.test(key))
+    .map(([key, item]) => [key, safeValue(item)]));
+}
 const estimate = (record: CanonicalRecord) => JSON.stringify(record).length;
 function allowedRecord(record: CanonicalRecord): CanonicalRecord | undefined {
   if (record.trust_level === "L0") return undefined;
-  const fields = Object.fromEntries(Object.entries(record).filter(([key]) => modelFields.has(key)));
-  if (record.trust_level === "L1" && typeof fields.provenance !== "object") fields.provenance = record.provenance;
+  const fields = Object.fromEntries(Object.entries(record).filter(([key]) => modelFields.has(key)).map(([key, value]) => [key, safeValue(value)]));
+  if (record.trust_level === "L1" && typeof fields.provenance !== "object") fields.provenance = safeValue(record.provenance);
   return fields as CanonicalRecord;
 }
-function priority(record: CanonicalRecord, workItemId: string | null): number {
+function priority(record: CanonicalRecord, workItemId: string | null, deltaIds: ReadonlySet<string> = new Set()): number {
   const kind = String(record.kind ?? "");
+  const coverageGap = kind === "coverage" && ["not_tested", "queued", "in_progress", "tested_no_observation", "inconclusive", "blocked", "blocked_by_control"].includes(String(record.status));
   if (["engagement", "scope", "rule_of_engagement"].includes(kind)) return 0;
   const isTargetWorkItem = Boolean(workItemId) && (record.id === workItemId || record.work_item_ref === workItemId);
   if (kind === "work_item" || kind === "workitem") return isTargetWorkItem ? 1 : 4;
   if (kind === "checkpoint") return 2;
+  if (deltaIds.has(record.id) || coverageGap || ["conflict", "impact_event", "coverage_gap", "delta"].includes(kind)
+    || record.status === "stale" || record.stale_reason !== undefined
+    || record.coverage_status === "gap" || record.coverage_gap === true) return 3;
   if (isTargetWorkItem) return 2;
-  if (["observation", "evidence", "coverage", "control_observation", "access_decision_observation", "finding", "claim", "resource"].includes(kind)) return 3;
+  if (["observation", "evidence", "coverage", "control_observation", "access_decision_observation", "finding", "claim", "resource"].includes(kind)) return 4;
   return 5;
 }
 function mandatoryProjection(record: CanonicalRecord): CanonicalRecord {
@@ -119,24 +188,32 @@ function compactProjection(record: CanonicalRecord): CanonicalRecord {
   } as CanonicalRecord;
 }
 function encodeCursor(state: CursorState): string {
-  const payload = Buffer.from(JSON.stringify(state)).toString("base64url");
-  const signature = createHash("sha256").update(cursorSecret).update(payload).digest("base64url");
-  return `${payload}.${signature}`;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", cursorSecret, iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(state), "utf8"), cipher.final()]);
+  return `v1.${iv.toString("base64url")}.${encrypted.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}`;
 }
 function decodeCursor(value: string): CursorState {
-  const [payload, signature, extra] = value.split(".");
-  if (!payload || !signature || extra) throw new Error("invalid context continuation cursor");
-  const expected = createHash("sha256").update(cursorSecret).update(payload).digest("base64url");
-  const actualBytes = Buffer.from(signature); const expectedBytes = Buffer.from(expected);
-  if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) throw new Error("invalid context continuation cursor");
-  const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as CursorState;
-  if (parsed.v !== 1 || !Array.isArray(parsed.records) || !Array.isArray(parsed.delivered) || !Number.isSafeInteger(parsed.offset) || parsed.offset < 0) throw new Error("invalid context continuation cursor");
+  const [version, ivPart, encryptedPart, tagPart, extra] = value.split(".");
+  if (version !== "v1" || !ivPart || !encryptedPart || !tagPart || extra) throw new Error("invalid context continuation cursor");
+  let parsed: CursorState;
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", cursorSecret, Buffer.from(ivPart, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
+    parsed = JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedPart, "base64url")), decipher.final()]).toString("utf8")) as CursorState;
+  } catch {
+    throw new Error("invalid context continuation cursor");
+  }
+  if (parsed.v !== 1 || !Array.isArray(parsed.records) || !Array.isArray(parsed.delivered) || !Number.isSafeInteger(parsed.offset) || parsed.offset < 0 || !Number.isSafeInteger(parsed.issued_at) || !Number.isSafeInteger(parsed.expires_at) || parsed.expires_at < parsed.issued_at) throw new Error("invalid context continuation cursor");
+  if (Date.now() > parsed.expires_at) throw new Error("context continuation cursor expired");
   return parsed;
 }
 function packPage(state: CursorState, offset: number, budget: number): ContextPack {
   const delivered = new Set(state.delivered);
   const pending = state.records.slice(offset);
-  const isMandatory = (record: CanonicalRecord) => priority(record, state.work_item_id) <= 1 || record.id === state.latest_checkpoint_id;
+  const deltaIds = new Set(state.delta_ids);
+  const recordPriority = (record: CanonicalRecord) => priority(record, state.work_item_id, deltaIds);
+  const isMandatory = (record: CanonicalRecord) => recordPriority(record) <= 1 || record.id === state.latest_checkpoint_id;
   const undelivered = pending.filter((record) => !delivered.has(record.id));
   const mandatory = undelivered.filter(isMandatory);
   const mandatoryFullCost = mandatory.reduce((total, record) => total + estimate(record), 0);
@@ -190,7 +267,26 @@ function packPage(state: CursorState, offset: number, budget: number): ContextPa
   const nextDelivered = [...delivered, ...items.map((item) => item.id)];
   const exhausted = nextOffset >= state.records.length;
   const cursor = exhausted ? undefined : encodeCursor({ ...state, offset: nextOffset, budget, delivered: nextDelivered });
-  const sourceRecords = items.map((item) => ({ id: item.id, hash: digest(item), version: item.version, time: typeof item.updated_at === "string" ? item.updated_at : undefined, trust_level: item.trust_level, priority: priority(item, state.work_item_id) }));
+  const sourceRecords = items.map((item) => ({
+    id: item.id,
+    hash: digest(item),
+    source_hash: typeof item.source_hash === "string" ? item.source_hash : undefined,
+    version: item.version,
+    revision: typeof item.revision_id === "string" || typeof item.revision_id === "number" ? item.revision_id : item.revision as string | number | undefined,
+    time: typeof item.updated_at === "string" ? item.updated_at : typeof item.created_at === "string" ? item.created_at : undefined,
+    trust_level: item.trust_level,
+    slice: {
+      ...((item.slice_metadata && typeof item.slice_metadata === "object" ? item.slice_metadata : {}) as Record<string, unknown>),
+      ...(item.byte_range !== undefined ? { byte_range: item.byte_range } : {}),
+      ...(item.line_range !== undefined ? { line_range: item.line_range } : {}),
+      ...(item.http_location !== undefined ? { http_location: item.http_location } : {}),
+      ...(item.evidence_location !== undefined ? { evidence_location: item.evidence_location } : {})
+    },
+    permission: `${state.principal_id}@${state.engagement_id}`,
+    source_permission: typeof item.permission_scope === "string" ? item.permission_scope : typeof item.permission === "string" ? item.permission : undefined,
+    source_kind: typeof item.kind === "string" ? item.kind : undefined,
+    priority: recordPriority(item)
+  }));
   return {
     context_snapshot_id: state.snapshot_id, read_seq: state.read_seq, schema_version: "1.0.0", adapter_version: "adapter/1.0", budget, budget_unit: "characters", used,
     builder_version: BUILDER_VERSION, policy_version: state.policy_version, items, omitted_count: omittedCount,
@@ -200,7 +296,10 @@ function packPage(state: CursorState, offset: number, budget: number): ContextPa
     mandatory_constraints: mandatory.map((item) => ({ id: item.id, display_id: typeof item.display_id === "string" ? item.display_id : undefined, constraints: mandatoryProjection(item) })),
     cursor, sources: items.map((item) => item.id), manifest: sourceRecords, ordering: state.ordering,
     work_item_id: state.work_item_id ?? undefined, worker_role: state.worker_role ?? undefined,
-    latest_checkpoint_id: state.latest_checkpoint_id ?? undefined
+    latest_checkpoint_id: state.latest_checkpoint_id ?? undefined,
+    token_estimator_version: "characters/json-length/1",
+    permission_scope: `${state.principal_id}@${state.engagement_id}`,
+    resume_delta: state.resume_delta
   };
 }
 
@@ -213,14 +312,18 @@ export function buildContextPack(store: AuthorityStore, engagementId: string, bu
     if (state.engagement_id !== engagementId || state.principal_id !== principalId || state.include_candidates !== Boolean(options.includeCandidates) || state.policy_version !== (options.policyVersion ?? "policy/1")) throw new Error("context continuation cursor binding mismatch");
     if ((options.workItemId ?? null) !== state.work_item_id || (options.workerRole ?? null) !== state.worker_role) throw new Error("context continuation cursor binding mismatch");
     if (Boolean(options.reviewerMode) !== state.reviewer_mode) throw new Error("context continuation cursor binding mismatch");
+    if (options.ordering !== undefined && options.ordering !== state.ordering) throw new Error("context continuation cursor binding mismatch");
+    if (JSON.stringify(canonical(options.filters ?? {})) !== JSON.stringify(canonical(state.filters))) throw new Error("context continuation cursor binding mismatch");
+    if (options.readSeq !== undefined && options.readSeq !== state.read_seq) throw new Error("context continuation cursor binding mismatch");
     if (requestedBudget !== state.budget) throw new Error("context continuation cursor budget mismatch");
     return packPage(state, state.offset, requestedBudget);
   }
-  const snapshot = store.snapshot(engagementId, { includeCandidates: options.includeCandidates });
-  if (options.readSeq !== undefined && options.readSeq !== snapshot.read_seq) throw new Error("requested read_seq is unavailable from the authority snapshot API");
-  const records = snapshot.records
+  if (options.cursorTtlMs !== undefined && (!Number.isSafeInteger(options.cursorTtlMs) || options.cursorTtlMs < 1)) throw new RangeError("cursor ttl must be a positive integer");
+  const snapshot = store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
+  let records = snapshot.records
     .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
     .filter((record) => !options.reviewerMode || record.kind !== "review")
+    .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
     .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record))
     .sort((a, b) => {
       const byPriority = priority(a, options.workItemId ?? null) - priority(b, options.workItemId ?? null);
@@ -228,13 +331,247 @@ export function buildContextPack(store: AuthorityStore, engagementId: string, bu
       if (a.kind === "checkpoint" && b.kind === "checkpoint") return String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
       return String(a.id).localeCompare(String(b.id));
     });
+  if (snapshot.read_seq === snapshot.committed_seq) {
+    const existing = new Set(records.map((record) => record.id));
+    const staleIds = new Set(store.events()
+      .filter((event) => event.commit_seq <= snapshot.read_seq && event.event_type === "record.stale" && event.subject_id)
+      .map((event) => event.subject_id!));
+    const staleRecords = [...staleIds].filter((id) => !existing.has(id)).map((id) => store.get(id))
+      .filter((record): record is CanonicalRecord => Boolean(record && record.engagement_id === engagementId && record.status === "stale"))
+      .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
+      .filter((record) => !options.reviewerMode || record.kind !== "review")
+      .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
+      .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record));
+    records = [...records, ...staleRecords];
+  }
   const latestCheckpointId = records.find((record) => record.kind === "checkpoint")?.id ?? null;
+  const resumeFromSeq = options.resumeFromSeq ?? (typeof options.checkpoint?.source_read_seq === "number" ? options.checkpoint.source_read_seq : undefined);
+  const resumeDelta = resumeFromSeq === undefined ? undefined : resumeContextDelta(store, engagementId, resumeFromSeq, {
+    checkpoint: options.checkpoint,
+    principalId,
+    workItemId: options.workItemId,
+    workerRole: options.workerRole,
+    includeCandidates: options.includeCandidates,
+    readSeq: snapshot.read_seq,
+    pendingActions: options.pendingActions
+  });
+  if (resumeDelta && snapshot.read_seq === snapshot.committed_seq) {
+    const existing = new Set(records.map((record) => record.id));
+    const staleDeltaRecords = resumeDelta.updated.filter((record) => !existing.has(record.id))
+      .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
+      .filter((record) => !options.reviewerMode || record.kind !== "review")
+      .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
+      .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record));
+    records = [...records, ...staleDeltaRecords];
+  }
+  const resumeSummary: ContextResumeSummary | undefined = resumeDelta ? {
+    from_read_seq: resumeDelta.from_read_seq,
+    to_read_seq: resumeDelta.to_read_seq,
+    added_ids: resumeDelta.added.map((record) => record.id),
+    updated_ids: resumeDelta.updated.map((record) => record.id),
+    removed_ids: resumeDelta.removed,
+    scope_changes: resumeDelta.scope_changes,
+    dependency_changes: resumeDelta.dependency_changes,
+    pending_actions: resumeDelta.pending_actions,
+    blocked: resumeDelta.blocked,
+    replan_required: resumeDelta.replan_required,
+    reasons: resumeDelta.reasons
+  } : undefined;
+  const deltaIds = [...new Set([...(resumeDelta?.added.map((record) => record.id) ?? []), ...(resumeDelta?.updated.map((record) => record.id) ?? [])])];
+  const deltaIdSet = new Set(deltaIds);
+  records.sort((a, b) => {
+    const byPriority = priority(a, options.workItemId ?? null, deltaIdSet) - priority(b, options.workItemId ?? null, deltaIdSet);
+    if (byPriority) return byPriority;
+    if (a.kind === "checkpoint" && b.kind === "checkpoint") return String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
+    return String(a.id).localeCompare(String(b.id));
+  });
+  const issuedAt = Date.now();
+  const ttl = options.cursorTtlMs ?? 60 * 60 * 1000;
+  if (!Number.isSafeInteger(ttl) || ttl < 1 || !Number.isSafeInteger(issuedAt + ttl)) throw new RangeError("cursor ttl must be a positive safe integer");
   const state: CursorState = {
     v: 1, engagement_id: engagementId, principal_id: principalId, read_seq: snapshot.read_seq,
     budget: requestedBudget, offset: 0, include_candidates: Boolean(options.includeCandidates),
     policy_version: options.policyVersion ?? "policy/1", snapshot_id: `ctx_${randomBytes(16).toString("hex")}`,
-    ordering: "scope,work_item,checkpoint,direct,entity_evidence,background", work_item_id: options.workItemId ?? null,
-    worker_role: options.workerRole ?? null, reviewer_mode: Boolean(options.reviewerMode), latest_checkpoint_id: latestCheckpointId, delivered: [], records
+    ordering: options.ordering ?? "scope,work_item,checkpoint,delta,direct,entity_evidence,background", work_item_id: options.workItemId ?? null,
+    filters: structuredClone(options.filters ?? {}),
+    worker_role: options.workerRole ?? null, reviewer_mode: Boolean(options.reviewerMode), latest_checkpoint_id: latestCheckpointId, delivered: [], records,
+    delta_ids: deltaIds, resume_delta: resumeSummary,
+    issued_at: issuedAt, expires_at: issuedAt + ttl
   };
   return packPage(state, 0, requestedBudget);
+}
+
+export interface ResumeContextDelta {
+  engagement_id: string;
+  from_read_seq: number;
+  to_read_seq: number;
+  read_seq: number;
+  records: CanonicalRecord[];
+  added: CanonicalRecord[];
+  updated: CanonicalRecord[];
+  removed: string[];
+  events: Array<{ commit_seq: number; event_id: string; event_type: string; subject_id?: string; hash: string }>;
+  scope_changes: string[];
+  dependency_changes: string[];
+  pending_actions: string[];
+  context_manifest: { context_snapshot_id: string; read_seq: number; builder_version: string; source_ids: string[] };
+  blocked: boolean;
+  replan_required: boolean;
+  reasons: string[];
+}
+
+export interface ResumeDeltaOptions {
+  checkpoint?: Record<string, unknown>;
+  principalId?: string;
+  workItemId?: string;
+  workerRole?: string;
+  includeCandidates?: boolean;
+  readSeq?: number;
+  pendingActions?: Array<Record<string, unknown>>;
+}
+
+/** Return only changes after a pinned checkpoint sequence. This is a read-only
+ * helper; it never promotes late results or writes a new authority record. */
+export function resumeContextDelta(store: AuthorityStore, engagementId: string, fromReadSeq: number, options: ResumeDeltaOptions = {}): ResumeContextDelta {
+  if (!Number.isSafeInteger(fromReadSeq) || fromReadSeq < 0) throw new RangeError("from_read_seq must be a non-negative integer");
+  const current = store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
+  if (fromReadSeq > current.read_seq) throw new Error("resume delta source sequence is unavailable");
+  const before = store.snapshot(engagementId, { asOf: fromReadSeq, includeCandidates: options.includeCandidates });
+  const beforeById = new Map(before.records.map((record) => [record.id, record]));
+  const afterById = new Map(current.records.map((record) => [record.id, record]));
+  const added: CanonicalRecord[] = [];
+  const updated: CanonicalRecord[] = [];
+  for (const record of current.records) {
+    const prior = beforeById.get(record.id);
+    if (!prior) added.push(record);
+    else if (digest(prior) !== digest(record)) updated.push(record);
+  }
+  const removed = [...beforeById.keys()].filter((id) => !afterById.has(id));
+  const ids = new Set([...beforeById.keys(), ...afterById.keys()]);
+  const checkpointWorkItem = typeof options.checkpoint?.work_item_ref === "string" ? options.checkpoint.work_item_ref : options.workItemId;
+  const relevantEvent = (event: ReturnType<AuthorityStore["events"]>[number]) =>
+    (event.subject_id !== undefined && ids.has(event.subject_id))
+    || event.payload.engagement_id === engagementId
+    || (checkpointWorkItem !== undefined && event.payload.work_item_id === checkpointWorkItem);
+  const events = store.events().filter((event) => event.commit_seq > fromReadSeq && event.commit_seq <= current.read_seq && relevantEvent(event))
+    .map((event) => ({ commit_seq: event.commit_seq, event_id: event.event_id, event_type: event.event_type, subject_id: event.subject_id, hash: event.hash }));
+  const changedRecordIds = new Set([...added, ...updated].map((record) => record.id));
+  for (const event of events) {
+    if (!event.subject_id || changedRecordIds.has(event.subject_id)) continue;
+    const record = store.get(event.subject_id);
+    if (record?.engagement_id === engagementId && record.trust_level !== "L0") {
+      updated.push(record);
+      changedRecordIds.add(record.id);
+    }
+  }
+  const changed = [...added, ...updated];
+  const scopeKinds = ["scope", "rule_of_engagement", "engagement"];
+  const scopeChanges = [
+    ...changed.filter((record) => scopeKinds.includes(String(record.kind))).map((record) => record.id),
+    ...removed.filter((id) => scopeKinds.includes(String(beforeById.get(id)?.kind)))
+  ];
+  const dependencyKinds = ["resource", "resource_revision", "relation", "control", "control_observation", "access_decision_observation", "claim", "finding", "coverage", "coverage_gap", "conflict", "impact_event"];
+  const dependencyChanges = [
+    ...changed.filter((record) => dependencyKinds.includes(String(record.kind)) || record.status === "stale").map((record) => record.id),
+    ...removed.filter((id) => dependencyKinds.includes(String(beforeById.get(id)?.kind)))
+  ];
+  const pendingActions = (options.pendingActions ?? changed.filter((record) => String(record.kind) === "action_intent" && ["recommended", "authorized", "unknown"].includes(String(record.status))))
+    .filter((action) => ["recommended", "authorized", "unknown"].includes(String(action.status)))
+    .map((action) => String(action.action_id ?? action.id ?? "")).filter(Boolean);
+  const reasons: string[] = [];
+  const checkpoint = options.checkpoint;
+  if (checkpoint) {
+    if (typeof checkpoint.engagement_id === "string" && checkpoint.engagement_id !== engagementId) throw new Error("checkpoint engagement binding mismatch");
+    const scopeRef = typeof checkpoint.scope_ref === "string" ? checkpoint.scope_ref : undefined;
+    if (scopeRef && scopeChanges.includes(scopeRef)) reasons.push("scope_changed");
+    if (scopeRef) {
+      const currentScope = afterById.get(scopeRef);
+      if (!currentScope || (typeof checkpoint.scope_version === "number" && currentScope.version !== checkpoint.scope_version)) reasons.push("scope_version_changed");
+    }
+    const workItemRef = typeof checkpoint.work_item_ref === "string" ? checkpoint.work_item_ref : options.workItemId;
+    if (workItemRef) {
+      const currentWorkItem = afterById.get(workItemRef);
+      if (!currentWorkItem || changed.some((record) => record.id === workItemRef)) reasons.push("work_item_changed");
+      if (typeof checkpoint.work_item_version === "number" && currentWorkItem?.version !== checkpoint.work_item_version) reasons.push("work_item_version_changed");
+      if (typeof checkpoint.target_version === "number" && currentWorkItem?.target_version !== checkpoint.target_version) reasons.push("target_version_changed");
+    }
+    const premiseRefs = ["observation_refs", "evidence_refs", "host_decision_refs", "action_refs", "tool_result_refs"]
+      .flatMap((field) => Array.isArray(checkpoint[field]) ? checkpoint[field] as unknown[] : [])
+      .filter((ref): ref is string => typeof ref === "string");
+    if (premiseRefs.some((ref) => changedRecordIds.has(ref) || removed.includes(ref))) reasons.push("checkpoint_premise_changed");
+    if (typeof checkpoint.generation === "number" && typeof checkpoint.attempt_ref !== "string") reasons.push("attempt_attribution_missing");
+    if (typeof checkpoint.external_action_state === "string" && checkpoint.external_action_state === "unknown") reasons.push("external_action_unresolved");
+  }
+  if (scopeChanges.length > 0) reasons.push("scope_or_roe_delta");
+  const manifest = {
+    context_snapshot_id: `ctx_resume_${randomBytes(16).toString("hex")}`,
+    read_seq: current.read_seq,
+    builder_version: BUILDER_VERSION,
+    source_ids: changed.map((record) => record.id)
+  };
+  return {
+    engagement_id: engagementId, from_read_seq: fromReadSeq, to_read_seq: current.read_seq, read_seq: current.read_seq,
+    records: changed, added, updated, removed, events, scope_changes: scopeChanges, dependency_changes: dependencyChanges,
+    pending_actions: pendingActions, context_manifest: manifest, blocked: reasons.length > 0, replan_required: reasons.length > 0, reasons: [...new Set(reasons)]
+  };
+}
+
+export interface ContextCacheEntry {
+  key: string;
+  engagement_id: string;
+  read_seq: number;
+  source_ids: string[];
+  pack: ContextPack;
+  valid?: boolean;
+  invalidated_at?: string;
+  invalidation_reason?: string;
+}
+
+/** Mark a cached pack invalid when its pinned source or authority sequence changes. */
+export function invalidateContextCache(cache: ContextCacheEntry, changedSourceIds: Iterable<string> = [], currentReadSeq?: number): ContextCacheEntry {
+  const changed = new Set(changedSourceIds);
+  const sourceChanged = cache.source_ids.some((id) => changed.has(id));
+  const sequenceChanged = currentReadSeq !== undefined && currentReadSeq !== cache.read_seq;
+  if (!sourceChanged && !sequenceChanged && cache.valid !== false) return cache;
+  return { ...cache, valid: false, invalidated_at: new Date().toISOString(), invalidation_reason: sourceChanged ? "source_changed" : "authority_sequence_changed" };
+}
+
+export interface SealedDraft {
+  draft_id: string;
+  engagement_id: string;
+  status: "sealed" | "rebased";
+  attempt_ref?: string;
+  generation?: number;
+  owner?: Record<string, unknown>;
+  content: Record<string, unknown>;
+  content_hash: string;
+  sealed_at: string;
+  original_attempt_ref?: string;
+  original_generation?: number;
+  rebase?: { attempt_ref: string; generation: number; read_seq?: number; rebased_at: string };
+}
+
+/** Freeze a private draft while retaining its original Attempt/generation attribution. */
+export function sealDraft(input: { draft_id?: string; engagement_id: string; attempt_ref?: string; generation?: number; owner?: Record<string, unknown>; content: Record<string, unknown> }): SealedDraft {
+  if (!input.engagement_id || !input.content || typeof input.content !== "object" || Array.isArray(input.content)) throw new Error("draft engagement and object content are required");
+  if ((input.attempt_ref === undefined) !== (input.generation === undefined) || (input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 0))) throw new Error("draft attempt and generation attribution must be complete");
+  const sealedAt = new Date().toISOString();
+  return {
+    draft_id: input.draft_id ?? `draft_${randomBytes(16).toString("hex")}`,
+    engagement_id: input.engagement_id, status: "sealed", attempt_ref: input.attempt_ref, generation: input.generation,
+    owner: input.owner, content: structuredClone(input.content), content_hash: digest(input.content), sealed_at: sealedAt,
+    original_attempt_ref: input.attempt_ref, original_generation: input.generation
+  };
+}
+
+/** Explicitly rebase a sealed draft. The old attribution remains available for audit. */
+export function rebaseDraft(draft: SealedDraft, target: { engagement_id: string; attempt_ref: string; generation: number; read_seq?: number }): SealedDraft {
+  if (!draft || draft.status !== "sealed") throw new Error("only a sealed draft may be rebased");
+  if (draft.engagement_id !== target.engagement_id) throw new Error("draft engagement binding mismatch");
+  if (!target.attempt_ref || !Number.isSafeInteger(target.generation) || target.generation < 0 || (target.read_seq !== undefined && (!Number.isSafeInteger(target.read_seq) || target.read_seq < 0))) throw new Error("rebase target requires attempt and generation");
+  if (draft.original_attempt_ref === target.attempt_ref) throw new Error("rebase requires a new Attempt");
+  if (draft.original_generation !== undefined && target.generation <= draft.original_generation) throw new Error("rebase target generation must be newer");
+  if (digest(draft.content) !== draft.content_hash) throw new Error("sealed draft integrity check failed");
+  const rebasedAt = new Date().toISOString();
+  return { ...draft, status: "rebased", attempt_ref: target.attempt_ref, generation: target.generation, content: structuredClone(draft.content), rebase: { attempt_ref: target.attempt_ref, generation: target.generation, read_seq: target.read_seq, rebased_at: rebasedAt } };
 }

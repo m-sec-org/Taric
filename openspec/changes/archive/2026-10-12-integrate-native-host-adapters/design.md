@@ -12,7 +12,7 @@
 
 - 让每个适配器通过受认证的 scoped Core client 调用共享规则。
 - 以 capability manifest 描述真实可用的 lifecycle hooks、host/version、contract version 和 fallback。
-- 让 DeepSeek Harness 与 Hermes 的失败、取消、重载和重复回调可观察、可重试且不重复提交。
+- 让已验证的 DeepSeek session 与 Hermes context/observer 回调可观察、可重试且不重复提交；未提供的生命周期事件保持 unavailable。
 - 让安装管理和诊断反映测试证据，而不是根据声明推断能力。
 
 **Non-Goals:**
@@ -33,7 +33,7 @@
 
 ### 3. 独立桥接与共享契约
 
-DeepSeek 使用锁定 Cordis 版本的生命周期桥接，Hermes 使用 general plugin RPC；二者只映射事件到 Core contract。admission、writer、scope、idempotency 和动作授权保持在 Core/宿主，不在适配器复制。
+DeepSeek 使用锁定 Cordis 版本的 session-event 桥接，Hermes 使用 general plugin RPC 映射 context、tool 和 session observer hooks；二者只映射已存在的宿主事件到 Core contract。admission、writer、scope、idempotency 和动作授权保持在 Core/宿主，不在适配器复制。宿主 API 的 package contract fixture 用于测试事件名称、参数形状和缺失能力；它不等同于启动完整桌面/agent runtime 的 end-to-end 测试。
 
 ### 4. 管理操作的可逆性
 
@@ -41,9 +41,9 @@ install/remove/config 只改 Taric 适配器文件与配置，健康诊断读取
 
 ## Risks / Trade-offs
 
-- [宿主 preview API 变化] → 按 host commit 锁定 manifest，契约测试失败时标记 unsupported 并降级 MCP/CLI。
+- [宿主 preview API 变化或能力不完整] → 按 host commit 锁定 manifest，契约测试失败或 hook 不存在时标记 unavailable/unsupported 并降级 MCP/CLI。
 - [原生插件与宿主共享 OS 身份] → 文档说明 sandbox/profile 责任，transport capability 不宣称 OS 隔离。
-- [回调重复或重载] → 使用 Core idempotency key 与 session identity，测试重载后不会重复 proposal/checkpoint。
+- [回调重复或重载] → 使用事件 identity 做幂等去重；未提供 reload hook 时不声称可靠 resume。
 - [Hermes provider 冲突] → general plugin 不修改 provider 选择，安装诊断明确 MemoryProvider 不属于默认能力。
 
 ## Migration Plan

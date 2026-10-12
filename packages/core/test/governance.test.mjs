@@ -8,7 +8,7 @@ test("admission rejects stale proposal and admits valid proposal as L1", () => {
   const id = uuidv7();
   const first = store.commit({ id, engagement_id, kind: "claim", proposition: "one" }, "L1");
   const proposal = store.submitProposal({ id: uuidv7(), engagement_id, subject_type: "claim", base_version: first.version, content: { id, engagement_id, kind: "claim", proposition: "two" } });
-  store.commit({ id, engagement_id, kind: "claim", proposition: "three" }, "L1");
+  store.commit({ id, engagement_id, kind: "claim", proposition: "three" }, "L1", undefined, { expected_version: first.version });
   const result = store.admitProposal(proposal.id, "sha256:policy", { validate: () => undefined });
   assert.equal(result.ok, false);
   assert.match(result.reason, /stale/);

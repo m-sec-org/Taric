@@ -8,6 +8,11 @@
       "type": "string",
       "format": "uuid"
     },
+    "uuidV7": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
     "timestamp": {
       "type": "string",
       "format": "date-time"
@@ -437,7 +442,12 @@
             "from_ref",
             "predicate",
             "to_ref",
-            "version"
+            "version",
+            "from_type",
+            "to_type",
+            "source_observation_refs",
+            "valid_from",
+            "criticality"
           ],
           "properties": {
             "from_ref": {
@@ -457,7 +467,13 @@
                 "permits",
                 "denies",
                 "routes_to",
-                "depends_on"
+                "depends_on",
+                "derived_from",
+                "implements",
+                "uses",
+                "supported_by",
+                "contradicted_by",
+                "tests"
               ]
             },
             "to_ref": {
@@ -468,7 +484,81 @@
               "minimum": 1
             },
             "source_observation_refs": {
-              "$ref": "#/$defs/uuidList"
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uuid"
+              },
+              "minItems": 1
+            },
+            "from_type": {
+              "enum": [
+                "resource",
+                "resource_revision",
+                "relation",
+                "claim",
+                "test_hypothesis",
+                "attack_path",
+                "work_item",
+                "evidence",
+                "observation",
+                "finding",
+                "coverage",
+                "protective_control",
+                "protective_control_revision",
+                "control_observation",
+                "access_decision_observation",
+                "capability"
+              ]
+            },
+            "to_type": {
+              "enum": [
+                "resource",
+                "resource_revision",
+                "relation",
+                "claim",
+                "test_hypothesis",
+                "attack_path",
+                "work_item",
+                "evidence",
+                "observation",
+                "finding",
+                "coverage",
+                "protective_control",
+                "protective_control_revision",
+                "control_observation",
+                "access_decision_observation",
+                "capability"
+              ]
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "criticality": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "status": {
+              "enum": [
+                "active",
+                "disputed",
+                "stale",
+                "retracted"
+              ]
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "applicable_scope_ref": {
+              "$ref": "#/$defs/uuid"
             }
           }
         }
@@ -568,6 +658,13 @@
           "properties": {
             "title": {
               "$ref": "#/$defs/nonEmptyString"
+            },
+            "scope_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "target_version": {
+              "type": "integer",
+              "minimum": 0
             },
             "status": {
               "enum": [
@@ -708,6 +805,12 @@
             },
             "limitations": {
               "$ref": "#/$defs/stringList"
+            },
+            "reproducibility": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "counter_evidence_refs": {
+              "$ref": "#/$defs/uuidList"
             },
             "applicable_scope_ref": {
               "$ref": "#/$defs/uuid"
@@ -1014,6 +1117,66 @@
             },
             "control_type": {
               "$ref": "#/$defs/nonEmptyString"
+            },
+            "current_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "protected_resource_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "source_observation_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "status": {
+              "enum": [
+                "suspected",
+                "observed",
+                "configured",
+                "changed",
+                "unknown"
+              ]
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "control_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "control_revision_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "policy_snapshot_hash": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "resource_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "authentication_session_revision_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -1059,7 +1222,6 @@
         {
           "type": "object",
           "required": [
-            "control_ref",
             "outcome",
             "observed_at"
           ],
@@ -1068,7 +1230,10 @@
               "$ref": "#/$defs/uuid"
             },
             "control_ref": {
-              "$ref": "#/$defs/uuid"
+              "anyOf": [
+                { "$ref": "#/$defs/uuid" },
+                { "type": "null" }
+              ]
             },
             "operation": {
               "$ref": "#/$defs/nonEmptyString"
@@ -1082,11 +1247,7 @@
                 "suspected",
                 "not_observed",
                 "inconclusive",
-                "changed",
-                "passed",
-                "blocked",
-                "failed",
-                "unknown"
+                "changed"
               ]
             },
             "decision_layer": {
@@ -1190,6 +1351,38 @@
             },
             "network_condition": {
               "type": "string"
+            },
+            "control_revision_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "policy_snapshot_hashes": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "resource_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "authentication_session_revision_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tenant_ref": {
+              "$ref": "#/$defs/uuid"
             }
           }
         }
@@ -1401,8 +1594,14 @@
           "type": "object",
           "required": [
             "work_item_ref",
+            "work_run_ref",
             "attempt_ref",
             "generation",
+            "target_version",
+            "work_item_version",
+            "scope_version",
+            "owner",
+            "lease_expires_at",
             "source_read_seq",
             "completed_steps",
             "next_steps",
@@ -1411,7 +1610,13 @@
             "negative_results",
             "unresolved_work",
             "host_decision_refs",
-            "external_action_state"
+            "external_action_state",
+            "budget",
+            "draft_refs",
+            "handoff_refs",
+            "action_refs",
+            "tool_result_refs",
+            "context_manifest"
           ],
           "properties": {
             "work_run_ref": {
@@ -1424,6 +1629,14 @@
               "$ref": "#/$defs/uuid"
             },
             "target_version": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "work_item_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scope_version": {
               "type": "integer",
               "minimum": 0
             },
@@ -1475,6 +1688,12 @@
             "next_steps": {
               "$ref": "#/$defs/stringList"
             },
+            "action_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "tool_result_refs": {
+              "$ref": "#/$defs/stringList"
+            },
             "budget": {
               "$ref": "#/$defs/budget"
             },
@@ -1517,6 +1736,9 @@
             },
             "rationale": {
               "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/nonEmptyString"
             },
             "uncertainty": {
               "type": "string"
@@ -1729,6 +1951,757 @@
         }
       },
       "additionalProperties": false
+    },
+    "resourceRevision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "resource_ref",
+            "revision",
+            "logical_identity",
+            "variant",
+            "content_hash",
+            "source_observation_refs",
+            "valid_from"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/uuidV7"
+            },
+            "resource_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "logical_identity": {
+              "type": "object",
+              "minProperties": 1
+            },
+            "variant": {
+              "type": "object",
+              "minProperties": 1,
+              "properties": {
+                "method": {
+                  "$ref": "#/$defs/nonEmptyString"
+                },
+                "path_template": {
+                  "$ref": "#/$defs/nonEmptyString"
+                },
+                "parameter_set_hash": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "parameters": {
+                  "$ref": "#/$defs/stringList"
+                },
+                "content_type": {
+                  "$ref": "#/$defs/nonEmptyString"
+                },
+                "principal_ref": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "tenant_ref": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "identity_ref": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "authentication_session_revision_ref": {
+                  "$ref": "#/$defs/uuid"
+                }
+              },
+              "additionalProperties": false
+            },
+            "content_hash": {
+              "$ref": "#/$defs/sha256"
+            },
+            "source_observation_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uuid"
+              },
+              "minItems": 1
+            },
+            "observed_at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "supersedes": {
+              "$ref": "#/$defs/uuid"
+            },
+            "raw_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "object_hash"
+                ],
+                "properties": {
+                  "object_hash": {
+                    "$ref": "#/$defs/sha256"
+                  },
+                  "start": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "end": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "description": "Immutable content and applicability snapshot for one variant of a stable logical resource. The record ID is UUIDv7; display_id is an optional Core-assigned TAR alias."
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "testHypothesis": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "title",
+            "proposition",
+            "status",
+            "version",
+            "source_observation_refs",
+            "limitations",
+            "valid_from",
+            "criticality"
+          ],
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "proposition": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "status": {
+              "enum": [
+                "proposed",
+                "supported",
+                "contradicted",
+                "inconclusive",
+                "stale",
+                "replan_required",
+                "retracted",
+                "superseded"
+              ]
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "source_observation_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "resource_revision_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "claim_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "coverage_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "depends_on": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "evidence_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "limitations": {
+              "$ref": "#/$defs/stringList"
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "criticality": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "applicable_scope_ref": {
+              "$ref": "#/$defs/uuid"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "attackPath": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "title",
+            "status",
+            "version",
+            "steps",
+            "source_observation_refs",
+            "valid_from",
+            "criticality"
+          ],
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "status": {
+              "enum": [
+                "proposed",
+                "active",
+                "stale",
+                "retracted",
+                "superseded"
+              ]
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "subject_type",
+                  "subject_ref"
+                ],
+                "properties": {
+                  "subject_type": {
+                    "enum": [
+                      "resource_revision",
+                      "relation",
+                      "claim",
+                      "finding",
+                      "capability"
+                    ]
+                  },
+                  "subject_ref": {
+                    "$ref": "#/$defs/uuid"
+                  },
+                  "label": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "source_observation_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "depends_on": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "criticality": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "applicable_scope_ref": {
+              "$ref": "#/$defs/uuid"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "patchSet": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "base_generation",
+            "read_set",
+            "write_set",
+            "operations",
+            "source_refs",
+            "content_hash",
+            "merge_status"
+          ],
+          "properties": {
+            "base_generation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "read_set": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "entity_ref",
+                  "version"
+                ],
+                "properties": {
+                  "entity_ref": {
+                    "$ref": "#/$defs/uuid"
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "write_set": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "entity_ref",
+                  "base_version"
+                ],
+                "properties": {
+                  "entity_ref": {
+                    "$ref": "#/$defs/uuid"
+                  },
+                  "base_version": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "fields": {
+                    "$ref": "#/$defs/stringList"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "upsert_resource",
+                  "upsert_relation",
+                  "replace_property",
+                  "add_relation",
+                  "remove_relation",
+                  "revise_claim",
+                  "revise_hypothesis",
+                  "attach_observation"
+                ]
+              }
+            },
+            "source_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "content_hash": {
+              "$ref": "#/$defs/sha256"
+            },
+            "merge_status": {
+              "enum": [
+                "pending",
+                "merged",
+                "conflict"
+              ]
+            },
+            "host_id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "agent_id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "run_id": {
+              "$ref": "#/$defs/uuid"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "conflict": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "subject_ref",
+            "field_path",
+            "base_version",
+            "current_version",
+            "candidates",
+            "source_refs",
+            "diff",
+            "merge_status"
+          ],
+          "properties": {
+            "subject_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "field_path": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "base_version": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "current_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "base_value": {},
+            "candidates": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "required": [
+                  "value",
+                  "source_refs"
+                ],
+                "properties": {
+                  "value": {},
+                  "source_refs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/$defs/uuid"
+                    }
+                  },
+                  "patch_ref": {
+                    "$ref": "#/$defs/uuid"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "diff": {
+              "type": "object"
+            },
+            "source_refs": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "merge_status": {
+              "enum": [
+                "open",
+                "resolved",
+                "accepted",
+                "rejected",
+                "deferred"
+              ]
+            },
+            "resolution_ref": {
+              "$ref": "#/$defs/uuid"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "impactEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "source_ref",
+            "changed_dependency_ref",
+            "affected_refs",
+            "criticality",
+            "disposition",
+            "reason_code"
+          ],
+          "properties": {
+            "source_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "changed_dependency_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "affected_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "criticality": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "disposition": {
+              "enum": [
+                "stale_for_current_use",
+                "requires_revalidation",
+                "revoked"
+              ]
+            },
+            "reason_code": {
+              "enum": [
+                "resource_changed",
+                "relation_changed",
+                "claim_withdrawn",
+                "control_changed",
+                "policy_changed",
+                "identity_changed",
+                "other"
+              ]
+            },
+            "continuation": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "pending_watermark": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "protectiveControlRevision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "control_ref",
+            "revision",
+            "layer",
+            "protected_resource_revision_refs",
+            "identity_conditions",
+            "network_conditions",
+            "valid_from",
+            "source_observation_refs"
+          ],
+          "properties": {
+            "control_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "layer": {
+              "$ref": "#/$defs/decisionLayer"
+            },
+            "policy_snapshot_hash": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "policy_artifact_ref": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "protected_resource_revision_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "identity_conditions": {
+              "$ref": "#/$defs/stringList"
+            },
+            "network_conditions": {
+              "$ref": "#/$defs/stringList"
+            },
+            "valid_from": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "valid_until": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "source_observation_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "supersedes": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "controlApplicabilityEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/recordBase"
+        },
+        {
+          "$ref": "#/$defs/coreManagedFields"
+        },
+        {
+          "type": "object",
+          "required": [
+            "subject_refs",
+            "changed_dependency_ref",
+            "affected_current_view_refs",
+            "disposition",
+            "reason_code",
+            "committed_at"
+          ],
+          "properties": {
+            "subject_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            },
+            "changed_dependency_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "previous_policy_hash": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "current_policy_hash": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "affected_current_view_refs": {
+              "$ref": "#/$defs/uuidList"
+            },
+            "disposition": {
+              "enum": [
+                "stale_for_current_use",
+                "requires_revalidation",
+                "revoked"
+              ]
+            },
+            "reason_code": {
+              "enum": [
+                "policy_changed",
+                "control_changed",
+                "identity_changed",
+                "resource_changed",
+                "other"
+              ]
+            },
+            "committed_at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
     }
   }
 }

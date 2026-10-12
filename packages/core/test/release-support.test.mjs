@@ -10,6 +10,8 @@ test("support documentation and capability diagnostics match the runtime manifes
   const diagnostics = createCoreService(store).capabilityStatus(createPrincipal("operator", "release-check"));
   assert.equal(diagnostics.ok, true);
   assert.deepEqual(diagnostics.data.compatibility_manifest, TARIC_COMPATIBILITY_MANIFEST);
+  assert.ok(diagnostics.data.supported_operations.includes("work.renew"));
+  assert.ok(diagnostics.data.supported_operations.includes("error.report"));
   for (const capability of TARIC_COMPATIBILITY_MANIFEST.capabilities.filter((entry) => entry.state === "unsupported")) {
     assert.ok(guide.includes(capability.id), `guide documents ${capability.id}`);
     assert.ok(capability.follow_up, `${capability.id} has a follow-up owner`);
@@ -23,7 +25,7 @@ test("integration guide assigns Artifact retention and authorization to the host
   const guide = await readFile(new URL("../../../docs/agent-integration.md", import.meta.url), "utf8");
   assert.match(guide, /Artifact bodies, retention, and redaction/);
   assert.match(guide, /does not execute a target action or grant authorization/);
-  assert.match(guide, /remote push remains unsupported/);
+  assert.match(guide, /remote push requires a private repository/);
   assert.doesNotMatch(guide, /current version has no runnable MCP server|projection function does not create Git commit/i);
 });
 

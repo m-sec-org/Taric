@@ -1,15 +1,16 @@
-import { API_CONTRACT_VERSION, createCoreServiceForPath, type CoreService, type Principal } from "@taric/core";
+import { API_CONTRACT_VERSION, createCoreServiceForPath, createPrincipal, type CoreService, type Principal } from "@taric/core";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "capture.observation", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "adapter.status", "capability.status"] as const;
+export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "capture.observation", "control.list", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
 
 /** 二级动词白名单。只有这里列出的组合才会被转发到 Core，未知组合不猜测。 */
 export const cliSubcommands: Readonly<Record<string, readonly string[]>> = Object.freeze({
   context: ["build", "query"],
   action: ["recommend", "host-decision", "host-result", "reconcile"],
   audit: ["verify", "doctor", "reconcile"],
+  adapter: ["install", "remove", "config", "health", "version"],
 });
 
 export type CliExitCode = 0 | 1 | 2;
@@ -46,6 +47,16 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") return { exitCode: 0, stdout: `taric ${API_CONTRACT_VERSION}\n${cliHelp()}\n`, stderr: "" };
   if (argv[0] === "--version" || argv[0] === "-V") return { exitCode: 0, stdout: `${API_CONTRACT_VERSION}\n`, stderr: "" };
   const operation = normalizeCliOperation(argv);
+  if (argv[0] === "adapter" && ["health", "version"].includes(argv[1] ?? "")) {
+    if (argv[1] === "version") return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION } })}\n`, stderr: "" };
+    const health = service.dispatch("capability.status", createPrincipal(principal.role, principal.id, principal.engagement_id), {});
+    const manifest = health.ok ? (health.data as Record<string, unknown>).compatibility_manifest : undefined;
+    let adapter_config: Record<string, unknown> = {};
+    const configPath = process.env.TARIC_ADAPTER_CONFIG ?? join(homedir(), ".taric", "adapters.json");
+    try { adapter_config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>; } catch { /* absent config means no locally installed adapter */ }
+    const healthReport = { compatibility_manifest: manifest, core_connected: health.ok, configured_adapters: adapter_config.adapters ?? {}, adapter_config_path: configPath };
+    return { exitCode: health.ok ? 0 : 1, stdout: health.ok ? `${JSON.stringify({ ok: true, data: healthReport })}\n` : "", stderr: health.ok ? "" : `${JSON.stringify(health)}\n` };
+  }
   const consumed = cliSubcommands[argv[0] ?? ""] && argv[1] ? 2 : 1;
   const args = argv.slice(consumed);
   if (argv[0] === "--json" && argv.length === 1) return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: API_CONTRACT_VERSION, commands: cliCommands } })}\n`, stderr: "" };
@@ -53,7 +64,7 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   let request: Record<string, unknown>;
   try { request = JSON.parse(json) as Record<string, unknown>; } catch { return { exitCode: 2, stdout: "", stderr: JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be valid JSON" } }) + "\n" }; }
   if (Array.isArray(request) || typeof request !== "object") return { exitCode: 2, stdout: "", stderr: `${JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be a JSON object" } })}\n` };
-  const response = service.dispatch(operation, { ...principal, transport_verified: true }, request);
+  const response = service.dispatch(operation, createPrincipal(principal.role, principal.id, principal.engagement_id), request);
   return { exitCode: response.ok ? 0 : 1, stdout: response.ok ? `${JSON.stringify(response)}\n` : "", stderr: response.ok ? "" : `${JSON.stringify(response)}\n` };
 }
 
@@ -69,6 +80,7 @@ export function normalizeCliOperation(argv: string[]): string {
     query: "query", review: "review.submit", admit: "admission.evaluate", capture: "capture.observation",
     "capability.status": "capability.status", "adapter.status": "adapter.status",
   };
+  if (argv[0] === "adapter") return argv[1] && ["install", "remove", "config"].includes(argv[1]) ? `adapter.${argv[1]}` : "adapter.invalid";
   const verb = cliSubcommands[argv[0] ?? ""];
   if (verb) return argv[1] && verb.includes(argv[1]) ? `${argv[0]}.${argv[1]}` : `${argv[0]}.invalid`;
   return aliases[argv[0] ?? ""] ?? argv[0] ?? "";

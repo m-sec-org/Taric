@@ -60,6 +60,12 @@ test("100-worker multi-engagement gate keeps IDs, events, CAS and projection pub
     const cas = stores[1].compareAndSet(target.id, target.version, { statement: "updated" });
     assert.equal(cas.version, target.version + 1);
     assert.equal(cas.display_id, target.display_id, "CAS preserves the alias");
+    const concurrent = await Promise.allSettled([
+      Promise.resolve().then(() => stores[0].compareAndSet(target.id, cas.version, { statement: "concurrent-a" })),
+      Promise.resolve().then(() => stores[1].compareAndSet(target.id, cas.version, { statement: "concurrent-b" })),
+    ]);
+    assert.equal(concurrent.filter((result) => result.status === "fulfilled").length, 1, "only one writer may commit from the same base version");
+    assert.equal(concurrent.filter((result) => result.status === "rejected").length, 1, "the losing writer receives a version conflict");
 
     const first = await publishProjection(stores[0], { engagementId: engagements[0], outputDir: projectionDir, localGit: false });
     const second = await publishProjection(stores[1], { engagementId: engagements[0], outputDir: projectionDir, localGit: false });
@@ -193,7 +199,7 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
     const work_item_id = uuidv7();
     store.commit({ id: work_item_id, engagement_id, kind: "work_item", goal: "verify admin access", acceptance: ["evidence recorded"], risk_budget: { actions: 1 } }, "L2");
     const run = store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi", agent_id: "worker-a", ttl_ms: 60_000 });
-    const checkpoint = store.commitCheckpoint(run.run_id, run.generation, "pi", { completed_steps: ["inventory"], pending_steps: ["verify"], budget: { actions: 1 } });
+    const checkpoint = store.commitCheckpoint(run.run_id, run.generation, "pi", { work_item_ref: work_item_id, work_run_ref: run.run_id, attempt_ref: run.attempt_ref, generation: run.generation, target_version: run.target_version, work_item_version: run.work_item_version, scope_version: run.scope_version, owner: run.owner, lease_expires_at: run.lease_expires_at, source_read_seq: run.read_seq, completed_steps: ["inventory"], next_steps: ["verify"], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: { actions: 1 }, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.read_seq, builder_version: "test" } });
     const pack = buildContextPack(store, engagement_id, 20_000, { workItemId: work_item_id, workerRole: "worker" });
     assert.ok(pack.sources.includes(work_item_id));
     const current = store.getWorkRun(run.run_id);
@@ -202,8 +208,10 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
     assert.equal(current.status, "checkpointed");
     assert.ok(pack.sources.includes(work_item_id));
 
-    const action = store.recordActionIntent({ action_id: uuidv7(), run_id: run.run_id, generation: run.generation, mode: "authorized_autonomous", status: "unknown", host_decision_ref: "host:decision:1" });
-    assert.equal(action.status, "unknown");
+    const action = store.recordActionIntent({ action_id: uuidv7(), run_id: run.run_id, generation: run.generation, mode: "authorized_autonomous", status: "recommended", target: "/admin", method: "GET", host_id: "pi" });
+    store.recordActionIntent({ action_id: action.action_id, run_id: run.run_id, generation: run.generation, mode: "authorized_autonomous", status: "authorized", host_decision_ref: "host:decision:1", host_id: "pi" });
+    store.recordActionIntent({ action_id: action.action_id, run_id: run.run_id, generation: run.generation, mode: "authorized_autonomous", status: "unknown", host_decision_ref: "host:decision:1", host_id: "pi" });
+    assert.equal(store.getActionIntent(action.action_id).status, "unknown");
     const pending = store.pendingActionIntents(run.run_id);
     assert.equal(pending.length, 1);
     assert.equal(pending.some((item) => item.status === "executed"), false, "an unknown external action is never auto-replayed");
@@ -215,7 +223,7 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
     assert.equal(late.status, "late_result_quarantine");
     assert.equal(late.generation, run.generation - 1, "a late result keeps its original generation attribution");
     assert.equal(store.pendingActionIntents(run.run_id).some((item) => item.result_ref === "host:result:late"), false, "a quarantined late result never enters current action state");
-    assert.throws(() => store.recordActionIntent({ run_id: run.run_id, generation: run.generation - 1, mode: "authorized_autonomous", status: "executed" }), /stale action intent generation/, "a stale generation cannot attach a result to the current run");
+    assert.throws(() => store.recordActionIntent({ run_id: run.run_id, generation: run.generation - 1, mode: "authorized_autonomous", status: "executed", host_id: "pi" }), /stale action intent generation/, "a stale generation cannot attach a result to the current run");
   } finally {
     store.close();
   }

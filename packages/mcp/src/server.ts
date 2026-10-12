@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, createCoreServiceForPath, type CoreService, type Principal } from "@taric/core";
+import { API_CONTRACT_VERSION, createCoreServiceForPath, createPrincipal, type CoreService, type Principal } from "@taric/core";
 
 export const modelTools = ["context.query", "resource.query", "evidence.query", "proposal.submit", "checkpoint.propose", "action.recommend"] as const;
 
@@ -7,11 +7,12 @@ const toolSchemas: Record<(typeof modelTools)[number], { required: string[]; pro
   "resource.query": { required: ["engagement_id"], properties: { engagement_id: { type: "string" }, as_of: { type: "integer", minimum: 0 } } },
   "evidence.query": { required: ["engagement_id"], properties: { engagement_id: { type: "string" }, as_of: { type: "integer", minimum: 0 } } },
   "proposal.submit": { required: ["engagement_id", "subject_type", "content"], properties: { engagement_id: { type: "string" }, subject_type: { type: "string" }, base_version: { type: "integer", minimum: 0 }, content: { type: "object" } } },
-  "checkpoint.propose": { required: ["engagement_id", "work_run_id", "checkpoint"], properties: { engagement_id: { type: "string" }, work_run_id: { type: "string" }, checkpoint: { type: "object" } } },
+  "checkpoint.propose": { required: ["engagement_id", "work_run_id", "generation", "checkpoint"], properties: { engagement_id: { type: "string" }, work_run_id: { type: "string" }, generation: { type: "integer", minimum: 1 }, checkpoint: { type: "object" } } },
   "action.recommend": { required: ["engagement_id", "target", "method", "rationale"], properties: { engagement_id: { type: "string" }, work_run_id: { type: "string" }, target: { type: "string" }, method: { type: "string" }, rationale: { type: "string" } } },
 };
 
 export function createMcpServer(service: CoreService, principal: Principal = { id: "mcp-model", role: "model", transport_verified: true }) {
+  const authenticatedPrincipal = createPrincipal(principal.role, principal.id, principal.engagement_id);
   return {
     initialize(params: Record<string, unknown>) {
       const requested = typeof params.protocolVersion === "string" ? params.protocolVersion : "2024-11-05";
@@ -26,7 +27,7 @@ export function createMcpServer(service: CoreService, principal: Principal = { i
       if (missing.length) return toolError("validation_error", `missing required arguments: ${missing.join(", ")}`);
       const unexpected = Object.keys(arguments_).filter((key) => !(key in schema.properties));
       if (unexpected.length) return toolError("validation_error", `unexpected arguments: ${unexpected.join(", ")}`);
-      const response = service.dispatch(params.name, principal, params.arguments ?? {});
+      const response = service.dispatch(params.name, authenticatedPrincipal, params.arguments ?? {});
       return { content: [{ type: "text", text: JSON.stringify(response) }], isError: !response.ok };
     }
   };
