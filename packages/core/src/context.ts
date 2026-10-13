@@ -124,7 +124,7 @@ interface CursorState {
   resume_delta?: ContextResumeSummary;
 }
 const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-const sensitiveField = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|hidden_reasoning|chain_of_thought)/i;
+const sensitiveField = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|hidden_reasoning|chain_of_thought|host_ref|location|summary|cookie|header|url)/i;
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)]));
@@ -133,9 +133,16 @@ function canonical(value: unknown): unknown {
 function safeValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(safeValue);
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+  const entries = Object.entries(value as Record<string, unknown>)
     .filter(([key]) => !sensitiveField.test(key))
-    .map(([key, item]) => [key, safeValue(item)]));
+    .map(([key, item]) => [key, safeValue(item)] as const);
+  const artifactRef = (value as Record<string, unknown>).content_ref;
+  if (typeof artifactRef === "string") {
+    const allowed = new Set(["content_ref", "artifact_id", "version", "storage_mode", "content_status", "integrity_status", "payload_kind", "media_type", "byte_length", "chunk_count", "content_hash", "manifest_hash", "captured_at", "stored_at", "provenance_ref", "derived_from", "child_refs"]);
+    return Object.fromEntries(entries.filter(([key]) => allowed.has(key)));
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "host_ref")) return undefined;
+  return Object.fromEntries(entries);
 }
 const estimate = (record: CanonicalRecord) => JSON.stringify(record).length;
 function allowedRecord(record: CanonicalRecord): CanonicalRecord | undefined {

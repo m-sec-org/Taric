@@ -30,10 +30,124 @@ export type ProposalStatus = "pending" | "rejected" | "admitted" | "needs_eviden
 export type DependencyCriticality = "low" | "medium" | "high" | "critical";
 
 export interface ArtifactReference {
-  host_ref: string;
+  host_ref?: string;
   content_hash?: Sha256;
+  manifest_hash?: Sha256;
+  content_ref?: string;
+  artifact_id?: Uuid;
+  version?: number;
+  storage_mode?: "external" | "taric_stored";
+  content_status?: "external" | "staged" | "available" | "unavailable" | "integrity_failed" | "quarantined" | "deleted";
+  integrity_status?: "unverified" | "verified" | "mismatch" | "missing";
+  payload_kind?: "text" | "binary" | "manifest";
   location?: string;
   media_type?: string;
+  charset?: string;
+  content_encoding?: string;
+  transfer_encoding?: string;
+  captured_at?: Timestamp;
+  stored_at?: Timestamp;
+  summary_ref?: string;
+  summary?: string;
+  byte_length?: number;
+  chunk_count?: number;
+  provenance_ref?: Uuid;
+  derived_from?: Uuid;
+  child_refs?: Uuid[];
+}
+
+export interface ArtifactSessionBinding {
+  engagement_id: Uuid;
+  session_id: string;
+  root: string;
+  binding_id?: string;
+  created_at?: Timestamp;
+  manifest_hash?: Sha256;
+}
+
+export type ArtifactPayloadKind = "text" | "binary" | "manifest";
+
+export interface ArtifactStoreBegin {
+  engagement_id: Uuid;
+  session_id: string;
+  payload_kind: ArtifactPayloadKind;
+  media_type: string;
+  storage_mode?: "external" | "taric_stored";
+  charset?: string;
+  content_encoding?: string;
+  transfer_encoding?: string;
+  captured_at?: Timestamp;
+  summary_ref?: string;
+  summary?: string;
+  expected_bytes?: number;
+  expected_hash?: Sha256;
+  category?: string;
+  host_ref?: string;
+  work_run_id?: Uuid;
+  attempt_id?: Uuid;
+  generation?: number;
+  base_content_ref?: string;
+  parent_ref?: string;
+  derived_from?: string;
+  child_refs?: string[];
+  idempotency_key?: string;
+}
+
+export interface ArtifactStoreAppend {
+  engagement_id: Uuid;
+  session_id: string;
+  upload_id: string;
+  ordinal: number;
+  offset?: number;
+  chunk_hash: Sha256;
+  data: string;
+  encoding?: "base64";
+  idempotency_key?: string;
+}
+
+export interface ArtifactStoreCommit {
+  engagement_id: Uuid;
+  session_id: string;
+  upload_id: string;
+  total_bytes: number;
+  chunk_count?: number;
+  content_hash: Sha256;
+  manifest_hash?: Sha256;
+  idempotency_key?: string;
+}
+
+export interface ArtifactContentRead {
+  engagement_id: Uuid;
+  session_id: string;
+  content_ref: string;
+  offset?: number;
+  length?: number;
+  chunk_cursor?: string;
+  include_content?: boolean;
+  max_response_bytes?: number;
+}
+
+export interface ArtifactContentList {
+  engagement_id: Uuid;
+  session_id: string;
+  cursor?: string;
+  page_size?: number;
+  category?: string;
+  media_type?: string;
+  work_run_id?: Uuid;
+  include_content?: boolean;
+}
+
+export interface ArtifactSessionOutput {
+  engagement_id: Uuid;
+  session_id: string;
+  cursor?: string;
+  execution_cursor?: string;
+  page_size?: number;
+  include_content?: boolean;
+  max_response_bytes?: number;
+  work_run_id?: Uuid;
+  attempt_id?: Uuid;
 }
 
 export interface Provenance {
@@ -461,6 +575,8 @@ export interface Attempt extends RecordBase, CoreManagedFields {
   heartbeat_at?: Timestamp;
   started_at?: Timestamp;
   ended_at?: Timestamp;
+  task_session_ref?: string;
+  artifact_refs?: ArtifactReference[];
 }
 
 export interface WorkRun extends RecordBase, CoreManagedFields {
@@ -474,6 +590,8 @@ export interface WorkRun extends RecordBase, CoreManagedFields {
   checkpoint_id?: Uuid;
   read_seq?: number;
   pending_action_refs?: Uuid[];
+  task_session_ref?: string;
+  artifact_refs?: ArtifactReference[];
 }
 
 export interface Checkpoint extends RecordBase, CoreManagedFields {
@@ -502,6 +620,8 @@ export interface Checkpoint extends RecordBase, CoreManagedFields {
   draft_refs: Uuid[];
   handoff_refs: Uuid[];
   context_manifest: ContextManifest;
+  task_session_ref?: string;
+  artifact_refs?: ArtifactReference[];
 }
 
 export interface ActionIntent extends RecordBase, CoreManagedFields {

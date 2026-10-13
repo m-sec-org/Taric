@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "capture.observation", "control.list", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
+export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "capture.observation", "control.list", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "artifact.session.bind", "artifact.store.begin", "artifact.store.append", "artifact.store.commit", "artifact.metadata", "artifact.content.read", "artifact.content.list", "artifact.session.output", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
 
 /** 二级动词白名单。只有这里列出的组合才会被转发到 Core，未知组合不猜测。 */
 export const cliSubcommands: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -20,6 +20,8 @@ export interface CliConfig {
   principal_id?: string;
   principal_role?: "operator" | "model" | "host";
   engagement_id?: string;
+  content_read_enabled?: boolean;
+  content_root?: string;
   authority?: SharedAuthorityConfiguration;
   deployment?: DeploymentGuardInput;
 }
@@ -60,10 +62,11 @@ export function discoverCliConfig(env: NodeJS.ProcessEnv = process.env, cwd = pr
     const config = parsed as Record<string, unknown>;
     const role = config.principal_role;
     if (role !== undefined && role !== "operator" && role !== "model" && role !== "host") throw new Error(`invalid principal_role in Taric config: ${path}`);
-    for (const key of ["db_path", "principal_id", "engagement_id"]) if (config[key] !== undefined && typeof config[key] !== "string") throw new Error(`invalid ${key} in Taric config: ${path}`);
+    for (const key of ["db_path", "principal_id", "engagement_id", "content_root"]) if (config[key] !== undefined && typeof config[key] !== "string") throw new Error(`invalid ${key} in Taric config: ${path}`);
+    if (config.content_read_enabled !== undefined && typeof config.content_read_enabled !== "boolean") throw new Error(`invalid content_read_enabled in Taric config: ${path}`);
     if (config.authority !== undefined && (!config.authority || typeof config.authority !== "object" || Array.isArray(config.authority))) throw new Error(`invalid authority in Taric config: ${path}`);
     if (config.deployment !== undefined && (!config.deployment || typeof config.deployment !== "object" || Array.isArray(config.deployment))) throw new Error(`invalid deployment in Taric config: ${path}`);
-    return { config: { db_path: config.db_path as string | undefined, principal_id: config.principal_id as string | undefined, principal_role: role as CliConfig["principal_role"], engagement_id: config.engagement_id as string | undefined, authority: config.authority as SharedAuthorityConfiguration | undefined, deployment: config.deployment as DeploymentGuardInput | undefined }, path };
+    return { config: { db_path: config.db_path as string | undefined, principal_id: config.principal_id as string | undefined, principal_role: role as CliConfig["principal_role"], engagement_id: config.engagement_id as string | undefined, content_read_enabled: config.content_read_enabled as boolean | undefined, content_root: config.content_root as string | undefined, authority: config.authority as SharedAuthorityConfiguration | undefined, deployment: config.deployment as DeploymentGuardInput | undefined }, path };
   }
   return { config: {} };
 }
@@ -85,17 +88,19 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   const consumed = cliSubcommands[argv[0] ?? ""] && argv[1] ? 2 : 1;
   const args = argv.slice(consumed);
   if (argv[0] === "--json" && argv.length === 1) return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: API_CONTRACT_VERSION, commands: cliCommands } })}\n`, stderr: "" };
-  const json = args.join(" ").trim() || "{}";
+  const includeContent = args.includes("--include-content");
+  const json = args.filter((arg) => arg !== "--include-content").join(" ").trim() || "{}";
   let request: Record<string, unknown>;
   try { request = JSON.parse(json) as Record<string, unknown>; } catch { return { exitCode: 2, stdout: "", stderr: JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be valid JSON" } }) + "\n" }; }
   if (Array.isArray(request) || typeof request !== "object") return { exitCode: 2, stdout: "", stderr: `${JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be a JSON object" } })}\n` };
-  const response = service.dispatch(operation, createPrincipal(principal.role, principal.id, principal.engagement_id), request);
+  if (includeContent) request.include_content = true;
+  const response = service.dispatch(operation, createPrincipal(principal.role, principal.id, principal.engagement_id, principal.capabilities ?? []), request);
   return { exitCode: response.ok ? 0 : 1, stdout: response.ok ? `${JSON.stringify(response)}\n` : "", stderr: response.ok ? "" : `${JSON.stringify(response)}\n` };
 }
 
-export function createCliService(directory = join(tmpdir(), "taric-cli")) {
+export function createCliService(directory = join(tmpdir(), "taric-cli"), contentRoot?: string) {
   mkdirSync(dirname(directory), { recursive: true });
-  return createCoreServiceForPath(directory);
+  return createCoreServiceForPath(directory, contentRoot);
 }
 
 /** 便于宿主以单个命令字符串调用，同时保持策略集中在 Core。 */
@@ -147,10 +152,11 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     process.stderr.write(`${JSON.stringify({ ok: false, error: { code: diagnostic.code, message: diagnostic.message, follow_up: diagnostic.follow_up }, data: diagnostic })}\n`);
     return 1;
   }
-  const service = createCliService(startup.dbPath);
+  const service = createCliService(startup.dbPath, process.env.TARIC_CONTENT_ROOT ?? config.content_root);
   const role = (process.env.TARIC_PRINCIPAL_ROLE ?? config.principal_role ?? "operator") as "operator" | "model" | "host";
   const engagement_id = process.env.TARIC_ENGAGEMENT_ID ?? config.engagement_id;
-  const result = await runCli(argv, service, { id: process.env.TARIC_PRINCIPAL_ID ?? config.principal_id ?? "operator-local", role, engagement_id: engagement_id === "" ? undefined : engagement_id });
+  const contentReadEnabled = process.env.TARIC_CONTENT_READ_ENABLED === "true" || config.content_read_enabled === true;
+  const result = await runCli(argv, service, { id: process.env.TARIC_PRINCIPAL_ID ?? config.principal_id ?? "operator-local", role, engagement_id: engagement_id === "" ? undefined : engagement_id, capabilities: contentReadEnabled ? ["content_read"] : [] });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   return result.exitCode;

@@ -8,7 +8,7 @@ This runbook applies only when an operator explicitly enables the `multi_host_au
 - PostgreSQL transactions, constraints, sequences, lease expiry, and fencing generation are the source of shared ordering.
 - SQLite is local single-host authority only. A shared SQLite file, NFS lock, independent SQLite replicas, or shared Git clone is not a shared authority.
 - Markdown and Git are derived projections. They do not coordinate writers, leases, event ordering, or recovery.
-- PostgreSQL stores Taric authority state only. Artifact bodies and credentials remain in the host application.
+- PostgreSQL stores Taric authority state. Artifact bodies may remain external or be explicitly stored in a host-bound Taric task-session spool. The spool is local to the host/session root configured for the Core instance; it is not coordinated by PostgreSQL, and shared hosts must provide their own durable, isolated spool roots and backup procedure. Credentials remain opaque payload bytes and are never interpreted or exposed by default.
 
 ## Enablement checklist
 
@@ -19,6 +19,14 @@ This runbook applies only when an operator explicitly enables the `multi_host_au
 5. Create a verified backup and restore it into a temporary target. Confirm schema version, source and recovered sequence, integrity hash, Engagement identity, provenance, revision history, and unresolved errors.
 6. Generate the shared-authority release evidence report. Enablement is valid only when deployment checks, required gates, conformance, and backup/restore evidence all pass.
 7. Start hosts and inspect diagnostics for the selected backend, schema and policy digests, host count, server-fenced lease mode, and enabled state. Verify every host resolves to the same authority service.
+
+## Artifact spool in a shared deployment
+
+Artifact APIs use the same Engagement/session authorization on every host, but PostgreSQL does not store or coordinate payload bytes. Before enabling a host, bind each task session to a root beneath that host's configured content root. A host may instead submit an external `host_ref`; Taric never fetches it. Do not point two hosts at the same writable spool unless the deployment has an independently tested filesystem and locking design; a shared PostgreSQL authority alone does not make file publication atomic.
+
+The host/operator sequence is `artifact.session.bind` → `artifact.store.begin` → ordered `artifact.store.append` (base64 transport, at most 64 MiB decoded per chunk) → `artifact.store.commit`. Committed files use UTC date and server-derived ID sharding, native payload chunks, a JSON hash manifest, and a Markdown metadata sidecar. `artifact.content.list` and `artifact.session.output` are bounded metadata pages. `artifact.content.read` requires the separate `content_read` capability and returns at most one bounded chunk with a continuation cursor. MCP and ordinary model context never read payload bytes.
+
+Coordinate PostgreSQL backups with the corresponding host spool backup. Artifact publication uses staged files and authority publication markers; restart and doctor/reconcile compare markers, manifests, hashes, and catalog rows in bounded batches. Reads fail closed when a manifest/chunk is missing or its hash differs, and reconciliation reports unavailable/integrity states without silently deleting or recreating files. Execution sidecars and WorkRun-fenced session output are bounded and remain scoped to the registered task session. A shared PostgreSQL authority does not make two writable host spool roots safe; use one bound root per host unless filesystem locking has been independently verified.
 
 ## Migration from SQLite
 

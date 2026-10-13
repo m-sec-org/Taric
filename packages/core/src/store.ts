@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { uuidv7 } from "./identity.js";
 import { DEFAULT_ADMISSION_POLICY, evaluateAdmission, policyDigest, riskClassOf, type AdmissionDecision, type AdmissionPolicy, type AdmissionReview, type PinnedEvidence, type RiskClass } from "./policy.js";
 import { contractNames, SCHEMA_VERSION, type ContractName } from "@taric/schemas";
@@ -154,6 +155,29 @@ const attemptTransitions: Record<string, string[]> = {
 };
 
 const checkpointForbiddenFields = new Set(["reasoning", "hidden_reasoning", "chain_of_thought", "thoughts", "internal_reasoning", "private_reasoning"]);
+function sanitizeSnapshotRecord(value: unknown, sensitive: RegExp): unknown {
+  if (Array.isArray(value)) return value.map((item) => sanitizeSnapshotRecord(item, sensitive)).filter((item) => item !== undefined);
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(record, "host_ref") || Object.prototype.hasOwnProperty.call(record, "content_ref")) {
+    if (typeof record.content_ref !== "string") return undefined;
+    const allowed = new Set(["content_ref", "artifact_id", "version", "storage_mode", "content_status", "integrity_status", "payload_kind", "media_type", "byte_length", "chunk_count", "content_hash", "manifest_hash", "captured_at", "stored_at", "provenance_ref", "derived_from", "child_refs"]);
+    return Object.fromEntries(Object.entries(record).filter(([key]) => allowed.has(key)).map(([key, item]) => [key, sanitizeSnapshotRecord(item, sensitive)]));
+  }
+  if (typeof record.content_ref === "string") {
+    const allowed = new Set(["content_ref", "artifact_id", "version", "storage_mode", "content_status", "integrity_status", "payload_kind", "media_type", "byte_length", "chunk_count", "content_hash", "manifest_hash", "captured_at", "stored_at", "provenance_ref", "derived_from", "child_refs"]);
+    return Object.fromEntries(Object.entries(record).filter(([key]) => allowed.has(key)).map(([key, item]) => [key, sanitizeSnapshotRecord(item, sensitive)]));
+  }
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !sensitive.test(key)).map(([key, item]) => [key, sanitizeSnapshotRecord(item, sensitive)]));
+}
+function sanitizeExecutionMetadata(value: unknown): unknown {
+  const forbidden = /(?:token|secret|credential|password|cookie|authorization|bearer|body|packet|hidden_reasoning|chain_of_thought|private_key)/i;
+  if (Array.isArray(value)) return value.map(sanitizeExecutionMetadata).filter((item) => item !== undefined);
+  if (!value || typeof value !== "object") return typeof value === "string" ? value.slice(0, 512) : value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !forbidden.test(key))
+    .map(([key, item]) => [key, sanitizeExecutionMetadata(item)]));
+}
 
 /** 规范化 JSON 对象键序，保证等价 payload 产生同一 request hash。 */
 function stablePayload(value: unknown): unknown {
@@ -200,13 +224,135 @@ export class AuthorityStore {
       CREATE TABLE IF NOT EXISTS attempts (attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, work_item_id TEXT NOT NULL, engagement_id TEXT NOT NULL, status TEXT NOT NULL, generation INTEGER NOT NULL, owner_host TEXT NOT NULL, owner_agent TEXT NOT NULL, lease_expires_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checkpoints (checkpoint_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, generation INTEGER NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS action_intents (action_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, generation INTEGER NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifact_sessions (engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, root TEXT NOT NULL, binding_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(engagement_id,session_id));
+      CREATE UNIQUE INDEX IF NOT EXISTS artifact_session_root_unique ON artifact_sessions(root);
+      CREATE TABLE IF NOT EXISTS artifact_catalog (content_ref TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, artifact_id TEXT NOT NULL, version INTEGER NOT NULL, category TEXT, media_type TEXT, stored_at TEXT NOT NULL, work_run_id TEXT, attempt_id TEXT, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifact_chunks (content_ref TEXT NOT NULL, ordinal INTEGER NOT NULL, byte_offset INTEGER NOT NULL, byte_count INTEGER NOT NULL, chunk_hash TEXT NOT NULL, relative_path TEXT NOT NULL, PRIMARY KEY(content_ref,ordinal));
+      CREATE TABLE IF NOT EXISTS artifact_catalog_watermarks (engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, catalog_watermark INTEGER NOT NULL, index_watermark INTEGER NOT NULL, index_status TEXT NOT NULL, PRIMARY KEY(engagement_id,session_id));
+      CREATE TABLE IF NOT EXISTS artifact_uploads (upload_id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifact_idempotency (key TEXT PRIMARY KEY, operation TEXT NOT NULL, principal TEXT NOT NULL, engagement_id TEXT NOT NULL, request_hash TEXT NOT NULL, result TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS artifact_publications (upload_id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, content_ref TEXT NOT NULL, phase TEXT NOT NULL, body TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS execution_catalog (execution_id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, session_id TEXT NOT NULL, work_run_id TEXT, attempt_id TEXT, sequence INTEGER NOT NULL, body TEXT NOT NULL);
     `);
+    const catalogColumns = this.#db.prepare("PRAGMA table_info(artifact_catalog)").all() as Array<{ name: string }>;
+    if (!catalogColumns.some((column) => column.name === "media_type")) this.#db.exec("ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT");
     this.#db.exec("CREATE UNIQUE INDEX IF NOT EXISTS records_display_id_unique ON records(display_id) WHERE display_id IS NOT NULL;");
+    this.#db.exec("CREATE INDEX IF NOT EXISTS artifact_catalog_session_time ON artifact_catalog(engagement_id,session_id,stored_at,content_ref); CREATE INDEX IF NOT EXISTS artifact_catalog_category_time ON artifact_catalog(engagement_id,session_id,category,stored_at,content_ref); CREATE INDEX IF NOT EXISTS artifact_catalog_media_time ON artifact_catalog(engagement_id,session_id,media_type,stored_at,content_ref); CREATE INDEX IF NOT EXISTS artifact_catalog_reference_version ON artifact_catalog(engagement_id,session_id,artifact_id,version); CREATE INDEX IF NOT EXISTS artifact_catalog_work_run ON artifact_catalog(engagement_id,session_id,work_run_id,attempt_id,stored_at,content_ref); CREATE INDEX IF NOT EXISTS artifact_chunks_reference ON artifact_chunks(content_ref,ordinal); CREATE INDEX IF NOT EXISTS execution_catalog_run ON execution_catalog(engagement_id,session_id,work_run_id,attempt_id,sequence,execution_id); CREATE INDEX IF NOT EXISTS artifact_publications_session ON artifact_publications(engagement_id,session_id,phase,updated_at);");
     this.#db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version',?)").run(SCHEMA_VERSION);
     this.#db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('display_sequence','1')").run();
     this.doctor();
   }
   close(): void { this.#db.close(); }
+  artifactSessions(): Array<{ engagement_id: string; session_id: string; root: string; binding_id: string; created_at: string }> { return this.#db.prepare("SELECT engagement_id,session_id,root,binding_id,created_at FROM artifact_sessions").all() as Array<{ engagement_id: string; session_id: string; root: string; binding_id: string; created_at: string }>; }
+  executionCatalogRows(input: { engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string }): Array<Record<string, unknown>> {
+    return this.executionCatalogPage({ ...input, page_size: 1000 }).items;
+  }
+  executionCatalogPage(input: { engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size: number }): { items: Array<Record<string, unknown>>; next_cursor?: string; index_watermark: number } {
+    const limit = Math.min(1000, Math.max(1, Math.trunc(input.page_size)));
+    const cursor = input.cursor ? (() => { const [sequence, executionId] = input.cursor.split("\0"); const parsed = Number(sequence); if (!Number.isSafeInteger(parsed) || !executionId) throw new ContractValidationError("validation_error", "invalid execution cursor"); return { sequence: parsed, executionId }; })() : undefined;
+    const where = ["engagement_id=?", "session_id=?"];
+    const values: Array<string | number> = [input.engagement_id, input.session_id];
+    if (input.work_run_id) { where.push("work_run_id=?"); values.push(input.work_run_id); }
+    if (input.attempt_id) { where.push("attempt_id=?"); values.push(input.attempt_id); }
+    if (cursor) { where.push("(sequence>? OR (sequence=? AND execution_id>?))"); values.push(cursor.sequence, cursor.sequence, cursor.executionId); }
+    const rows = this.#db.prepare(`SELECT execution_id,sequence,body FROM execution_catalog WHERE ${where.join(" AND ")} ORDER BY sequence,execution_id LIMIT ?`).all(...values, limit + 1) as Array<{ execution_id: string; sequence: number; body: string }>;
+    const hasMore = rows.length > limit; const selected = hasMore ? rows.slice(0, limit) : rows;
+    const root = this.#db.prepare("SELECT root FROM artifact_sessions WHERE engagement_id=? AND session_id=?").get(input.engagement_id, input.session_id) as { root?: string } | undefined;
+    const items = selected.map((row) => {
+      const body = JSON.parse(row.body) as Record<string, unknown>;
+      if (body.sealed === true || body.quarantine === true) return { ...body, sidecar_status: body.quarantine === true ? "quarantined" : "sealed" };
+      if (typeof body.sidecar_path !== "string" || typeof body.sidecar_hash !== "string") return { ...body, sidecar_status: "unavailable" };
+      try { const rootPath = resolve(root?.root ?? ""); const path = realpathSync(join(rootPath, body.sidecar_path)); if (path !== rootPath && !path.startsWith(`${rootPath}${sep}`)) return { ...body, sidecar_status: "integrity_failed" }; const content = readFileSync(path); return hash(content.toString("utf8")) === body.sidecar_hash ? { ...body, sidecar_status: "available" } : { ...body, sidecar_status: "integrity_failed" }; } catch { return { ...body, sidecar_status: "unavailable" }; }
+    });
+    const last = selected.at(-1);
+    return { items, next_cursor: hasMore && last ? `${last.sequence}\0${last.execution_id}` : undefined, index_watermark: Number((this.#db.prepare("SELECT COALESCE(MAX(sequence),0) AS value FROM execution_catalog WHERE engagement_id=? AND session_id=?").get(input.engagement_id, input.session_id) as { value: number }).value) };
+  }
+  private writeExecutionSidecar(input: { engagement_id: string; session_id?: string; work_run_id?: string; attempt_id?: string; generation?: number; kind: "checkpoint" | "action" | "result" | "error"; reference_id: string; metadata: Record<string, unknown> }): Record<string, unknown> {
+    if (!input.session_id) return { execution_id: input.reference_id, sidecar_status: "unbound" };
+    const binding = this.#db.prepare("SELECT root FROM artifact_sessions WHERE engagement_id=? AND session_id=?").get(input.engagement_id, input.session_id) as { root?: string } | undefined;
+    if (!binding?.root) throw new ContractValidationError("authorization_error", "execution sidecar requires a registered task session");
+    if (input.work_run_id && input.generation !== undefined && input.metadata.quarantine !== true) {
+      const runRow = this.#db.prepare("SELECT engagement_id,generation,status,lease_expires_at,body FROM work_runs WHERE run_id=?").get(input.work_run_id) as { engagement_id?: string; generation?: number; status?: string; lease_expires_at?: string; body?: string } | undefined;
+      const runBody = runRow?.body ? JSON.parse(runRow.body) as Record<string, unknown> : {};
+      const attemptRow = input.attempt_id ? this.#db.prepare("SELECT status,generation,owner_host,body FROM attempts WHERE attempt_id=? AND run_id=?").get(input.attempt_id,input.work_run_id) as { status?: string; generation?: number; owner_host?: string; body?: string } | undefined : undefined;
+      const attemptBody = attemptRow?.body ? JSON.parse(attemptRow.body) as Record<string, unknown> : {};
+      if (!runRow || runRow.engagement_id !== input.engagement_id || runBody.task_session_ref !== input.session_id || Number(runRow.generation) !== input.generation || runBody.attempt_ref !== input.attempt_id || !runRow.lease_expires_at || runRow.lease_expires_at <= new Date().toISOString() || !["claimed", "running", "checkpointed", "blocked"].includes(String(runRow.status)) || !attemptRow || Number(attemptRow.generation) !== input.generation || !["claimed", "running", "checkpointed", "blocked"].includes(String(attemptRow.status)) || attemptBody.task_session_ref !== input.session_id) throw new ContractValidationError("stale_version", "execution sidecar is fenced by an inactive or stale Attempt");
+    }
+    const executionId = uuidv7(); const storedAt = new Date().toISOString(); const day = storedAt.slice(0, 10).split("-"); const run = input.work_run_id ?? "unbound"; const attempt = input.attempt_id ?? "unbound"; const sequence = Number((this.#db.prepare("SELECT COALESCE(MAX(sequence),0)+1 AS next FROM execution_catalog WHERE engagement_id=? AND session_id=?").get(input.engagement_id, input.session_id) as { next: number }).next);
+    const dir = join(binding.root, "execution", ...day, run.slice(0, 2), run, attempt); mkdirSync(dir, { recursive: true, mode: 0o700 }); const body = { schema_version: "1.0.0", execution_id: executionId, kind: input.kind, engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id, attempt_id: input.attempt_id, generation: input.generation, sequence, reference_id: input.reference_id, stored_at: storedAt, ...sanitizeExecutionMetadata(input.metadata) as Record<string, unknown> }; const text = `# Execution ${executionId}\n\n\`\`\`json\n${JSON.stringify(body, null, 2)}\n\`\`\`\n`; const temporary = join(dir, `.segment-${executionId}.tmp`); const path = join(dir, `${input.kind}-${String(sequence).padStart(8, "0")}.md`); writeFileSync(temporary, text, { mode: 0o600 }); renameSync(temporary, path); const catalogBody = { ...body, sidecar_path: path.slice(binding.root.length + 1), sidecar_hash: hash(text) }; this.#db.prepare("INSERT INTO execution_catalog(execution_id,engagement_id,session_id,work_run_id,attempt_id,sequence,body) VALUES(?,?,?,?,?,?,?)").run(executionId, input.engagement_id, input.session_id, input.work_run_id ?? null, input.attempt_id ?? null, sequence, JSON.stringify(catalogBody)); return catalogBody;
+  }
+  saveArtifactSession(binding: { engagement_id: string; session_id: string; root: string; binding_id: string; created_at: string }): void { this.transaction(() => { const roots = this.#db.prepare("SELECT engagement_id,session_id,root FROM artifact_sessions WHERE NOT (engagement_id=? AND session_id=?)").all(binding.engagement_id,binding.session_id) as Array<{ engagement_id: string; session_id: string; root: string }>; const path = resolve(binding.root); if (roots.some((owner) => { const other = resolve(owner.root); return path === other || path.startsWith(`${other}${sep}`) || other.startsWith(`${path}${sep}`); })) throw new ContractValidationError("authorization_error", "task session roots cannot overlap"); const owner = this.#db.prepare("SELECT engagement_id,session_id FROM artifact_sessions WHERE root=?").get(binding.root) as { engagement_id: string; session_id: string } | undefined; if (owner && (owner.engagement_id !== binding.engagement_id || owner.session_id !== binding.session_id)) throw new ContractValidationError("authorization_error", "session root is already bound"); this.#db.prepare("INSERT INTO artifact_sessions(engagement_id,session_id,root,binding_id,created_at) VALUES(?,?,?,?,?) ON CONFLICT(engagement_id,session_id) DO UPDATE SET binding_id=artifact_sessions.binding_id,created_at=artifact_sessions.created_at WHERE artifact_sessions.root=excluded.root").run(binding.engagement_id,binding.session_id,binding.root,binding.binding_id,binding.created_at); const row = this.#db.prepare("SELECT root FROM artifact_sessions WHERE engagement_id=? AND session_id=?").get(binding.engagement_id,binding.session_id) as { root?: string } | undefined; if (!row || row.root !== binding.root) throw new ContractValidationError("conflict", "task session is already bound to another root"); }); }
+  artifactCatalogRows(): Array<Record<string, unknown>> { return (this.#db.prepare("SELECT body FROM artifact_catalog ORDER BY stored_at,content_ref").all() as Array<{ body: string }>).map((row) => JSON.parse(row.body) as Record<string, unknown>); }
+  artifactCatalogRow(engagementId: string, sessionId: string, contentRef: string): Record<string, unknown> | undefined { const row = this.#db.prepare("SELECT body FROM artifact_catalog WHERE engagement_id=? AND session_id=? AND content_ref=?").get(engagementId, sessionId, contentRef) as { body?: string } | undefined; return row?.body ? JSON.parse(row.body) as Record<string, unknown> : undefined; }
+  artifactCatalogWatermark(engagementId: string, sessionId: string): { catalog_watermark: number; index_watermark: number; index_status: string } { const row = this.#db.prepare("SELECT catalog_watermark,index_watermark,index_status FROM artifact_catalog_watermarks WHERE engagement_id=? AND session_id=?").get(engagementId, sessionId) as { catalog_watermark: number; index_watermark: number; index_status: string } | undefined; return row ? { catalog_watermark: Number(row.catalog_watermark), index_watermark: Number(row.index_watermark), index_status: row.index_status } : { catalog_watermark: 0, index_watermark: 0, index_status: "current" }; }
+  queryArtifactCatalog(input: { engagement_id: string; session_id: string; category?: string; media_type?: string; work_run_id?: string; after?: { stored_at: string; content_ref: string }; limit: number }): { items: Array<Record<string, unknown>>; has_more: boolean; watermark: ReturnType<AuthorityStore["artifactCatalogWatermark"]> } {
+    const limit = Math.min(1000, Math.max(1, Math.trunc(input.limit)));
+    const where = ["engagement_id=?", "session_id=?"];
+    const values: Array<string | number | null> = [input.engagement_id, input.session_id];
+    if (input.category) { where.push("category=?"); values.push(input.category); }
+    if (input.media_type) { where.push("media_type=?"); values.push(input.media_type); }
+    if (input.work_run_id) { where.push("work_run_id=?"); values.push(input.work_run_id); }
+    if (input.after) { where.push("(stored_at>? OR (stored_at=? AND content_ref>?))"); values.push(input.after.stored_at, input.after.stored_at, input.after.content_ref); }
+    const rows = this.#db.prepare(`SELECT body FROM artifact_catalog WHERE ${where.join(" AND ")} ORDER BY stored_at,content_ref LIMIT ?`).all(...values, limit + 1) as Array<{ body: string }>;
+    const has_more = rows.length > limit;
+    return { items: rows.slice(0, limit).map((row) => JSON.parse(row.body) as Record<string, unknown>), has_more, watermark: this.artifactCatalogWatermark(input.engagement_id, input.session_id) };
+  }
+  explainArtifactCatalog(input: { engagement_id: string; session_id: string; category?: string; media_type?: string; work_run_id?: string }): string[] {
+    const where = ["engagement_id=?", "session_id=?"];
+    const values: string[] = [input.engagement_id, input.session_id];
+    if (input.category) { where.push("category=?"); values.push(input.category); }
+    if (input.media_type) { where.push("media_type=?"); values.push(input.media_type); }
+    if (input.work_run_id) { where.push("work_run_id=?"); values.push(input.work_run_id); }
+    return (this.#db.prepare(`EXPLAIN QUERY PLAN SELECT body FROM artifact_catalog WHERE ${where.join(" AND ")} ORDER BY stored_at,content_ref LIMIT 101`).all(...values) as Array<{ detail: string }>).map((row) => row.detail);
+  }
+  artifactPublications(): Array<{ upload_id: string; engagement_id: string; session_id: string; content_ref: string; phase: string; body: Record<string, unknown> }> { return (this.#db.prepare("SELECT upload_id,engagement_id,session_id,content_ref,phase,body FROM artifact_publications WHERE phase!='committed' ORDER BY updated_at,upload_id").all() as Array<{ upload_id: string; engagement_id: string; session_id: string; content_ref: string; phase: string; body: string }>).map((row) => ({ ...row, body: JSON.parse(row.body) as Record<string, unknown> })); }
+  startArtifactPublication(uploadId: string, engagementId: string, sessionId: string, contentRef: string, publishPath: string): void {
+    this.transaction(() => {
+      const prior = this.#db.prepare("SELECT phase FROM artifact_publications WHERE upload_id=?").get(uploadId) as { phase?: string } | undefined;
+      if (prior && prior.phase !== "quarantined") throw new ContractValidationError("conflict", "Artifact publication is already in progress");
+      const event = this.nextEvent("artifact.publication.pending", { engagement_id: engagementId, session_id: sessionId, upload_id: uploadId, content_ref: contentRef }, uploadId);
+      this.#db.prepare("INSERT INTO artifact_publications(upload_id,engagement_id,session_id,content_ref,phase,body,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(upload_id) DO UPDATE SET engagement_id=excluded.engagement_id,session_id=excluded.session_id,content_ref=excluded.content_ref,phase='publishing',body=excluded.body,updated_at=excluded.updated_at").run(uploadId, engagementId, sessionId, contentRef, "publishing", JSON.stringify({ publish_path: publishPath, marker_event_id: event.event_id, marker_commit_seq: event.commit_seq }), new Date().toISOString());
+    });
+  }
+  prepareArtifactPublication(uploadId: string, row: Record<string, unknown> & { content_ref: string; engagement_id: string; session_id: string }, chunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }>, publishPath: string, idempotency?: { key: string; principal: string; request_hash: string; result: unknown }): void {
+    this.transaction(() => {
+      const publication = this.#db.prepare("SELECT body FROM artifact_publications WHERE upload_id=? AND phase='publishing'").get(uploadId) as { body?: string } | undefined;
+      if (!publication?.body) throw new ContractValidationError("conflict", "Artifact publication marker is unavailable");
+      const prior = JSON.parse(publication.body) as Record<string, unknown>;
+      this.#db.prepare("UPDATE artifact_publications SET phase='ready',body=?,updated_at=? WHERE upload_id=?").run(JSON.stringify({ ...prior, row, chunks, publish_path: publishPath, idempotency }), new Date().toISOString(), uploadId);
+    });
+  }
+  completeArtifactPublication(uploadId: string, row: Record<string, unknown> & { content_ref: string; engagement_id: string; session_id: string; artifact_id: string; version: number; category?: string; stored_at: string; work_run_id?: string; attempt_id?: string; relative_dir: string; manifest_path: string }, chunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }>, idempotency?: { key: string; principal: string; request_hash: string; result: unknown }): void {
+    this.transaction(() => {
+      const publication = this.#db.prepare("SELECT phase,body FROM artifact_publications WHERE upload_id=?").get(uploadId) as { phase?: string; body?: string } | undefined;
+      if (!publication || !["ready", "publishing", "published"].includes(String(publication.phase))) throw new ContractValidationError("conflict", "Artifact publication marker is unavailable");
+      const category = typeof row.category === "string" ? row.category : null; const mediaType = typeof row.media_type === "string" ? row.media_type : null;
+      this.#db.prepare("INSERT INTO artifact_catalog(content_ref,engagement_id,session_id,artifact_id,version,category,media_type,stored_at,work_run_id,attempt_id,body) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(row.content_ref,row.engagement_id,row.session_id,row.artifact_id,row.version,category,mediaType,row.stored_at,typeof row.work_run_id === "string" ? row.work_run_id : null,typeof row.attempt_id === "string" ? row.attempt_id : null,JSON.stringify(row));
+      const add = this.#db.prepare("INSERT INTO artifact_chunks(content_ref,ordinal,byte_offset,byte_count,chunk_hash,relative_path) VALUES(?,?,?,?,?,?)");
+      for (const chunk of chunks) add.run(row.content_ref,chunk.ordinal,chunk.offset,chunk.bytes,chunk.hash,chunk.path);
+      this.#db.prepare("DELETE FROM artifact_uploads WHERE upload_id=?").run(uploadId);
+      if (idempotency?.key) this.#db.prepare("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)").run(idempotency.key,"artifact.store.commit",idempotency.principal,row.engagement_id,idempotency.request_hash,JSON.stringify(idempotency.result));
+      this.#db.prepare("INSERT INTO artifact_catalog_watermarks(engagement_id,session_id,catalog_watermark,index_watermark,index_status) VALUES(?,?,1,1,'current') ON CONFLICT(engagement_id,session_id) DO UPDATE SET catalog_watermark=catalog_watermark+1,index_watermark=index_watermark+1,index_status='current'").run(row.engagement_id,row.session_id);
+      const marker = JSON.parse(publication.body!) as { marker_commit_seq?: number };
+      if (marker.marker_commit_seq) { this.#db.prepare("UPDATE outbox SET status='applied' WHERE commit_seq=?").run(marker.marker_commit_seq); this.#db.prepare("UPDATE operation_markers SET status='indexed',updated_at=? WHERE commit_seq=? AND status='pending'").run(new Date().toISOString(),marker.marker_commit_seq); }
+      this.#db.prepare("UPDATE artifact_publications SET phase='committed',updated_at=? WHERE upload_id=?").run(new Date().toISOString(),uploadId);
+      this.nextEvent("artifact.content.committed", { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, byte_length: row.byte_length, content_hash: row.content_hash, chunk_count: row.chunk_count, work_run_id: row.work_run_id, attempt_id: row.attempt_id, generation: row.generation }, row.content_ref);
+    });
+  }
+  updateArtifactCatalogRow(row: Record<string, unknown> & { content_ref: string; engagement_id: string; session_id: string }, eventType: string): void {
+    this.transaction(() => { this.#db.prepare("UPDATE artifact_catalog SET body=? WHERE engagement_id=? AND session_id=? AND content_ref=?").run(JSON.stringify(row),row.engagement_id,row.session_id,row.content_ref); this.nextEvent(eventType, { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, content_status: row.content_status, integrity_status: row.integrity_status }, row.content_ref); });
+  }
+  markArtifactPublication(uploadId: string, phase: "publishing" | "published" | "quarantined"): void { this.transaction(() => { const changed = this.#db.prepare("UPDATE artifact_publications SET phase=?,updated_at=? WHERE upload_id=? AND phase!='committed'").run(phase,new Date().toISOString(),uploadId); if (Number(changed.changes) !== 1) throw new ContractValidationError("conflict", "Artifact publication marker is unavailable"); }); }
+  failArtifactPublication(uploadId: string, reason: string): void { this.transaction(() => { const row = this.#db.prepare("SELECT engagement_id,session_id,content_ref,body FROM artifact_publications WHERE upload_id=?").get(uploadId) as { engagement_id?: string; session_id?: string; content_ref?: string; body?: string } | undefined; if (!row) return; const marker = row.body ? JSON.parse(row.body) as { marker_commit_seq?: number } : {}; const message = reason.slice(0,512); this.#db.prepare("UPDATE artifact_publications SET phase='quarantined',body=?,updated_at=? WHERE upload_id=?").run(JSON.stringify({ ...(row.body ? JSON.parse(row.body) as Record<string, unknown> : {}), failure: message }),new Date().toISOString(),uploadId); if (marker.marker_commit_seq) { this.#db.prepare("UPDATE outbox SET status='applied' WHERE commit_seq=?").run(marker.marker_commit_seq); this.#db.prepare("UPDATE operation_markers SET status='failed',error=?,updated_at=? WHERE commit_seq=?").run(message,new Date().toISOString(),marker.marker_commit_seq); } this.nextEvent("artifact.publication.quarantined", { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, reason: message }, uploadId); }); }
+  saveArtifactCatalogRow(row: Record<string, unknown> & { content_ref: string; engagement_id: string; session_id: string; artifact_id: string; version: number; category?: string; stored_at: string; work_run_id?: string; attempt_id?: string; relative_dir: string; manifest_path: string }, chunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }>, uploadId?: string, idempotency?: { key: string; principal: string; request_hash: string; result: unknown }): void {
+    this.transaction(() => { const category = typeof row.category === "string" ? row.category : null; const mediaType = typeof row.media_type === "string" ? row.media_type : null; this.#db.prepare("INSERT INTO artifact_catalog(content_ref,engagement_id,session_id,artifact_id,version,category,media_type,stored_at,work_run_id,attempt_id,body) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(row.content_ref,row.engagement_id,row.session_id,row.artifact_id,row.version,category,mediaType,row.stored_at,typeof row.work_run_id === "string" ? row.work_run_id : null,typeof row.attempt_id === "string" ? row.attempt_id : null,JSON.stringify(row)); const add = this.#db.prepare("INSERT INTO artifact_chunks(content_ref,ordinal,byte_offset,byte_count,chunk_hash,relative_path) VALUES(?,?,?,?,?,?)"); for (const chunk of chunks) add.run(row.content_ref,chunk.ordinal,chunk.offset,chunk.bytes,chunk.hash,chunk.path); if (uploadId) this.#db.prepare("DELETE FROM artifact_uploads WHERE upload_id=?").run(uploadId); if (idempotency?.key) this.#db.prepare("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)").run(idempotency.key,"artifact.store.commit",idempotency.principal,row.engagement_id,idempotency.request_hash,JSON.stringify(idempotency.result)); this.#db.prepare("INSERT INTO artifact_catalog_watermarks(engagement_id,session_id,catalog_watermark,index_watermark,index_status) VALUES(?,?,1,1,'current') ON CONFLICT(engagement_id,session_id) DO UPDATE SET catalog_watermark=catalog_watermark+1,index_watermark=index_watermark+1,index_status='current'").run(row.engagement_id,row.session_id); this.nextEvent(row.content_status === "external" ? "artifact.reference.external" : "artifact.content.committed", { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, byte_length: row.byte_length, content_hash: row.content_hash, chunk_count: row.chunk_count, work_run_id: row.work_run_id, attempt_id: row.attempt_id, generation: row.generation }, row.content_ref); });
+  }
+  saveArtifactUpload(uploadId: string, engagementId: string, sessionId: string, body: Record<string, unknown>): void { this.transaction(() => { this.#db.prepare("INSERT INTO artifact_uploads(upload_id,engagement_id,session_id,body,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(upload_id) DO UPDATE SET body=excluded.body,updated_at=excluded.updated_at").run(uploadId,engagementId,sessionId,JSON.stringify(body),new Date().toISOString()); }); }
+  artifactUploads(): Array<{ upload_id: string; engagement_id: string; session_id: string; body: Record<string, unknown> }> { return (this.#db.prepare("SELECT upload_id,engagement_id,session_id,body FROM artifact_uploads").all() as Array<{ upload_id: string; engagement_id: string; session_id: string; body: string }>).map((row) => ({ ...row, body: JSON.parse(row.body) as Record<string, unknown> })); }
+  deleteArtifactUpload(uploadId: string): void { this.transaction(() => { this.#db.prepare("DELETE FROM artifact_uploads WHERE upload_id=?").run(uploadId); }); }
+  artifactIdempotencyResult(key: string, operation: string, principal: string, engagementId: string, requestHash: string): unknown | undefined { const row = this.#db.prepare("SELECT operation,principal,engagement_id,request_hash,result FROM artifact_idempotency WHERE key=?").get(key) as { operation: string; principal: string; engagement_id: string; request_hash: string; result: string } | undefined; if (!row) return undefined; if (row.operation !== operation || row.principal !== principal || row.engagement_id !== engagementId || row.request_hash !== requestHash) throw new ContractValidationError("idempotency_conflict", "idempotency key is bound to another Artifact request"); return JSON.parse(row.result) as unknown; }
+  saveArtifactIdempotency(key: string, operation: string, principal: string, engagementId: string, requestHash: string, result: unknown): void { this.transaction(() => { this.#db.prepare("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)").run(key,operation,principal,engagementId,requestHash,JSON.stringify(result)); }); }
+  recordArtifactEvent(eventType: string, engagementId: string, subjectId: string, metadata: Record<string, unknown>): void { this.transaction(() => { this.nextEvent(eventType, { engagement_id: engagementId, ...metadata }, subjectId); }); }
   /** Authority corruption blocks further writes until an operator repairs the store. */
   private authorityDrift(): string[] {
     const errors: string[] = [];
@@ -541,12 +687,12 @@ export class AuthorityStore {
 
   exportSnapshot(engagementId: string, asOf?: number): { schema_version: string; engagement_id: string; read_seq: number; committed_seq: number; projected_seq: number; records: CanonicalRecord[]; hash: string } {
     const snapshot = this.snapshot(engagementId, { asOf, includeCandidates: true });
-    const sensitive = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact)/i;
+    const sensitive = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|host_ref|location|summary|url|header|cookie|body|packet)/i;
     // Export is an authority migration boundary, so retain L0 and recalled history
     // that the ordinary recall API intentionally hides.
     const rows = this.#db.prepare("SELECT body FROM record_versions WHERE engagement_id=? AND commit_seq<=? ORDER BY commit_seq DESC").all(engagementId, snapshot.read_seq) as Array<{ body: string }>;
     const seen = new Set<string>();
-    const records = rows.map((row) => JSON.parse(row.body) as CanonicalRecord).filter((record) => { if (seen.has(record.id)) return false; seen.add(record.id); return true; }).map((record) => Object.fromEntries(Object.entries(record).filter(([key]) => !sensitive.test(key)))).map((record) => record as CanonicalRecord);
+    const records = rows.map((row) => JSON.parse(row.body) as CanonicalRecord).filter((record) => { if (seen.has(record.id)) return false; seen.add(record.id); return true; }).map((record) => sanitizeSnapshotRecord(record, sensitive)).map((record) => record as CanonicalRecord);
     const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.0", engagement_id: engagementId, read_seq: snapshot.read_seq, committed_seq: snapshot.committed_seq, projected_seq: snapshot.projected_seq, format: "taric-native-json", records };
     return { ...payload, hash: hash(json(payload)) };
   }
@@ -957,11 +1103,11 @@ export class AuthorityStore {
     return { ok: false, reason, proposal: { ...proposal, status: "rejected" } };
   }
 
-  claimWorkRun(input: { run_id?: string; work_item_id: string; engagement_id: string; host_id: string; agent_id: string; ttl_ms?: number }): Record<string, unknown> {
+  claimWorkRun(input: { run_id?: string; work_item_id: string; engagement_id: string; host_id: string; agent_id: string; ttl_ms?: number; task_session_ref?: string }): Record<string, unknown> {
     if (input.ttl_ms !== undefined && (!Number.isSafeInteger(input.ttl_ms) || input.ttl_ms < 1)) throw new ContractValidationError("validation_error", "lease ttl must be a positive integer");
     const runId = input.run_id ?? uuidv7(); const now = new Date(); const expiry = new Date(now.getTime() + (input.ttl_ms ?? 60_000)).toISOString();
     return this.transaction(() => {
-      const prior = this.#db.prepare("SELECT generation,status,lease_expires_at,engagement_id,work_item_id FROM work_runs WHERE run_id=?").get(runId) as any;
+      const prior = this.#db.prepare("SELECT generation,status,lease_expires_at,engagement_id,work_item_id,body FROM work_runs WHERE run_id=?").get(runId) as any;
       if (prior && prior.engagement_id !== input.engagement_id) throw new ContractValidationError("authorization_error", "work run belongs to another engagement");
       if (prior && prior.work_item_id !== input.work_item_id) throw new ContractValidationError("conflict", "work item cannot change for an existing run");
       const workItemRow = this.#db.prepare("SELECT engagement_id,version,body FROM records WHERE id=? AND kind='work_item'").get(input.work_item_id) as { engagement_id?: string; version?: number; body?: string } | undefined;
@@ -979,6 +1125,7 @@ export class AuthorityStore {
           body.ended_at = now.toISOString();
           this.#db.prepare("UPDATE attempts SET body=? WHERE attempt_id=?").run(json(body), oldAttempt.attempt_id ?? "");
         }
+        this.sealExecutionSidecars(runId, Number(prior.generation), "attempt_lost");
       }
       if (prior && ["completed", "failed", "cancelled"].includes(String(prior.status))) throw new ContractValidationError("conflict", "terminal work run cannot be reclaimed");
       if (prior && prior.lease_expires_at > now.toISOString() && !["lost", "completed", "failed", "cancelled"].includes(String(prior.status))) throw new ContractValidationError("conflict", "work run lease is still active");
@@ -986,7 +1133,11 @@ export class AuthorityStore {
       const previousAttempt = prior ? this.#db.prepare("SELECT attempt_id FROM attempts WHERE run_id=? AND generation=?").get(runId, Number(prior.generation)) as { attempt_id?: string } | undefined : undefined;
       const previousAttemptRef = previousAttempt?.attempt_id;
       const owner = { host_id: input.host_id, agent_id: input.agent_id };
+      const priorBody = prior?.body ? JSON.parse(prior.body) as Record<string, unknown> : {};
+      const taskSessionRef = input.task_session_ref ?? (typeof priorBody.task_session_ref === "string" ? priorBody.task_session_ref : undefined);
+      if (taskSessionRef && !this.#db.prepare("SELECT 1 FROM artifact_sessions WHERE engagement_id=? AND session_id=?").get(input.engagement_id, taskSessionRef)) throw new ContractValidationError("authorization_error", "WorkRun task session is not registered in this Engagement");
       const body: Record<string, unknown> = { run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", owner, generation, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: Number((this.#db.prepare("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events").get() as any).seq), work_item_version: Number(workItemRow.version), target_version: Number(item.target_version ?? workItemRow.version) };
+      if (taskSessionRef) body.task_session_ref = taskSessionRef;
       const engagementBody = this.#db.prepare("SELECT body FROM records WHERE id=? AND kind='engagement'").get(input.engagement_id) as { body?: string } | undefined;
       const engagement = engagementBody?.body ? JSON.parse(engagementBody.body) as Record<string, unknown> : {};
       const scopeRef = typeof item.scope_ref === "string" ? item.scope_ref : typeof engagement.scope_ref === "string" ? engagement.scope_ref : undefined;
@@ -995,7 +1146,7 @@ export class AuthorityStore {
       body.scope_ref = scopeRef;
       body.scope_version = scopeVersion;
       const attemptId = uuidv7();
-      const attempt = { attempt_id: attemptId, run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", generation, owner, lease_expires_at: expiry, heartbeat_at: now.toISOString() };
+      const attempt = { attempt_id: attemptId, run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", generation, owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), ...(taskSessionRef ? { task_session_ref: taskSessionRef } : {}) };
       const provenance = { host_id: input.host_id, producer_id: input.agent_id, source_kind: "host" };
       const recordBase = { schema_version: SCHEMA_VERSION, engagement_id: input.engagement_id, created_at: now.toISOString(), provenance };
       validateContract("workRun", { ...recordBase, id: runId, kind: "work_run", work_item_ref: input.work_item_id, status: "claimed", generation, attempt_ref: attemptId, owner: body.owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: body.read_seq });
@@ -1037,7 +1188,10 @@ export class AuthorityStore {
       const row = this.#db.prepare("SELECT * FROM work_runs WHERE run_id=?").get(runId) as any;
       if (!row) throw new ContractValidationError("conflict", "work run not found");
       if (row.lease_expires_at > new Date().toISOString()) throw new ContractValidationError("conflict", "work run lease is still active");
-      return this.claimWorkRun({ run_id: runId, work_item_id: row.work_item_id, engagement_id: row.engagement_id, host_id: hostId, agent_id: agentId, ttl_ms: ttlMs });
+      const previousGeneration = Number(row.generation);
+      const reclaimed = this.claimWorkRun({ run_id: runId, work_item_id: row.work_item_id, engagement_id: row.engagement_id, host_id: hostId, agent_id: agentId, ttl_ms: ttlMs });
+      this.sealExecutionSidecars(runId, previousGeneration);
+      return reclaimed;
     });
   }
   commitCheckpoint(runId: string, generation: number, hostId: string, checkpoint: Record<string, unknown>): Record<string, unknown> {
@@ -1126,6 +1280,8 @@ export class AuthorityStore {
       const attempt = JSON.parse(activeAttempt.body) as Record<string, unknown>;
       attempt.status = "checkpointed";
       this.#db.prepare("UPDATE attempts SET status='checkpointed',body=?,updated_at=? WHERE attempt_id=? AND generation=?").run(json(attempt), new Date().toISOString(), activeAttempt.attempt_id, generation);
+      const taskSessionRef = typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined;
+      this.writeExecutionSidecar({ engagement_id: row.engagement_id, session_id: taskSessionRef, work_run_id: runId, attempt_id: activeAttempt.attempt_id, generation, kind: "checkpoint", reference_id: checkpointId, metadata: { checkpoint_id: checkpointId, artifact_refs: Array.isArray(checkpoint.artifact_refs) ? checkpoint.artifact_refs : [], action_refs: Array.isArray(checkpoint.action_refs) ? checkpoint.action_refs : [], source_read_seq: checkpoint.source_read_seq, status: "checkpointed" } });
       this.nextEvent("work_run.checkpoint", { checkpoint_id: checkpointId, generation }, runId);
       return saved;
     });
@@ -1222,6 +1378,9 @@ export class AuthorityStore {
       if (input.message && input.message.length > 512) throw new ContractValidationError("validation_error", "host error message is too long");
       if (input.message && /(?:password|secret|token|bearer|credential|private key)/i.test(input.message)) throw new ContractValidationError("validation_error", "host error message contains prohibited secret material");
       const body = { engagement_id: input.engagement_id, host_id: input.host_id, work_run_id: input.work_run_id, generation: input.generation, error_ref: input.error_ref, message: input.message, recorded_at: new Date().toISOString() };
+      let taskSessionRef: string | undefined; let attemptId: string | undefined;
+      if (input.work_run_id) { const run = this.#db.prepare("SELECT body FROM work_runs WHERE run_id=?").get(input.work_run_id) as { body?: string } | undefined; if (run?.body) { const runBody = JSON.parse(run.body) as Record<string, unknown>; taskSessionRef = typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined; attemptId = typeof runBody.attempt_ref === "string" ? runBody.attempt_ref : undefined; } }
+      this.writeExecutionSidecar({ engagement_id: input.engagement_id, session_id: taskSessionRef, work_run_id: input.work_run_id, attempt_id: attemptId, generation: input.generation, kind: "error", reference_id: input.error_ref ?? uuidv7(), metadata: { error_ref: input.error_ref, status: "error", artifact_refs: [] } });
       const event = this.nextEvent("host.error", body, input.work_run_id);
       return { ...body, event_id: event.event_id, commit_seq: event.commit_seq };
     });
@@ -1229,6 +1388,30 @@ export class AuthorityStore {
   getWorkRun(runId: string): Record<string, unknown> | undefined {
     const row = this.#db.prepare("SELECT body FROM work_runs WHERE run_id=?").get(runId) as { body?: string } | undefined;
     return row ? JSON.parse(row.body!) : undefined;
+  }
+  sealExecutionSidecars(runId: string, generation: number, reason = "attempt_lost"): number {
+    return this.transaction(() => {
+      const rows = this.#db.prepare("SELECT execution_id,body FROM execution_catalog WHERE work_run_id=?").all(runId) as Array<{ execution_id: string; body: string }>;
+      let changed = 0;
+      for (const row of rows) {
+        const body = JSON.parse(row.body) as Record<string, unknown>;
+        if (Number(body.generation) !== generation || body.sealed === true) continue;
+        body.sealed = true; body.sealed_reason = reason; body.sealed_at = new Date().toISOString();
+        this.#db.prepare("UPDATE execution_catalog SET body=? WHERE execution_id=?").run(json(body), row.execution_id); changed++;
+      }
+      return changed;
+    });
+  }
+  validateArtifactFence(input: { engagement_id: string; session_id: string; work_run_id: string; attempt_id: string; generation: number; principal: string }): void {
+    const row = this.#db.prepare("SELECT engagement_id,status,owner_host,generation,lease_expires_at,body FROM work_runs WHERE run_id=?").get(input.work_run_id) as { engagement_id?: string; status?: string; owner_host?: string; generation?: number; lease_expires_at?: string; body?: string } | undefined;
+    if (!row || row.engagement_id !== input.engagement_id) throw new ContractValidationError("authorization_error", "WorkRun is not in this Engagement");
+    let body: Record<string, unknown>; try { body = JSON.parse(row.body ?? "{}"); } catch { throw new ContractValidationError("conflict", "WorkRun state is invalid"); }
+    if (body.task_session_ref !== input.session_id) throw new ContractValidationError("authorization_error", "Artifact does not match the registered WorkRun session");
+    if (row.owner_host !== input.principal || Number(row.generation) !== input.generation || !row.lease_expires_at || row.lease_expires_at <= new Date().toISOString() || !["claimed", "running", "checkpointed", "blocked"].includes(String(row.status))) throw new ContractValidationError("stale_version", "Artifact write is fenced by an expired or stale WorkRun");
+    if (body.attempt_ref !== input.attempt_id) throw new ContractValidationError("stale_version", "Artifact Attempt is stale");
+    const attempt = this.#db.prepare("SELECT engagement_id,status,generation,owner_host,lease_expires_at,body FROM attempts WHERE attempt_id=? AND run_id=?").get(input.attempt_id,input.work_run_id) as { engagement_id?: string; status?: string; generation?: number; owner_host?: string; lease_expires_at?: string; body?: string } | undefined;
+    const attemptBody = attempt?.body ? JSON.parse(attempt.body) as Record<string, unknown> : {};
+    if (!attempt || attempt.engagement_id !== input.engagement_id || attempt.owner_host !== input.principal || Number(attempt.generation) !== input.generation || attempt.lease_expires_at !== row.lease_expires_at || !["claimed", "running", "checkpointed", "blocked"].includes(String(attempt.status)) || attemptBody.task_session_ref !== input.session_id) throw new ContractValidationError("stale_version", "Artifact Attempt is missing, expired, or fenced");
   }
   transitionWorkRun(runId: string, generation: number, hostId: string, status: "running" | "checkpointed" | "blocked" | "completed" | "failed" | "cancelled"): Record<string, unknown> {
     return this.transaction(() => {
@@ -1313,6 +1496,9 @@ export class AuthorityStore {
       validateAuthorityReferences(actionRecord, { engagement: new Map(refs.map((ref) => [ref.id, ref.engagement_id])), kind: new Map(refs.map((ref) => [ref.id, ref.kind])) }, String(run.engagement_id));
       this.#db.prepare("INSERT INTO action_intents(action_id,run_id,generation,status,body,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(action_id) DO UPDATE SET status=excluded.status,body=excluded.body,updated_at=excluded.updated_at").run(actionId, input.run_id, input.generation, input.status, json(body), new Date().toISOString());
       this.#db.prepare("INSERT OR REPLACE INTO object_refs(id,engagement_id,kind) VALUES(?,?,?)").run(actionId, String(run.engagement_id), "action_intent");
+      const runRow = this.#db.prepare("SELECT body FROM work_runs WHERE run_id=?").get(input.run_id) as { body?: string } | undefined;
+      const runBody = runRow?.body ? JSON.parse(runRow.body) as Record<string, unknown> : {};
+      this.writeExecutionSidecar({ engagement_id: String(run.engagement_id), session_id: typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined, work_run_id: input.run_id, attempt_id: attempt.attempt_id, generation: input.generation, kind: input.status === "recommended" || input.status === "authorized" || input.status === "denied" ? "action" : "result", reference_id: actionId, metadata: { action_id: actionId, status: input.status, mode: input.mode, host_decision_ref: input.host_decision_ref, result_ref: input.result_ref, artifact_refs: [] } });
       this.nextEvent(`action_intent.${input.status}`, { mode: input.mode, status: input.status, host_id: input.host_id, agent_id: run.owner_agent, work_run_id: input.run_id, generation: input.generation, host_decision_ref: input.host_decision_ref, result_ref: input.result_ref }, actionId);
       return body;
     });
@@ -1339,6 +1525,8 @@ export class AuthorityStore {
     const currentScopeRef = typeof workItem?.scope_ref === "string" ? workItem.scope_ref : typeof engagement?.scope_ref === "string" ? engagement.scope_ref : undefined;
     const scopeRow = currentScopeRef ? this.#db.prepare("SELECT engagement_id,version,body FROM records WHERE id=? AND kind='scope'").get(currentScopeRef) as { engagement_id?: string; version?: number; body?: string } | undefined : undefined;
     const pendingActions = this.pendingActionIntents(runId);
+    const artifactRows = this.#db.prepare("SELECT body FROM artifact_catalog WHERE engagement_id=? AND session_id=? ORDER BY stored_at,content_ref").all(row.engagement_id, String(run.task_session_ref ?? "")) as Array<{ body: string }>;
+    const artifact_refs = artifactRows.map((item) => { const artifact = JSON.parse(item.body) as Record<string, unknown>; const { relative_dir: _dir, manifest_path: _manifest, host_ref: _hostRef, ...metadata } = artifact; return metadata; });
     const currentActions = this.#db.prepare("SELECT action_id,body FROM action_intents WHERE run_id=? AND generation=?").all(runId, Number(row.generation)) as Array<{ action_id: string; body: string }>;
     const currentActionBodies = currentActions.map((item) => JSON.parse(item.body) as Record<string, unknown>);
     const verifiedDecisions = currentActionBodies.flatMap((item) => typeof item.host_decision_ref === "string" ? [item.host_decision_ref] : []);
@@ -1363,6 +1551,8 @@ export class AuthorityStore {
       run,
       checkpoint,
       pending_actions: pendingActions,
+      task_session_ref: run.task_session_ref,
+      artifact_refs,
       checkpoint_read_seq: checkpointReadSeq,
       current_read_seq: currentReadSeq,
       premise_checks: premiseChecks,
@@ -1372,8 +1562,13 @@ export class AuthorityStore {
     };
   }
   recordLateResult(input: { run_id: string; generation: number; result_ref: string; result: Record<string, unknown> }): Record<string, unknown> {
-    const late = { late_result_id: uuidv7(), ...input, status: "late_result_quarantine", recorded_at: new Date().toISOString() };
+    const forbidden = /(?:token|secret|credential|password|cookie|authorization|bearer|body|packet|hidden_reasoning|chain_of_thought)/i;
+    const result = Object.fromEntries(Object.entries(input.result ?? {}).filter(([key]) => !forbidden.test(key)).map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 512) : value]));
+    const late = { late_result_id: uuidv7(), run_id: input.run_id, generation: input.generation, result_ref: input.result_ref, result, status: "late_result_quarantine", recorded_at: new Date().toISOString() };
     return this.transaction(() => {
+      const run = this.#db.prepare("SELECT body,engagement_id FROM work_runs WHERE run_id=?").get(input.run_id) as { body?: string; engagement_id?: string } | undefined;
+      const runBody = run?.body ? JSON.parse(run.body) as Record<string, unknown> : {};
+      this.writeExecutionSidecar({ engagement_id: String(run?.engagement_id ?? ""), session_id: typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined, work_run_id: input.run_id, attempt_id: typeof runBody.attempt_ref === "string" ? runBody.attempt_ref : undefined, generation: input.generation, kind: "result", reference_id: late.late_result_id, metadata: { status: late.status, result_ref: input.result_ref, quarantine: true, artifact_refs: [] } });
       this.#db.prepare("INSERT INTO action_intents(action_id,run_id,generation,status,body,updated_at) VALUES(?,?,?,?,?,?)").run(late.late_result_id, input.run_id, input.generation, late.status, json(late), new Date().toISOString());
       this.nextEvent("action_intent.late_result_quarantine", { generation: input.generation, result_ref: input.result_ref }, late.late_result_id);
       return late;

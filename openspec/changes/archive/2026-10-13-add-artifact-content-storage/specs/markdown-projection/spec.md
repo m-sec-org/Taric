@@ -16,6 +16,11 @@ The system SHALL continue to generate Brief and Index projections from committed
 - **WHEN** a stored Artifact or execution record field has not been approved for projection
 - **THEN** that field is omitted from Markdown, Context Pack, and model-facing output while the source content remains available only through authorized content APIs
 
+#### Scenario: Project metadata for an Artifact held in session storage
+
+- **WHEN** the authority catalog contains an Artifact whose original payload is in a task-session spool
+- **THEN** Taric MAY project only allowlisted opaque reference and safe metadata; it does not traverse, read, or copy the raw payload or Markdown sidecar
+
 #### Scenario: Read during projection switch
 
 - **WHEN** a client reads during generation publication

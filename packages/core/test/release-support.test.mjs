@@ -15,8 +15,15 @@ test("support documentation and capability diagnostics match the runtime manifes
   for (const capability of TARIC_COMPATIBILITY_MANIFEST.capabilities.filter((entry) => entry.state === "unsupported")) {
     assert.ok(guide.includes(capability.id), `guide documents ${capability.id}`);
     assert.ok(capability.follow_up, `${capability.id} has a follow-up owner`);
-    const root = new URL(`../../../openspec/changes/${capability.follow_up}/`, import.meta.url);
-    for (const artifact of ["proposal.md", "design.md", "tasks.md"]) await access(new URL(artifact, root));
+    const roots = [
+      new URL(`../../../openspec/changes/${capability.follow_up}/`, import.meta.url),
+      new URL(`../../../openspec/changes/archive/2026-10-12-${capability.follow_up}/`, import.meta.url),
+    ];
+    for (const artifact of ["proposal.md", "design.md", "tasks.md"]) {
+      let found = false;
+      for (const root of roots) { try { await access(new URL(artifact, root)); found = true; break; } catch { /* try the archived location */ } }
+      assert.equal(found, true, `${capability.follow_up}/${artifact} exists in active or archive OpenSpec storage`);
+    }
   }
   store.close();
 });

@@ -17,6 +17,10 @@ import {
   validateAdapter,
 } from "../dist/index.js";
 import { AuthorityStore } from "../dist/store.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 const base = { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION, capabilities: [], supported: false };
 
@@ -83,6 +87,36 @@ test("native adapters dispatch only through the authenticated Core client", asyn
   }
   assert.equal(store.events().length, 0);
   store.close();
+});
+
+test("authenticated adapter Artifact calls use Core authorization and content contracts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "taric-adapter-artifact-"));
+  const store = new AuthorityStore();
+  const engagement_id = uuidv7();
+  const session_id = "adapter-session";
+  const contentRoot = join(dir, "content");
+  const service = createCoreService(store, contentRoot);
+  const host = createDeepSeekHarnessAdapter(service, createPrincipal("host", "host-a", engagement_id));
+  const reader = createHermesAdapter(service, createPrincipal("host", "reader-a", engagement_id, ["content_read"]));
+  const bytes = Buffer.from("adapter artifact bytes");
+  const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  try {
+    assert.equal((await host.call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id) })).ok, true);
+    const begun = await host.call("artifact.store.begin", { engagement_id, session_id, payload_kind: "text", media_type: "text/plain", expected_bytes: bytes.length, expected_hash: digest });
+    assert.equal(begun.ok, true);
+    assert.equal((await host.call("artifact.store.append", { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest })).ok, true);
+    const committed = await host.call("artifact.store.commit", { engagement_id, session_id, upload_id: begun.data.upload_id, total_bytes: bytes.length, content_hash: digest });
+    assert.equal(committed.ok, true);
+    const denied = await host.call("artifact.content.read", { engagement_id, session_id, content_ref: committed.data.content_ref });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.error.code, "authorization_error");
+    const read = await reader.call("artifact.content.read", { engagement_id, session_id, content_ref: committed.data.content_ref });
+    assert.equal(read.ok, true);
+    assert.deepEqual(Buffer.from(read.data.data, "base64"), bytes);
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("untested Pi versions are unsupported", () => {

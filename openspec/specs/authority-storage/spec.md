@@ -55,7 +55,7 @@
 - **THEN** 服务阻塞权威写入并提供归属到 operation 和 sequence 的修复报告
 
 ### Requirement: Portable authority snapshots and migrations
-本期系统 SHALL 提供只读 Taric-native JSON/JSONL 或 Markdown snapshot export，导出在固定 read_seq 下经过权限和字段白名单处理的已提交 Engagement 状态，含 schema/core 版本、Engagement、source sequence、文件 hash 和格式说明。export 不得修改 authority，不得泄漏其他 Engagement、未授权 L0/草稿、SecretRef 或宿主 Artifact 内容。存储 schema version 不支持时必须在写入前失败。snapshot import、round-trip、历史序号移植、升级迁移和 backup/restore 属于后续变更，本期接口须报告 unsupported capability。
+本期系统 SHALL 提供只读 Taric-native JSON/JSONL 或 Markdown snapshot export，导出在固定 read_seq 下经过权限和字段白名单处理的已提交 Engagement 状态，含 schema/core 版本、Engagement、source sequence、文件 hash 和格式说明。export 不得修改 authority，不得泄漏其他 Engagement、未授权 L0/草稿、SecretRef、原始 Artifact payload bytes、session filesystem roots 或 host-only locators。允许经字段白名单批准的 opaque Artifact reference、hash、media metadata、integrity/content status 和安全 provenance metadata；这些字段不代表 snapshot 包含可恢复的 payload。存储 schema version 不支持时必须在写入前失败。snapshot import、round-trip、历史序号移植、升级迁移和 backup/restore 属于后续变更，本期接口须报告 unsupported capability。
 
 #### Scenario: Export an isolated snapshot
 - **WHEN** 获授权 operator 导出一个 Engagement 的固定 snapshot
@@ -79,3 +79,18 @@
 #### Scenario: Use a single-host default deployment
 - **WHEN** Taric runs with the default single-host configuration
 - **THEN** it operates without PostgreSQL configuration or service availability
+
+### Requirement: Artifact session catalog and external payload boundary
+系统 SHALL 将 Artifact task-session binding、resumable upload state、committed metadata、chunk hashes/offsets/relative paths 和 commit audit event 保存到当前 SQLite authority，并对 session/catalog/chunk reference 提供查询索引。原始 payload bytes SHALL 只保存在配置内容根下的注册 task-session 文件 spool，不进入 SQLite Artifact catalog body、authority event、Markdown projection 或 snapshot。bind SHALL 验证 session root 位于配置内容根目录下，并拒绝路径逃逸。Artifact 文件发布与 SQLite catalog commit 当前不是同一个原子事务；启动 doctor/reconcile 尚不校验或重建该 spool。读取缺少 manifest/chunk 或发现 chunk length/hash 不匹配时 SHALL fail closed 并返回 unavailable/integrity error；Taric 不得静默创建、修复或删除原文。
+
+#### Scenario: Persist the Artifact catalog association
+- **WHEN** an authenticated host commits a complete upload
+- **THEN** Taric writes catalog metadata, chunk locator rows, upload removal, and the `artifact.content.committed` audit event atomically in SQLite while payload bytes remain in the task-session filesystem
+
+#### Scenario: Filesystem and SQLite publication are interrupted
+- **WHEN** the process stops between payload file publication and SQLite catalog commit
+- **THEN** the current implementation may leave an orphan payload/operation marker, and doctor/reconcile does not claim to have repaired it; operators can identify it only with external filesystem inspection until Artifact-specific reconciliation is implemented
+
+#### Scenario: Stored content is missing or tampered
+- **WHEN** a caller reads a known Artifact whose manifest/chunk is missing or whose chunk length/hash differs from catalog manifest metadata
+- **THEN** Taric fails closed with a structured unavailable or integrity error and never treats the payload as verified Evidence

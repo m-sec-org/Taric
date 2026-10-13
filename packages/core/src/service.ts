@@ -5,9 +5,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { uuidv7 } from "./identity.js";
 import { buildContextPack, type ContextPack } from "./context.js";
 import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
-import { ContractValidationError, validateContract } from "./validation.js";
-import { operationContract, operationContracts, SCHEMA_VERSION } from "@taric/schemas";
+import { ContractValidationError, schemaValidator, validateContract } from "./validation.js";
+import { coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName } from "@taric/schemas";
 import { createAccessDecisionObservation, createControlObservation, type AccessDecisionObservationInput, type ControlObservationInput } from "./coverage.js";
+import { ArtifactContentStore, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactCommitInput } from "./artifact-content-store.js";
+import { dirname } from "node:path";
+import { tmpdir } from "node:os";
 
 export const API_CONTRACT_VERSION = "1.0.0" as const;
 
@@ -15,7 +18,7 @@ export type PrincipalRole = "model" | "host" | "reviewer" | "writer" | "operator
 /** principal 只能由 transport 创建，不能由请求 body 自行声明权限。 */
 export type PrincipalCapability =
   | "read" | "propose" | "review" | "admit" | "work" | "checkpoint"
-  | "action" | "audit" | "operator";
+  | "action" | "audit" | "operator" | "content" | "content_read";
 export interface Principal { id: string; role: PrincipalRole; engagement_id?: string; capabilities?: readonly PrincipalCapability[]; transport_verified: true; }
 
 // Transport adapters register principals here; callers cannot make an arbitrary
@@ -33,7 +36,7 @@ export interface ApiEnvelope<T> { ok: true; data: T; request_id?: string }
 export interface ErrorEnvelope { ok: false; error: ApiError }
 export type ApiResponse<T> = ApiEnvelope<T> | ErrorEnvelope;
 
-export function createCoreServiceForPath(filename = ":memory:"): CoreService { return createCoreService(new AuthorityStore(filename)); }
+export function createCoreServiceForPath(filename = ":memory:", configuredContentRoot?: string): CoreService { return createCoreService(new AuthorityStore(filename), configuredContentRoot ?? process.env.TARIC_CONTENT_ROOT ?? (filename === ":memory:" ? join(tmpdir(), "taric-content", uuidv7()) : join(dirname(filename), "content"))); }
 export function createAuthorityStoreForCli(filename = ":memory:"): AuthorityStore { return new AuthorityStore(filename); }
 
 const deferred = {
@@ -50,6 +53,7 @@ const hostScoped = new Set(["engagement.status", "context.build", "context.query
 const operatorScoped = new Set(["engagement.status", "context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "proposal.submit", "capture.observation", "admission.evaluate", "capability.status"]);
 const reviewerScoped = new Set(["review.submit", "review.get"]);
 const checkpointReasoningFields = new Set(["reasoning", "hidden_reasoning", "chain_of_thought", "thoughts", "internal_reasoning", "private_reasoning"]);
+const operationRequestValidators = new Map<string, ReturnType<typeof schemaValidator.compile>>();
 const adapterConfigPath = () => process.env.TARIC_ADAPTER_CONFIG ?? join(homedir(), ".taric", "adapters.json");
 function readAdapterConfig(): Record<string, unknown> { try { const value = JSON.parse(readFileSync(adapterConfigPath(), "utf8")); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; } }
 function saveAdapterConfig(value: Record<string, unknown>) { const path = adapterConfigPath(); mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); }
@@ -58,6 +62,25 @@ function containsCheckpointReasoning(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsCheckpointReasoning);
   if (!value || typeof value !== "object") return false;
   return Object.entries(value as Record<string, unknown>).some(([key, item]) => checkpointReasoningFields.has(key) || containsCheckpointReasoning(item));
+}
+
+function publicArtifactMetadata(row: import("./artifact-content-store.js").ArtifactRow): Record<string, unknown> {
+  const { relative_dir: _relativeDir, manifest_path: _manifestPath, ...metadata } = row;
+  return metadata;
+}
+function sanitizeModelValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeModelValue).filter((item) => item !== undefined);
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.content_ref === "string") {
+    const allowed = new Set(["content_ref", "artifact_id", "version", "storage_mode", "content_status", "integrity_status", "payload_kind", "media_type", "byte_length", "chunk_count", "content_hash", "manifest_hash", "captured_at", "stored_at", "provenance_ref", "derived_from", "child_refs"]);
+    return Object.fromEntries(Object.entries(record).filter(([key]) => allowed.has(key)).map(([key, item]) => [key, sanitizeModelValue(item)]));
+  }
+  if (Object.prototype.hasOwnProperty.call(record, "host_ref")) return undefined;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !/(?:location|summary|cookie|header|url|token|secret|credential|private_path|artifact_body|raw_artifact)/i.test(key)).map(([key, item]) => [key, sanitizeModelValue(item)]));
+}
+function sanitizeModelRecord(record: CanonicalRecord): CanonicalRecord {
+  return sanitizeModelValue(record) as CanonicalRecord;
 }
 
 export interface CoreService {
@@ -70,7 +93,7 @@ export interface CoreService {
   submitReview(principal: Principal, input: { engagement_id: string; proposal_id: string; reviewer_id: string; reviewer_kind: "reviewer"; input_hash: string; verdict: "pass" | "reject" | "needs_evidence" | "defer"; policy_digest: string; evidence_snapshot_hash?: string; rubric_hash?: string; limitations?: string[]; idempotency_key?: string; reviewer_capability?: "deterministic" | "model" | "human"; reviewer_model?: string; prompt_digest?: string; ruleset_digest?: string }): ApiResponse<Record<string, unknown>>;
   admitProposal(principal: Principal, input: { engagement_id: string; proposal_id: string; policy_digest: string; expected_base_version: number; idempotency_key?: string }): ApiResponse<Record<string, unknown>>;
   listProposals(principal: Principal, input: { engagement_id: string }): ApiResponse<Array<Record<string, unknown>>>;
-  workClaim(principal: Principal, input: { engagement_id: string; work_item_id: string; host_id: string; agent_id: string; ttl_ms?: number }): ApiResponse<Record<string, unknown>>;
+  workClaim(principal: Principal, input: { engagement_id: string; work_item_id: string; host_id: string; agent_id: string; ttl_ms?: number; task_session_ref?: string }): ApiResponse<Record<string, unknown>>;
   workRenew(principal: Principal, input: { engagement_id: string; work_run_id: string; generation: number; ttl_ms?: number }): ApiResponse<Record<string, unknown>>;
   workReclaim(principal: Principal, input: { engagement_id: string; work_run_id: string; agent_id: string; ttl_ms?: number }): ApiResponse<Record<string, unknown>>;
   auditReconcile(principal: Principal, input?: { action?: "preview" | "replay" | "rebuild" | "reconcile" }): ApiResponse<Record<string, unknown>>;
@@ -93,17 +116,60 @@ export interface CoreService {
   resourcePatch(principal: Principal, input: Record<string, unknown>): ApiResponse<Record<string, unknown>>;
   resourceRelation(principal: Principal, input: Record<string, unknown>): ApiResponse<Record<string, unknown>>;
   resourceImpact(principal: Principal, input: { engagement_id: string; source_id: string; limit?: number; continuation?: string }): ApiResponse<Record<string, unknown>>;
+  artifactSessionBind(principal: Principal, input: { engagement_id: string; session_id: string; root: string }): ApiResponse<Record<string, unknown>>;
+  artifactStoreBegin(principal: Principal, input: ArtifactBeginInput): ApiResponse<Record<string, unknown>>;
+  artifactStoreAppend(principal: Principal, input: ArtifactAppendInput): ApiResponse<Record<string, unknown>>;
+  artifactStoreCommit(principal: Principal, input: ArtifactCommitInput): ApiResponse<Record<string, unknown>>;
+  artifactMetadata(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string }): ApiResponse<Record<string, unknown>>;
+  artifactContentRead(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; max_response_bytes?: number }): ApiResponse<Record<string, unknown>>;
+  artifactContentList(principal: Principal, input: { engagement_id: string; session_id: string; cursor?: string; page_size?: number; category?: string; media_type?: string; work_run_id?: string; include_content?: boolean }): ApiResponse<Record<string, unknown>>;
+  artifactSessionOutput(principal: Principal, input: { engagement_id: string; session_id: string; cursor?: string; execution_cursor?: string; page_size?: number; include_content?: boolean; max_response_bytes?: number; work_run_id?: string; attempt_id?: string }): ApiResponse<Record<string, unknown>>;
   capabilityStatus(principal?: Principal): ApiResponse<Record<string, unknown>>;
   dispatch(operation: string, principal: Principal, request: Record<string, unknown>): ApiResponse<unknown>;
 }
 
-export function createCoreService(store: AuthorityStore): CoreService {
+export function createCoreService(store: AuthorityStore, contentRoot = process.env.TARIC_CONTENT_ROOT ?? join(tmpdir(), "taric-content", uuidv7())): CoreService {
+  const artifactStore = new ArtifactContentStore(contentRoot, store);
   const api = {
     init(engagement: { id: string; name?: string; scope_ref?: string }) {
       const record = store.commit({ id: engagement.id, engagement_id: engagement.id, kind: "engagement", name: engagement.name ?? "engagement", scope_ref: engagement.scope_ref }, "L2");
       return { ok: true as const, data: record };
     },
     status() { return { ok: true as const, data: { schema_version: API_CONTRACT_VERSION, schema_supported: true } }; },
+    artifactSessionBind(principal: Principal, input: { engagement_id: string; session_id: string; root: string }) {
+      const access = authorize(principal, "artifact.session.bind", input.engagement_id); if (!access.ok) return access;
+      return safe(() => { const { root: _root, ...binding } = artifactStore.bind(input); return { ok: true as const, data: binding as unknown as Record<string, unknown> }; });
+    },
+    artifactStoreBegin(principal: Principal, input: ArtifactBeginInput) {
+      const access = authorize(principal, "artifact.store.begin", input.engagement_id); if (!access.ok) return access;
+      return safe(() => ({ ok: true as const, data: artifactStore.begin(input, principal.id) }));
+    },
+    artifactStoreAppend(principal: Principal, input: ArtifactAppendInput) {
+      const access = authorize(principal, "artifact.store.append", input.engagement_id); if (!access.ok) return access;
+      return safe(() => ({ ok: true as const, data: artifactStore.append(input, principal.id) }));
+    },
+    artifactStoreCommit(principal: Principal, input: ArtifactCommitInput) {
+      const access = authorize(principal, "artifact.store.commit", input.engagement_id); if (!access.ok) return access;
+      return safe(() => ({ ok: true as const, data: publicArtifactMetadata(artifactStore.commit(input, principal.id)) }));
+    },
+    artifactMetadata(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string }) {
+      const access = authorize(principal, "artifact.metadata", input.engagement_id); if (!access.ok) return access;
+      return safe(() => ({ ok: true as const, data: artifactStore.metadata(input) }));
+    },
+    artifactContentRead(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; max_response_bytes?: number }) {
+      const access = authorize(principal, "artifact.content.read", input.engagement_id); if (!access.ok) return access;
+      return safe(() => ({ ok: true as const, data: artifactStore.readBounded({ ...input, principal_id: principal.id }) }));
+    },
+    artifactContentList(principal: Principal, input: { engagement_id: string; session_id: string; cursor?: string; page_size?: number; category?: string; media_type?: string; work_run_id?: string; include_content?: boolean }) {
+      const access = authorize(principal, "artifact.content.list", input.engagement_id); if (!access.ok) return access;
+      if ((input as typeof input & { include_content?: boolean }).include_content) { const rawAccess = authorize(principal, "artifact.content.read", input.engagement_id); if (!rawAccess.ok) return rawAccess; }
+      return safe(() => ({ ok: true as const, data: artifactStore.list({ ...input, principal_id: principal.id }) }));
+    },
+    artifactSessionOutput(principal: Principal, input: { engagement_id: string; session_id: string; cursor?: string; execution_cursor?: string; page_size?: number; include_content?: boolean; max_response_bytes?: number; work_run_id?: string; attempt_id?: string }) {
+      const access = authorize(principal, "artifact.session.output", input.engagement_id); if (!access.ok) return access;
+      if (input.include_content) { const rawAccess = authorize(principal, "artifact.content.read", input.engagement_id); if (!rawAccess.ok) return rawAccess; }
+      return safe(() => ({ ok: true as const, data: artifactStore.output({ ...input, principal_id: principal.id }) }));
+    },
     buildContext(principal: Principal, input: { engagement_id: string; budget?: number; include_candidates?: boolean; work_item_id?: string; worker_role?: string; policy_version?: string; read_seq?: number; cursor?: string; filters?: Record<string, unknown>; ordering?: string; checkpoint?: Record<string, unknown>; resume_from_seq?: number; pending_actions?: Array<Record<string, unknown>> }) {
       const response = authorize(principal, "context.build", input.engagement_id);
       if (!response.ok) return response;
@@ -112,7 +178,7 @@ export function createCoreService(store: AuthorityStore): CoreService {
     query(principal: Principal, input: { engagement_id: string; as_of?: number; trust_level?: TrustLevel; include_candidates?: boolean }) {
       const response = authorize(principal, "query", input.engagement_id);
       if (!response.ok) return response;
-      return safe(() => ({ ok: true as const, data: store.snapshot(input.engagement_id, { asOf: input.as_of, trustLevel: principal.role === "model" ? undefined : input.trust_level, includeCandidates: principal.role === "model" ? false : input.include_candidates }) }));
+      return safe(() => { const snapshot = store.snapshot(input.engagement_id, { asOf: input.as_of, trustLevel: principal.role === "model" ? undefined : input.trust_level, includeCandidates: principal.role === "model" ? false : input.include_candidates }); return { ok: true as const, data: principal.role === "model" ? { ...snapshot, records: snapshot.records.map(sanitizeModelRecord) } : snapshot }; });
     },
     submitProposal(principal: Principal, input: { engagement_id: string; subject_type: string; base_version: number; content: CanonicalRecord; work_run_id?: string; generation?: number; idempotency_key?: string }) {
       const response = authorize(principal, "proposal.submit", input.engagement_id);
@@ -162,7 +228,7 @@ export function createCoreService(store: AuthorityStore): CoreService {
       if (!response.ok) return response;
       return safe(() => ({ ok: true as const, data: store.proposals(input.engagement_id) as unknown as Array<Record<string, unknown>> }));
     },
-    workClaim(principal: Principal, input: { engagement_id: string; work_item_id: string; host_id: string; agent_id: string; ttl_ms?: number }) {
+    workClaim(principal: Principal, input: { engagement_id: string; work_item_id: string; host_id: string; agent_id: string; ttl_ms?: number; task_session_ref?: string }) {
       const response = authorize(principal, "work.claim", input.engagement_id);
       if (!response.ok) return response;
       return safe(() => ({ ok: true as const, data: store.claimWorkRun({ ...input, host_id: principal.id }) }));
@@ -184,10 +250,13 @@ export function createCoreService(store: AuthorityStore): CoreService {
     auditReconcile(principal: Principal, input: { action?: "preview" | "replay" | "rebuild" | "reconcile" } = {}) {
       const response = authorize(principal, "audit.reconcile");
       if (!response.ok) return response;
-      return safe(() => {
+      return safe<Record<string, unknown>>(() => {
         if (input.action !== undefined && !["preview", "replay", "rebuild", "reconcile"].includes(input.action)) return error("validation_error", "audit reconcile action must be preview, replay, rebuild, or reconcile");
-        if (input.action) return { ok: true as const, data: store.reconcileDerived(input.action) as unknown as Record<string, unknown> };
-        return { ok: true as const, data: { applied: store.consumeOutbox(), doctor: store.doctor() } };
+        if (input.action) return { ok: true as const, data: {
+          ...store.reconcileDerived(input.action) as unknown as Record<string, unknown>,
+          artifacts: input.action === "reconcile" || input.action === "preview" ? artifactStore.reconcile() : undefined,
+        } };
+        return { ok: true as const, data: { applied: store.consumeOutbox(), doctor: { ...store.doctor(), artifacts: artifactStore.reconcile() } } };
       });
     },
     errorReport(principal: Principal, input: { engagement_id: string; work_run_id?: string; generation?: number; error_ref?: string; message?: string }) {
@@ -308,7 +377,7 @@ export function createCoreService(store: AuthorityStore): CoreService {
     auditDoctor(principal: Principal) {
       const response = authorize(principal, "audit.doctor");
       if (!response.ok) return response;
-      return safe(() => ({ ok: true as const, data: store.doctor() as unknown as Record<string, unknown> }));
+      return safe(() => ({ ok: true as const, data: { ...store.doctor(), artifacts: artifactStore.reconcile() } as unknown as Record<string, unknown> }));
     },
     snapshotExport(principal: Principal, input: { engagement_id: string; as_of?: number }) {
       const response = authorize(principal, "snapshot.export", input.engagement_id);
@@ -395,7 +464,13 @@ export function createCoreService(store: AuthorityStore): CoreService {
       const requestedEngagement = typeof request.engagement_id === "string" ? request.engagement_id : typeof request.id === "string" && operation === "engagement.init" ? request.id : undefined;
       const access = authorize(principal, operation, requestedEngagement);
       if (!access.ok) return access;
-      const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "capabilityStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "snapshot.import": "snapshotImport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query" };
+      if (operation.startsWith("artifact.")) {
+        const requestContract = operationContract(operation)!.request as ContractName;
+        let validate = operationRequestValidators.get(requestContract);
+        if (!validate) { validate = schemaValidator.compile({ $id: `${coreSchema.$id}/requests/${requestContract}.json`, $defs: coreSchema.$defs, $ref: `#/$defs/${requestContract}` }); operationRequestValidators.set(requestContract, validate); }
+        if (!validate || !validate(request)) return error("validation_error", `invalid ${operation} request`);
+      }
+      const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "capabilityStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "snapshot.import": "snapshotImport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
       const methodName = aliases[operation] ?? operation;
       if (!Object.prototype.hasOwnProperty.call(api, methodName)) return error("unsupported_capability", "operation is not supported", "complete-taric-runtime-gaps");
       return safe(() => {
@@ -439,6 +514,8 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
   if (["checkpoint.commit"].includes(operation)) return "checkpoint";
   if (["action.host-decision", "action.host-result", "action.reconcile"].includes(operation)) return "action";
   if (["audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import"].includes(operation)) return "audit";
+  if (operation === "artifact.content.read") return "content_read";
+  if (operation.startsWith("artifact.")) return "content";
   if (["resource.revise", "resource.patch", "resource.relation", "resource.impact"].includes(operation)) return "propose";
   if (["engagement.init", "capability.status"].includes(operation)) return "operator";
   return undefined;
@@ -451,6 +528,8 @@ function safe<T>(operation: () => ApiResponse<T>): ApiResponse<T> {
       const code: ApiErrorCode = cause.code === "unsupported_schema_version" || cause.code === "unsupported_capability" || cause.code === "idempotency_conflict" || cause.code === "conflict" || cause.code === "stale_version" || cause.code === "authorization_error" ? cause.code : "validation_error";
       return error(code, cause.message, typeof cause.details === "string" ? cause.details : undefined);
     }
+    const errorCode = cause && typeof cause === "object" && "code" in cause ? String((cause as { code: unknown }).code) : "";
+    if (["validation_error", "authorization_error", "unsupported_capability", "unsupported_schema_version", "idempotency_conflict", "stale_version", "conflict", "unavailable_host"].includes(errorCode)) return error(errorCode as ApiErrorCode, cause instanceof Error ? cause.message : "artifact operation failed");
     const message = cause instanceof Error ? cause.message : "internal error";
     // 只有明确可识别的冲突语义才映射为 stale_version，其余一律 internal_error 且不泄漏堆栈。
     if (/unavailable host/i.test(message)) return error("unavailable_host", message);

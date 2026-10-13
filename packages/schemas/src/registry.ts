@@ -52,6 +52,7 @@ export interface OperationContract {
   mutates_authority: boolean;
   /** 需要 Engagement 归属校验。 */
   engagement_scoped: boolean;
+  capability?: string;
 }
 
 export interface UnsupportedContract {
@@ -105,6 +106,14 @@ export const operationContracts: OperationContract[] = [
   { operation: "action.host-decision", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.host-result", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.reconcile", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "artifact.session.bind", roles: ["host", "operator"], request: "artifactSessionBinding", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "artifact.store.begin", roles: ["host", "operator"], request: "artifactStoreBegin", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "artifact.store.append", roles: ["host", "operator"], request: "artifactStoreAppend", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "artifact.store.commit", roles: ["host", "operator"], request: "artifactStoreCommit", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "artifact.metadata", roles: ["host", "operator"], request: "artifactContentRead", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "artifact.content.read", roles: ["host", "operator"], request: "artifactContentRead", response: "apiSuccess", errors: [...COMMON_READ_ERRORS, "unavailable_host"], idempotent: false, mutates_authority: false, engagement_scoped: true, capability: "content_read" },
+  { operation: "artifact.content.list", roles: ["host", "operator"], request: "artifactContentList", response: "apiSuccess", errors: [...COMMON_READ_ERRORS, "unavailable_host"], idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "artifact.session.output", roles: ["host", "operator"], request: "artifactSessionOutput", response: "apiSuccess", errors: [...COMMON_READ_ERRORS, "unavailable_host"], idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "audit.verify", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "audit.doctor", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "audit.reconcile", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: false },
@@ -135,7 +144,10 @@ export const permanentNonGoals: Array<{ capability: string; reason: string }> = 
   { capability: "hitl_identity", reason: "Taric 不建立人的身份或 HITL 审批系统" },
   { capability: "agent_loop", reason: "Taric 不实现 agent loop 或 worker 调度" },
   { capability: "audit_signing_keys", reason: "Taric 不托管审计签名密钥" },
-  { capability: "artifact_content_management", reason: "Artifact 内容、保留与脱敏由宿主管理" },
+  { capability: "artifact_redaction", reason: "Taric stores opaque originals and does not redact payloads" },
+  { capability: "secret_scanning", reason: "Taric does not inspect raw payloads for secrets" },
+  { capability: "credential_lifecycle", reason: "Taric does not manage credential or token lifecycle" },
+  { capability: "content_retention", reason: "Retention and expiry remain host/operator policy" },
 ];
 
 const operationsByName = new Map(operationContracts.map((contract) => [contract.operation, contract]));

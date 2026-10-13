@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCoreService } from "@taric/core";
+import { createPrincipal, uuidv7 } from "@taric/core";
 import { AuthorityStore } from "@taric/core/dist/store.js";
 import { cliCommands, cliSubcommands, discoverCliConfig, normalizeCliOperation, resolveCliStartup, runCli } from "../dist/cli.js";
 
@@ -62,14 +63,59 @@ test("normalizeCliOperation only resolves documented verbs", () => {
   assert.deepEqual(Object.keys(cliSubcommands).sort(), ["action", "adapter", "audit", "context"]);
 });
 
+test("Artifact CLI commands forward explicit content reads through Core only", async () => {
+  assert.equal(normalizeCliOperation(["artifact.content.read"]), "artifact.content.read");
+  assert.ok(cliCommands.includes("artifact.session.bind"));
+  assert.ok(cliCommands.includes("artifact.store.append"));
+  let received;
+  const mock = { dispatch(operation, principal, request) { received = { operation, principal, request }; return { ok: true, data: { accepted: true } }; } };
+  const result = await runCli(["artifact.session.output", JSON.stringify({ engagement_id: "e", session_id: "s" }), "--include-content"], mock, { id: "host", role: "host", engagement_id: "e", capabilities: ["content_read"] });
+  assert.equal(result.exitCode, 0);
+  assert.equal(received.operation, "artifact.session.output");
+  assert.equal(received.request.include_content, true);
+  assert.ok(received.principal.capabilities.includes("content_read"));
+});
+
+test("Artifact CLI round-trips content through Core and requires explicit read capability", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-cli-artifact-"));
+  const engagement_id = uuidv7();
+  const session_id = "cli-session";
+  const contentRoot = join(dir, "content");
+  const store = new AuthorityStore();
+  const service = createCoreService(store, contentRoot);
+  const host = { id: "cli-host", role: "host", engagement_id };
+  const bytes = Buffer.from([0, 255, 10, 13, 42]);
+  const { createHash } = await import("node:crypto");
+  const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const call = async (operation, input, extra = []) => runCli([operation, JSON.stringify(input), ...extra], service, host);
+  try {
+    const binding = await call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id) });
+    assert.equal(binding.exitCode, 0);
+    const begun = JSON.parse((await call("artifact.store.begin", { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: digest })).stdout).data;
+    assert.equal(begun.content_status, "pending");
+    assert.equal((await call("artifact.store.append", { engagement_id, session_id, upload_id: begun.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest })).exitCode, 0);
+    const committed = JSON.parse((await call("artifact.store.commit", { engagement_id, session_id, upload_id: begun.upload_id, total_bytes: bytes.length, content_hash: digest })).stdout).data;
+    const denied = await call("artifact.content.read", { engagement_id, session_id, content_ref: committed.content_ref });
+    assert.equal(denied.exitCode, 1);
+    assert.equal(JSON.parse(denied.stderr).error.code, "authorization_error");
+    const read = await runCli(["artifact.content.read", JSON.stringify({ engagement_id, session_id, content_ref: committed.content_ref })], service, { ...host, capabilities: ["content_read"] });
+    assert.equal(read.exitCode, 0);
+    assert.deepEqual(Buffer.from(JSON.parse(read.stdout).data.data, "base64"), bytes);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("configuration discovery validates a deterministic JSON file", async () => {
   const dir = await mkdtemp(join(tmpdir(), "taric-cli-config-"));
   try {
     const configPath = join(dir, "config.json");
-    await (await import("node:fs/promises")).writeFile(configPath, JSON.stringify({ db_path: join(dir, "authority.sqlite"), principal_role: "host" }));
+    await (await import("node:fs/promises")).writeFile(configPath, JSON.stringify({ db_path: join(dir, "authority.sqlite"), content_root: join(dir, "content"), principal_role: "host" }));
     const found = discoverCliConfig({ TARIC_CONFIG: configPath }, dir, dir);
     assert.equal(found.path, configPath);
     assert.equal(found.config.principal_role, "host");
+    assert.equal(found.config.content_root, join(dir, "content"));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

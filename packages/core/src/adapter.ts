@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalRole } from "./service.js";
+import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalCapability, type PrincipalRole } from "./service.js";
 
 /** Adapter 契约版本与 Core API 版本分开演进；两者都必须显式声明。 */
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
@@ -279,14 +279,14 @@ export class TaricAdapterClient implements AdapterClient {
   }
 }
 
-export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string): Principal {
+export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string, grant: readonly PrincipalCapability[] = []): Principal {
   const defaults: Record<PrincipalRole, Principal["capabilities"]> = {
     model: ["read", "propose"],
-    host: ["read", "propose", "work", "checkpoint", "action"],
+    host: ["read", "propose", "work", "checkpoint", "action", "content"],
     reviewer: ["read", "review"],
     writer: ["read", "propose", "admit", "audit"],
-    operator: ["read", "propose", "admit", "audit", "operator"],
+    operator: ["read", "propose", "admit", "audit", "operator", "content"],
   };
-  const principal = { id, role, engagement_id: engagementId, capabilities: defaults[role], transport_verified: true } as Principal;
+  const principal = { id, role, engagement_id: engagementId, capabilities: [...new Set([...(defaults[role] ?? []), ...grant])], transport_verified: true } as Principal;
   return registerTransportPrincipal(principal);
 }

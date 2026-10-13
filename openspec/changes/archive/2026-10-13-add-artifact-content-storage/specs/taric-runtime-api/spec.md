@@ -16,6 +16,11 @@ The system SHALL expose JSON Schema request/response/error contracts for the exi
 - **WHEN** an authenticated host or operator sends a valid Artifact operation for an authorized Engagement and task session
 - **THEN** the Core service returns the documented bounded page/chunk, continuation cursor, watermark, `max_response_bytes`, media metadata, explicitly requested content, or correlated session output response
 
+#### Scenario: Store and read bounded Artifact content
+
+- **WHEN** an authorized host binds a task session, uploads ordered chunks, commits a matching full hash, and requests metadata or a bounded content range
+- **THEN** Core returns metadata or at most one bounded native-byte chunk with media metadata, integrity status, and an optional continuation cursor; no request accepts an arbitrary path
+
 #### Scenario: Call an unsupported operation version
 
 - **WHEN** a client sends an unsupported contract version, malformed content request, or missing session binding
@@ -59,6 +64,11 @@ The system SHALL expose separate model-facing, authenticated host-adapter, and o
 
 - **WHEN** a valid principal requests an Artifact or task session outside its Taric permission set
 - **THEN** Taric returns a stable authorization error without disclosing whether protected records, files, or paths exist
+
+#### Scenario: Model client requests Artifact bytes
+
+- **WHEN** a model-facing client requests `artifact.content.read`, `include_content=true`, or a task-session path
+- **THEN** Taric rejects it without reading or disclosing payload bytes, paths, or existence details
 
 ### Requirement: Provide an executable operator CLI
 

@@ -102,9 +102,11 @@
     },
     "artifactReference": {
       "type": "object",
-      "description": "宿主管理的 Artifact 引用。Taric 只保存引用元数据，不保存内容。",
-      "required": [
-        "host_ref"
+      "description": "Opaque Artifact reference. Content may remain external or be explicitly stored in a bound task session.",
+      "required": [],
+      "anyOf": [
+        { "required": ["host_ref"], "properties": { "host_ref": {} } },
+        { "required": ["content_ref"], "properties": { "content_ref": {} } }
       ],
       "properties": {
         "host_ref": {
@@ -113,12 +115,219 @@
         "content_hash": {
           "$ref": "#/$defs/sha256"
         },
+        "manifest_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "content_ref": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "artifact_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "storage_mode": {
+          "enum": [
+            "external",
+            "taric_stored"
+          ]
+        },
+        "content_status": {
+          "enum": [
+            "external",
+            "staged",
+            "available",
+            "unavailable",
+            "integrity_failed",
+            "quarantined",
+            "deleted"
+          ]
+        },
+        "integrity_status": {
+          "enum": [
+            "unverified",
+            "verified",
+            "mismatch",
+            "missing"
+          ]
+        },
+        "payload_kind": {
+          "enum": [
+            "text",
+            "binary",
+            "manifest"
+          ]
+        },
         "location": {
           "type": "string"
         },
         "media_type": {
           "type": "string"
+        },
+        "charset": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "content_encoding": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "transfer_encoding": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "captured_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "stored_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "summary_ref": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provenance_ref": {
+          "$ref": "#/$defs/uuid"
+        },
+        "derived_from": {
+          "$ref": "#/$defs/uuid"
+        },
+        "child_refs": {
+          "$ref": "#/$defs/uuidList"
         }
+      },
+      "additionalProperties": false
+    },
+    "artifactSessionBinding": {
+      "type": "object",
+      "required": ["engagement_id", "session_id", "root"] ,
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "root": { "$ref": "#/$defs/nonEmptyString" },
+        "binding_id": { "$ref": "#/$defs/nonEmptyString" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "manifest_hash": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "artifactStoreBegin": {
+      "type": "object",
+      "required": ["engagement_id", "session_id", "payload_kind", "media_type"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "payload_kind": { "enum": ["text", "binary", "manifest"] },
+        "storage_mode": { "enum": ["external", "taric_stored"] },
+        "media_type": { "$ref": "#/$defs/nonEmptyString" },
+        "charset": { "type": "string", "maxLength": 256 },
+        "content_encoding": { "type": "string", "maxLength": 256 },
+        "transfer_encoding": { "type": "string", "maxLength": 256 },
+        "captured_at": { "$ref": "#/$defs/timestamp" },
+        "summary_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "type": "string", "maxLength": 4096 },
+        "expected_bytes": { "type": "integer", "minimum": 0 },
+        "expected_hash": { "$ref": "#/$defs/sha256" },
+        "category": { "$ref": "#/$defs/nonEmptyString" },
+        "host_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "work_run_id": { "$ref": "#/$defs/uuid" },
+        "attempt_id": { "$ref": "#/$defs/uuid" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "base_content_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "parent_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "derived_from": { "$ref": "#/$defs/nonEmptyString" },
+        "child_refs": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "artifactStoreAppend": {
+      "type": "object",
+      "required": ["engagement_id", "session_id", "upload_id", "ordinal", "chunk_hash", "data"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "upload_id": { "$ref": "#/$defs/nonEmptyString" },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "chunk_hash": { "$ref": "#/$defs/sha256" },
+        "data": { "$ref": "#/$defs/nonEmptyString", "type": "string", "maxLength": 89478488 },
+        "encoding": { "const": "base64" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "artifactStoreCommit": {
+      "type": "object",
+      "required": ["engagement_id", "session_id", "upload_id", "total_bytes", "content_hash"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "upload_id": { "$ref": "#/$defs/nonEmptyString" },
+        "total_bytes": { "type": "integer", "minimum": 0 },
+        "chunk_count": { "type": "integer", "minimum": 0 },
+        "content_hash": { "$ref": "#/$defs/sha256" },
+        "manifest_hash": { "$ref": "#/$defs/sha256" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "artifactContentRead": {
+      "type": "object",
+      "required": ["engagement_id", "session_id", "content_ref"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "content_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "offset": { "type": "integer", "minimum": 0 },
+        "length": { "type": "integer", "minimum": 1, "maximum": 67108864 },
+        "chunk_cursor": { "$ref": "#/$defs/nonEmptyString" },
+        "include_content": { "type": "boolean" },
+        "max_response_bytes": { "type": "integer", "minimum": 1, "maximum": 67108864 }
+      },
+      "additionalProperties": false
+    },
+    "artifactContentList": {
+      "type": "object",
+      "required": ["engagement_id", "session_id"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "cursor": { "$ref": "#/$defs/nonEmptyString" },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "category": { "type": "string" },
+        "media_type": { "type": "string" },
+        "work_run_id": { "$ref": "#/$defs/uuid" },
+        "include_content": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "artifactSessionOutput": {
+      "type": "object",
+      "required": ["engagement_id", "session_id"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "cursor": { "$ref": "#/$defs/nonEmptyString" },
+        "execution_cursor": { "$ref": "#/$defs/nonEmptyString" },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "include_content": { "type": "boolean" },
+        "max_response_bytes": { "type": "integer", "minimum": 1, "maximum": 67108864 },
+        "work_run_id": { "$ref": "#/$defs/uuid" },
+        "attempt_id": { "$ref": "#/$defs/uuid" }
       },
       "additionalProperties": false
     },
@@ -1461,6 +1670,15 @@
             },
             "ended_at": {
               "$ref": "#/$defs/timestamp"
+            },
+            "task_session_ref": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "artifact_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/artifactReference"
+              }
             }
           }
         }
@@ -1525,6 +1743,15 @@
             },
             "pending_action_refs": {
               "$ref": "#/$defs/uuidList"
+            },
+            "task_session_ref": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "artifact_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/artifactReference"
+              }
             }
           }
         }
@@ -1705,6 +1932,15 @@
             },
             "context_manifest": {
               "$ref": "#/$defs/contextManifest"
+            },
+            "task_session_ref": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "artifact_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/artifactReference"
+              }
             }
           }
         }

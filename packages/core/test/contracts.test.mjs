@@ -33,6 +33,13 @@ const fixtures = {
   workRun: () => ({ ...base(), work_item_ref: randomUUID(), status: "running", generation: 1 }),
   checkpoint: () => ({ ...base(), work_item_ref: randomUUID(), work_run_ref: randomUUID(), attempt_ref: randomUUID(), generation: 1, target_version: 1, work_item_version: 1, scope_version: 0, owner: { host_id: "pi", agent_id: "worker" }, lease_expires_at: "2026-10-09T00:02:00.000Z", source_read_seq: 1, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: randomUUID(), read_seq: 1, builder_version: "context/1.0" } }),
   actionIntent: () => ({ ...base(), target: "host-ref", method: "inspect", status: "recommended", mode: "llm_recommend" }),
+  artifactSessionBinding: () => ({ engagement_id: randomUUID(), session_id: "session-1", root: "/tmp/session-1" }),
+  artifactStoreBegin: () => ({ engagement_id: randomUUID(), session_id: "session-1", payload_kind: "binary", media_type: "application/octet-stream" }),
+  artifactStoreAppend: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", ordinal: 0, chunk_hash: `sha256:${"a".repeat(64)}`, data: "YQ==", encoding: "base64" }),
+  artifactStoreCommit: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", total_bytes: 1, content_hash: `sha256:${"a".repeat(64)}` }),
+  artifactContentRead: () => ({ engagement_id: randomUUID(), session_id: "session-1", content_ref: "artifact-1@v1", offset: 0, length: 1 }),
+  artifactContentList: () => ({ engagement_id: randomUUID(), session_id: "session-1", page_size: 10 }),
+  artifactSessionOutput: () => ({ engagement_id: randomUUID(), session_id: "session-1", page_size: 10, include_content: false }),
   auditEvent: () => ({ event_id: randomUUID(), commit_seq: 1, event_type: "record.commit", created_at: "2026-10-09T00:00:00.000Z", hash: `sha256:${"a".repeat(64)}` }),
   apiSuccess: () => ({ ok: true, data: {} }),
   apiError: () => ({ ok: false, error: { code: "validation_error", message: "invalid" } }),
@@ -70,4 +77,14 @@ test("reference schemas reject malformed UUID identifiers", () => {
   const invalid = fixtures.relation();
   invalid.to_ref = "not-a-uuid";
   assert.equal(validate(invalid), false);
+});
+
+test("Artifact references require either an external locator or an opaque content reference", () => {
+  const validate = schemaValidator.compile({ $ref: `${contractSchema.$id}#/$defs/artifactReference` });
+  const local = { content_ref: `${randomUUID()}@v1`, artifact_id: randomUUID(), version: 1, storage_mode: "taric_stored", content_status: "available", payload_kind: "binary", media_type: "application/octet-stream", byte_length: 1, chunk_count: 1, content_hash: `sha256:${"a".repeat(64)}` };
+  assert.equal(validate(local), true, JSON.stringify(validate.errors));
+  const external = { host_ref: "opaque-host-ref", storage_mode: "external", content_status: "external" };
+  assert.equal(validate(external), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ media_type: "application/octet-stream" }), false);
+  assert.equal(validate({ ...local, arbitrary_path: "/tmp/payload" }), false);
 });

@@ -2,7 +2,7 @@
 
 Taric 是一个面向多智能体渗透测试的长期记忆与协作扩展。Core 提供版本化的 Engagement 权威状态、提案治理、证据引用、覆盖评估、任务租约、checkpoint、审计恢复、Context Pack 和可重建投影；CLI、MCP 与宿主 adapter 共享同一套 API 合同。
 
-Taric作为独立插件或扩展，自身不运行模型，不决策启动，不启动 agent，不执行目标系统的操作。交由上层宿主应用负责 agent 调度、工具调用和动作授权。宿主也负责 Artifact 内容、凭据、保留期限和脱敏。
+Taric作为独立插件或扩展，自身不运行模型，不决策启动，不启动 agent，不执行目标系统的操作。交由上层宿主应用负责 agent 调度、工具调用和动作授权。Artifact 可继续由宿主外部管理；宿主也可显式授权 Taric 在已绑定的任务会话 spool 中保存 opaque 原始内容。凭据生命周期、内容脱敏和保留期限仍由宿主/operator 负责。
 
 
 ## 设计边界
@@ -13,10 +13,10 @@ Taric作为独立插件或扩展，自身不运行模型，不决策启动，不
 | 区分待审提案、机审候选和独立验证记录 | 调用渗透测试工具 |
 | 记录证据引用和测试覆盖状态 | 决定高风险动作是否允许 |
 | 管理 WorkRun、checkpoint 和 handoff 状态 | 选择自主执行或 HITL 流程 |
-| 生成受字段白名单控制的 Markdown 投影 | 保存、脱敏和删除 Artifact 内容 |
+| 按授权在任务会话 spool 保存 opaque Artifact 原始字节 | 管理 Artifact 脱敏、凭据生命周期和保留策略 |
 | 记录宿主回传的动作决定和结果 | 管理凭据、审批人身份和用户授权 |
 
-Core 的权威边界是单主写入的 SQLite WAL authority；多主机 PostgreSQL profile 属于后续能力。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。Artifact 正文、凭据、模型调用、worker 调度和目标系统请求不进入 Core。
+Core 的权威边界是单主写入的 SQLite WAL authority；多主机 PostgreSQL profile 属于后续能力。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。可选 Artifact spool 的 payload 文件位于配置的内容根目录，不嵌入 authority 数据库、审计事件或模型输出。模型调用、worker 调度和目标系统请求不进入 Core。
 
 Taric 支持三种动作协作模式：
 
@@ -28,7 +28,8 @@ Taric 支持三种动作协作模式：
 
 ## 核心限制
 
-- Taric 不保存 Artifact 原文。
+- Taric 可通过 `artifact.session.bind` 和 `artifact.store.*` 在显式绑定的任务会话 spool 中保存 opaque 文本或二进制原文；默认 model/MCP、Context、Markdown projection 和 snapshot 不返回原文。
+- Artifact spool 仅按 host/operator 显式授权使用。Taric 不解析、执行、解密、扫描或脱敏 payload，也不自动删除、恢复或应用保留期限。
 - Taric 不保存凭据或 Token。
 - Taric 不扫描或脱敏宿主数据。
 - Taric 不发起目标系统请求。
@@ -44,7 +45,7 @@ Taric 支持三种动作协作模式：
 - **Engagement**：一次有明确范围和规则的测试。
 - **Resource**：一个目标资源，例如主机、服务、路由或接口。
 - **Observation**：在特定时间、身份和条件下得到的观察。
-- **Evidence**：支撑观察或 Finding 的证据记录。大对象保存在宿主中。Taric 保存引用。
+- **Evidence**：支撑观察或 Finding 的证据记录。大对象可以保留在宿主，也可以按授权写入 Taric 任务会话 spool；领域记录只引用 Artifact，不嵌入正文。
 - **Claim**：可以由证据支持或反驳的陈述。
 - **Proposal**：agent 提交的候选变更。Proposal 不会直接改变权威记忆。
 - **Finding**：经过独立证据审核的安全问题。
