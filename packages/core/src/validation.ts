@@ -10,7 +10,7 @@ export function compileSchema<T>(schema: AnySchema): ValidateFunction<T> {
   return schemaValidator.compile<T>(schema);
 }
 
-export type ValidationCode = "validation_error" | "authorization_error" | "stale_version" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability";
+export type ValidationCode = "validation_error" | "authorization_error" | "stale_version" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability" | "unavailable_host";
 export class ContractValidationError extends Error {
   readonly code: ValidationCode;
   readonly details: unknown;
@@ -30,6 +30,46 @@ contractSchemaValidator.addSchema(coreSchema);
 for (const name of contractNames) {
   const validator = contractSchemaValidator.getSchema(`${coreSchema.$id}#/$defs/${name}`);
   if (validator) validators.set(name, validator);
+}
+
+export const UUID_V7_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+export const proposalSubjectContracts: Readonly<Record<string, ContractName>> = Object.freeze({
+  scope: "scope", resource: "resource", resource_revision: "resourceRevision", observation: "observation", relation: "relation", claim: "claim", test_hypothesis: "testHypothesis", attack_path: "attackPath", work_item: "workItem", evidence: "evidence", finding: "finding", coverage: "coverageCell", coverage_cell: "coverageCell", negative_observation: "negativeObservation", protective_control: "protectiveControl", protective_control_revision: "protectiveControlRevision", control_observation: "controlObservation", access_decision_observation: "accessDecisionObservation", checkpoint: "checkpoint", action_intent: "actionIntent", action_recommendation: "actionIntent",
+});
+const candidateValidator = contractSchemaValidator.getSchema(`${coreSchema.$id}#/$defs/proposalCandidate`)!;
+const envelopeValidator = contractSchemaValidator.getSchema(`${coreSchema.$id}#/$defs/proposalEnvelope`)!;
+
+/** Validate untrusted proposal data without manufacturing a canonical identity. */
+export function validateProposalEnvelope(value: unknown): void {
+  const envelope = value as Record<string, unknown> | undefined;
+  const content = envelope?.content as Record<string, unknown> | undefined;
+  if (content?.schema_version !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "proposal schema version is not supported");
+  if (!envelopeValidator(value)) throw new ContractValidationError("validation_error", "invalid proposal envelope", envelopeValidator.errors);
+  if (envelope!.target_id !== undefined && envelope!.subject_ref !== undefined && envelope!.target_id !== envelope!.subject_ref) throw new ContractValidationError("validation_error", "proposal target_id and subject_ref must agree");
+  const target = envelope!.target_id ?? envelope!.subject_ref;
+  if ((Number(envelope!.expected_version) > 0) !== (target !== undefined)) throw new ContractValidationError("validation_error", "updates require an explicit target and positive expected_version; creates require expected_version zero");
+  if (content!.engagement_id !== envelope!.engagement_id) throw new ContractValidationError("validation_error", "proposal content must belong to the proposal engagement");
+  validateProposalCandidate(String(envelope!.subject_type), content!);
+}
+
+/** Reuse the canonical domain schema for candidate shape, with writer metadata
+ * substituted only in this temporary validation object. Evidence and review
+ * availability are deliberately left to the separate L2 hard gates. */
+export function validateProposalCandidate(subjectType: string, content: Record<string, unknown>): void {
+  if (!candidateValidator(content)) throw new ContractValidationError("validation_error", "proposal contains privileged fields or an invalid candidate shape", candidateValidator.errors);
+  const expectedKind = subjectType === "action_recommendation" ? "action_intent" : subjectType;
+  if (content.kind !== expectedKind) throw new ContractValidationError("validation_error", "proposal subject_type must match explicit candidate kind");
+  const contract = proposalSubjectContracts[subjectType];
+  if (!contract) throw new ContractValidationError("validation_error", "unsupported proposal subject type");
+  if (content.kind === "finding" && content.status !== "draft") throw new ContractValidationError("validation_error", "finding candidates must remain draft until L2 promotion");
+  if (content.status === "verified" || content.status === "supported") throw new ContractValidationError("validation_error", "proposal cannot assert a verified status");
+  const canonical = {
+    created_at: new Date().toISOString(),
+    ...content,
+    id: "00000000-0000-7000-8000-000000000000",
+    provenance: { ...(content.provenance as Record<string, unknown> ?? { host_id: "taric-core", producer_id: "taric-core" }), source_kind: "host" },
+  };
+  validateContract(contract, canonical);
 }
 
 /**
@@ -121,6 +161,12 @@ function referenceFields(record: Record<string, unknown>): Array<[string, string
   return refs;
 }
 
+/** Return the distinct authority ids referenced by a candidate. Store callers use
+ * this to build a bounded index for one proposal instead of scanning all rows. */
+export function authorityReferenceIds(record: Record<string, unknown>): string[] {
+  return [...new Set(referenceFields(record).map(([, ref]) => ref))];
+}
+
 /**
  * 跨引用校验：归属、种类和 recall 状态。Core store 在同一事务里用真实索引调用它，
  * 所以缺失引用、跨 Engagement 引用和指向已撤回对象的引用都会 fail closed。
@@ -159,11 +205,14 @@ export function validateAuthorityReferences(record: Record<string, unknown>, ind
 export function validateContract(name: ContractName, value: unknown): asserts value {
   if (!value || typeof value !== "object") throw new ContractValidationError("validation_error", `${name} must be an object`);
   const candidate = value as Record<string, unknown>;
-  if (candidate.schema_version !== SCHEMA_VERSION) {
+  const versioned = !["proposalEnvelope", "proposalProvenance", "promotionL2", "apiSuccess", "apiError", "auditEvent"].includes(name) && !name.startsWith("artifact");
+  if (versioned && candidate.schema_version !== SCHEMA_VERSION) {
     throw new ContractValidationError("unsupported_schema_version", `unsupported schema version for ${name}`, { expected: SCHEMA_VERSION, received: candidate.schema_version });
   }
   const validate = validators.get(name);
   if (validate && !validate(value)) throw new ContractValidationError("validation_error", `invalid ${name} contract`, validate.errors);
+  if (name === "proposalEnvelope") { validateProposalEnvelope(value); return; }
+  if (name === "proposalCandidate" || name === "proposalProvenance" || name === "promotionL2" || name === "apiSuccess" || name === "apiError" || name === "auditEvent" || name.startsWith("artifact")) return;
   validateCanonicalRecord(candidate);
 }
 
@@ -172,6 +221,9 @@ export function validateContract(name: ContractName, value: unknown): asserts va
  * 这些规则覆盖归属、时间范围、信任迁移、证据限制与 control/origin 语义。
  */
 export function validateCanonicalRecord(candidate: Record<string, unknown>, trustLevel?: string): void {
+  if (!UUID_V7_PATTERN.test(String(candidate.id ?? "")) || !UUID_V7_PATTERN.test(String(candidate.engagement_id ?? ""))) {
+    throw new ContractValidationError("validation_error", "canonical identity and engagement_id must be UUIDv7");
+  }
   if (candidate.engagement_id === undefined || typeof candidate.engagement_id !== "string" || candidate.engagement_id.length === 0) {
     throw new ContractValidationError("validation_error", "engagement ownership is required");
   }

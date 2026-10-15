@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { uuidv7 as randomUUID } from "../dist/index.js";
 
 const { coreSchema: contractSchema, contractNames } = await import("@taric/schemas");
 const { schemaValidator } = await import("../dist/validation.js");
@@ -21,10 +21,14 @@ const fixtures = {
   claim: () => ({ ...base(), proposition: "Resource has property", status: "proposed", evidence_refs: [], limitations: [] }),
   workItem: () => ({ ...base(), title: "Review endpoint", status: "queued", acceptance_criteria: ["reviewed"] }),
   evidence: () => ({ ...base(), artifact_ref: { host_ref: "host-artifact:1" }, observed_at: "2026-10-09T00:00:00.000Z", limitations: [] }),
-  finding: () => ({ ...base(), title: "Finding", claim_refs: [randomUUID()], evidence_refs: [randomUUID()], review_ref: randomUUID(), status: "verified" }),
+  finding: () => ({ ...base(), title: "Finding", claim_refs: [randomUUID()], evidence_refs: [randomUUID()], review_ref: randomUUID(), policy_digest: `sha256:${"a".repeat(64)}`, status: "verified" }),
   coverageCell: () => ({ ...base(), resource_ref: randomUUID(), test_category: "access-control", status: "blocked_by_control", limitations: [] }),
   negativeObservation: () => ({ ...base(), statement: "bounded negative observation", method: "GET /", baseline_ref: randomUUID(), tested_resource_refs: [randomUUID()], conditions: ["role=user"], evidence_refs: [], limitations: ["single identity"], bounded: true, tested_at: "2026-10-09T00:00:00.000Z" }),
-  proposal: () => ({ ...base(), subject_type: "observation", content_hash: `sha256:${"a".repeat(64)}`, status: "pending", base_version: 0 }),
+  proposal: () => ({ ...base(), subject_type: "observation", content_hash: `sha256:${"a".repeat(64)}`, status: "pending", expected_version: 0 }),
+  proposalCandidate: () => ({ schema_version: "1.0.0", engagement_id: randomUUID(), kind: "claim", proposition: "candidate", status: "proposed", evidence_refs: [], limitations: [] }),
+  proposalEnvelope: () => ({ engagement_id: randomUUID(), subject_type: "claim", expected_version: 0, content: fixtures.proposalCandidate() }),
+  proposalProvenance: () => ({ host_id: "pi", producer_id: "model", source_kind: "model" }),
+  promotionL2: () => ({ engagement_id: randomUUID(), proposal_id: randomUUID(), target_id: randomUUID(), expected_version: 1, input_hash: `sha256:${"a".repeat(64)}`, evidence_snapshot_hash: `sha256:${"b".repeat(64)}`, policy_digest: `sha256:${"c".repeat(64)}`, review_refs: [randomUUID()] }),
   review: () => ({ ...base(), proposal_ref: randomUUID(), reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: `sha256:${"a".repeat(64)}`, verdict: "pass" }),
   protectiveControl: () => ({ ...base(), name: "WAF", layer: "edge", resource_ref: randomUUID(), control_kind: "waf" }),
   controlObservation: () => ({ ...base(), control_ref: randomUUID(), outcome: "inconclusive", observed_at: "2026-10-09T00:00:00.000Z", evidence_refs: [], limitations: [] }),
@@ -65,10 +69,11 @@ for (const name of contractNames) {
     else if (name === "apiSuccess") delete invalid.data;
     else if (name === "apiError") delete invalid.error;
     else if (name === "auditEvent") delete invalid.event_type;
+    else if (name === "proposalProvenance") delete invalid.source_kind;
     assert.equal(validate(invalid), false);
     const extra = fixtures[name]();
     extra.unexpected = true;
-    if (name !== "recordBase" && name !== "scope" && name !== "engagement" && name !== "resource" && name !== "observation" && name !== "relation" && name !== "claim" && name !== "workItem" && name !== "evidence" && name !== "finding" && name !== "coverageCell" && name !== "proposal" && name !== "review") assert.equal(validate(extra), false);
+    if (!["recordBase", "scope", "engagement", "resource", "observation", "relation", "claim", "workItem", "evidence", "finding", "coverageCell", "proposal", "review", "proposalCandidate"].includes(name)) assert.equal(validate(extra), false);
   });
 }
 

@@ -41,11 +41,11 @@ Taric 自身不运行模型、不启动 agent、不执行目标系统操作、�
 - 在显式授权的任务会话 spool 中保存 opaque 的 Artifact 原始字节（HTTP 交换、截图、日志、抓包、扫描器输出、上传/下载文件等，可含凭据/Token/Cookie 物料），分块可恢复上传、按引用有界读取。
 - 导出/导入 JSON/JSONL 快照，运行 doctor/reconcile 诊断并修复派生层。
 - 生成带 manifest 哈希的 Markdown 投影与本地 Git checkpoint；默认本地、远端需显式防护。
-- 通过 MCP 暴露 6 个受限模型工具，通过 CLI 暴露全部 49 个操作的 JSON 接口。
+- MCP 暴露 6 个受限模型工具；统一注册表登记 50 个 operation，CLI 清单有 45 个标准命令并可转发注册表中的受权操作。
 
 ### 1.3 架构风格
 
-**分层单仓 monorepo + 单写者权威存储 + 显式可选的多主机后端**。领域 schema 与操作注册表是唯一契约源；Core 在 SQLite WAL authority（或显式启用的 PostgreSQL authority）上执行全部 canonical 写入；CLI/MCP/adapter 是同一 Core service 的薄 transport；Markdown、Git、Context Pack、快照、Artifact 目录全部是权威状态的派生侧车或投影，可校验、可重建。
+**分层单仓 monorepo + 单写者权威存储 + 有启用门的多主机后端**。领域 schema 与操作注册表是契约源；Core 在 SQLite WAL 或 PostgreSQL authority 上执行同一套异步治理逻辑。PostgreSQL 和共享 Core 场景已实现；对应 `storage.postgresql` capability 为 available/verified，但默认运行态 disabled，只有显式 multi-host profile 配合当前构建 digest 匹配的 conformance report 及健康 lease 才可启用。CLI/MCP/adapter 通过同一 Core service；Markdown、Git、Context Pack、快照与 Artifact 目录是可校验的派生数据。
 
 ```text
 schemas (契约唯一源: JSON Schema + 操作注册表)
@@ -65,13 +65,13 @@ cli       mcp       pi-adapter       hermes-plugin   deepseek-adapter
 | 语言 | TypeScript（ESM, strict） | target ES2022, TS 5.9 |
 | 运行时 | Node.js | ≥22（`node:sqlite` 实验性警告已知） |
 | 存储 | SQLite（WAL，`node:sqlite` DatabaseSync） | 单机权威 profile |
-| 存储（可选） | PostgreSQL（14–18，`taric` schema） | `multi_host_authority` profile，显式启用 |
+| Shared authority | PostgreSQL（14–18，版本化 `authority-sql/2` schema） | Async Core store、transaction-scoped governance 与 server lease；有 digest-bound activation gate |
 | Schema | JSON Schema draft 2020-12（Ajv 8 + ajv-formats） | v1，严格模式（缺失/额外/非法枚举一律拒绝） |
 | 测试 | `node:test` + `node:assert/strict`；Hermes 用 `unittest` | npm workspaces 逐包执行 |
 | 构建 | `tsc`（无 bundler） | npm 11 workspaces |
 | 部署 | 本地插件/进程（CLI、MCP stdio、宿主插件） | 无服务端部署依赖 |
 
-唯一第三方运行时依赖：`ajv`、`ajv-formats`（Core 校验）。其余全部使用 Node 内置模块（crypto、sqlite、fs、path、os）；PostgreSQL 后端通过最小 `PostgresQueryable` 接口注入，单机安装不加载 `pg`。`reference/`（kb、link、PTES、pentest-skills，按 commit/digest 冻结）是设计输入，不是运行时依赖。
+单机 Core 校验依赖 `ajv`、`ajv-formats`，其余使用 Node 内置模块。显式 PostgreSQL profile 通过 workspace 的 `pg` 驱动连接；默认 single-host SQLite 不连接 PostgreSQL。`reference/`（kb、link、PTES、pentest-skills，按 commit/digest 冻结）是设计输入，不是运行时依赖。
 
 ## 3. 仓库与代码结构
 
@@ -79,7 +79,7 @@ cli       mcp       pi-adapter       hermes-plugin   deepseek-adapter
 packages/
   schemas/            契约唯一源
     schemas/v1/core.schema.json   26 类领域合同 + Artifact/上传/会话合同 + API envelope
-    src/registry.ts               49 个支持操作 + 5 个 deferred + 8 个永久非目标
+    src/registry.ts               50 个 operation + 4 个 deferred + 8 个永久非目标
     src/types.ts                  schema 的手工等价 TS 投影（测试断言一致性）
   core/               权威存储与全部领域逻辑
     store.ts                      AuthorityStore：事务、CAS、审计链、租约、outbox、
@@ -92,7 +92,8 @@ packages/
     coverage.ts                   防护控制 / 访问决策观察
     artifact-content-store.ts     任务会话 Artifact spool（§5）
     projection.ts                 Markdown 投影 + Git checkpoint + 远端回调门
-    postgres.ts                   PostgreSQL 后端、迁移、租约、水位线
+    sql-driver.ts / sql-schema.ts SQLite/PostgreSQL SQL driver、迁移与事务
+    postgres.ts                   PostgreSQL manifest、readiness、runtime gate
     compatibility.ts              能力/非目标/安全不变量清单（代码常量）
     adapter.ts / pi-adapter.ts / deepseek-adapter.ts / adapter-rpc.ts
     deployment-guard.ts / shared-authority-*.ts / quality.ts / release-report.ts
@@ -111,7 +112,7 @@ scripts/             schema 检查、dist 清理
 
 `AuthorityStore` 是唯一的 canonical 写入点。所有写入发生在 `BEGIN IMMEDIATE`（或嵌套 SAVEPOINT）短事务内，同一事务原子提交：记录版本、`record_versions` 历史、哈希链审计事件、幂等结果、outbox 和 operation marker。失败事务不暴露部分成功。核心机制：
 
-- **CAS（乐观并发）**：Proposal 携带 `base_version`；两个 writer 竞争同一版本时至多一个提交，另一个得到结构化版本冲突，不会覆盖。
+- **CAS（乐观并发）**：Proposal 更新通过独立 `target_id`/`subject_ref` 与 `expected_version` 指定目标；两个 writer 竞争同一版本时至多一个提交，另一个得到结构化版本冲突，不会覆盖。新建 canonical ID 由 Core 在提交事务内分配 UUIDv7。
 - **幂等键**：按 principal + engagement + operation + 规范化 payload hash 去重；不同 payload 同键返回 `idempotency_conflict`；已确认的幂等操作在宿主 retry/reload 时不会重复确认。
 - **哈希链审计**：`events` 表每条事件带 `prev_hash`/`hash` 与归属元数据（actor/host/worker/dispatch、WorkRun/Attempt、proposal/review、policy digest、input/evidence hash、changed fields、before/after hash）；`verifyAudit` 整链校验；事件永不包含 Artifact 内容或凭据物料；Taric 不托管审计签名密钥。
 - **outbox + operation markers**：每个写操作留下 pending/applied/indexed/failed/recovered 标记，与权威提交原子建立；`doctor()` 检查未完成操作、账本连续性、record/counter/idempotency/outbox 水位与 store 权限；权威漂移**阻塞写入**并给出修复建议，不静默覆盖；`reconcileDerived()` 幂等修复 projection/outbox，保留权威历史。
@@ -119,19 +120,19 @@ scripts/             schema 检查、dist 清理
 - **钉住快照与 read-your-writes**：`snapshot()` 在只读事务内固定 authority sequence，返回内容严格对应所报 `read_seq`；continuation cursor 绑定 principal/Engagement/filter/read_seq，不得跨 Engagement、换过滤条件或换序列复用；写入后查询要么返回权威一致结果，要么给出明确 pending 与派生层低水位。
 - **部署防护**：`deployment-guard.ts` 检测并拒绝伪多主机部署（共享 SQLite 文件、NFS 锁、共享 Git clone、独立副本冒充同一 authority）；多主机必须显式 PostgreSQL profile，服务不可用时返回稳定 `unavailable_host`，不静默降级；Git/Markdown 投影永远是派生视图，不提供 authority 锁或事件排序。
 
-多主机 PostgreSQL profile（`multi_host_authority`）在 `postgres.ts` 中以与 SQLite 等价的 storage contract 语义实现：事务、条件写、UUIDv7/display ID 分配、审计排序、幂等、outbox、快照、服务端租约/心跳/reclaim/fencing、钉住读；全局唯一且单调的 event/display sequence 与 generation。两个后端运行同一 conformance suite，只有必需 gate 通过后多主机兼容性才标记 enabled。
+`sql-driver.ts` owns SQLite/PostgreSQL connection queues, transaction scopes and dialect expressions; `AuthorityStore` keeps proposal/review/L1/L2/checkpoint/action/Artifact and audit governance shared across both. `storage-contract.ts` defines the async backend and twelve executable Core scenarios; `shared-runtime.ts` plus `runtime-service.ts` refuse missing methods, stale/mismatched evidence, schema gaps, or unhealthy fencing before construction and before dispatch. There is no SQLite fallback.
 
 ### 4.2 分级信任与提案治理
 
 模型写入被设计为**只有提案**。三层信任有明确语义边界：L0 `proposal`（只在审核/提交者可见的隔离区）、L1 `machine_approved`（仅显式 candidate 查询中作为带 provenance/证据状态/limitations 的待验证线索）、L2 `independently_verified`（可按 Finding/覆盖规则进入普通召回）。
 
 ```text
-L0 Proposal (pending) ──review──▶ L1 机审候选 (admitted) ──独立复核──▶ L2 独立验证记录
+L0 Proposal (pending) ──admission.evaluate──▶ L1 机审候选 (admitted) ──admission.promote_l2──▶ L2 独立验证记录
         │                              │
         └── rejected / needs_evidence  └── 普通 query/context/projection 均不返回
 ```
 
-`policy.ts` 的 admission 硬门——**schema、scope、evidence、freshness、independence**——由代码从主题、钉住的证据快照和绑定评审记录重算；模型裁决、payload 中的 `accept: true`、自报的 `trust_level`/`verified` 字段或 host action mode 均无法改变结果（尝试会被拒绝或降为 L0 并记录原因）。风险分层决定独立复核要求：
+`admission.evaluate` 只执行结构、引用、归属、provenance 和版本检查，返回 `trust_phase=machine_approved`、策略版本和剩余 L2 条件；没有运行 evidence、freshness 或 independence 硬门。独立的 `admission.promote_l2` 仅供 writer/operator 调用，固定 proposal hash、evidence snapshot hash、canonical 版本和 review refs，再由 `policy.ts` 重算 **schema、scope、evidence、freshness、independence** 五个 L2 硬门。模型裁决、payload 中的 `accept: true`、自报的 `trust_level`/`verified` 字段或 host action mode 均无法改变结果。风险分层决定独立复核要求：
 
 | 风险级 | 最少独立复核 | 强独立性 | 证据最大年龄 |
 |---|---|---|---|
@@ -150,7 +151,7 @@ L0 Proposal (pending) ──review──▶ L1 机审候选 (admitted) ──独
 
 `context.ts` 用两层显式白名单（`modelFields` + 引用字段补充）过滤模型可见字段——新增权威字段默认不可见。信息优先级强制为：Scope/ROE → WorkItem（目标/验收/风险预算）→ 最近 checkpoint → 相关增量 → 冲突/过期/覆盖缺口 → 直接实体与证据位置 → 背景摘要。预算单位是序列化字符数（非模型 token），最低 256；强制信息放不下时返回结构化 `minimum_budget_required` 或 continuation 并标出未检视范围，不静默丢弃。
 
-- **cursor**：进程内随机密钥 HMAC 签名，绑定 principal、Engagement、filters、ordering、read_seq 与预算；同 principal/Engagement 的有效 cursor 翻页无重复无遗漏；跨 Engagement、篡改或过期 cursor 拒绝。
+- **cursor**：authority/content root 下的版本化 0600 key，绑定 principal、Engagement、filters、ordering、read_seq、read_time 与预算。加密 payload 仅含固定快照/过滤、偏移与 delivered IDs，不含完整 records；续页从固定历史版本重取，跨进程/重启可验证。缺失、权限错误或轮换使旧 cursor 返回 `invalid_cursor`。首屏与续页的重取/排序成本分别测量。
 - **resume delta**：从 checkpoint 的 read_seq 到当前，返回 added/updated/removed、scope/依赖变化、pending actions、上下文 manifest；前提失效时返回 blocked / replan_required。
 - **草稿封存与显式 rebase**：未提交草稿、迟到结果和旧 Attempt 提案保留原始 Attempt/generation 归属并被封存；新 Attempt 必须显式 rebase 或新建提案才能引用；过期租约、旧 generation、跨 Engagement 草稿不得修改当前权威。
 
@@ -250,7 +251,7 @@ authority 新增 catalog 表（见 §6.1）：`artifact_catalog`（opaque conten
 4. 在既有 SQLite 事务中提交 catalog/chunk 行、幂等结果与审计事件（标记 phase=published）；
 5. 清理 staging 与操作标记。
 
-任何一步失败：成功写入必须同时暴露已验证 payload 与已提交元数据，**失败/中断写入两者都不暴露为可用内容**，并留下可恢复 operation marker。启动时 `recoverPublications()` 只重放"完整 manifest 与 catalog 行仍可校验"的 published 标记；不完整的保持 pending 交由 operator reconcile，被隔离的上传不暴露 body。doctor/reconcile 按有界批次增量比对标记、manifest、catalog 与 authority 行（带 continuation cursor），报告修复范围，不在整个原始数据集上持有单一事务。
+成功写入同时暴露已验证 payload 与已提交元数据；中断保留 publication marker。`recoverPublications()` 只有在最终目录已发布，manifest/hash、全部 chunk 长度/哈希及整包哈希一致后才恢复 ready/published marker；不完整或篡改内容保持 pending/quarantine。operator doctor/verify/reconcile/export 报告 pinned sequence 与 watermarks；doctor/preview 不改历史。需要显式 replay/reconcile 才记录恢复审计。
 
 读取时完整性检查（`read()`）：catalog/manifest 一致性 → manifest 哈希 → **目标 chunk** 的哈希、ordinal 与字节长度——不重扫全部 chunk 重算全量哈希；响应区分 `chunk_verified` 与 commit 时验证的全量哈希，显式 doctor/verify 任务才做有界全量 rehash。缺失/被篡改/不可读文件返回结构化 `unavailable_host` 或 `integrity_failed`（行状态同步更新），**不作为可用 Evidence**，不静默重建或删除——保留策略与删除是显式宿主/operator 动作。
 
@@ -318,14 +319,14 @@ checkpoint、宿主决定/结果、对账与错误持久化会写日期/ID 分�
 
 ### 7.1 操作注册表（契约唯一源）
 
-`operationContracts` 登记全部 49 个支持操作，每项声明：允许角色、request/response 契约引用、错误码子集、是否幂等、是否写权威、是否 Engagement-scoped、所需 capability。Core、CLI、MCP、adapter 均从这份注册表派生。5 个显式 deferred 能力（migration、backup.restore、remote.push、storage.postgresql 注册表项、full_quality_evaluation）返回 `unsupported_capability` + follow-up change 名，与 8 个永久非目标（target_execution、hitl_identity、agent_loop、audit_signing_keys、artifact_redaction、secret_scanning、credential_lifecycle、content_retention）区分——永久非目标没有 follow-up，防止把非目标伪装成待交付能力。
+`operationContracts` 登记 50 个 operation，包括 `admission.promote_l2`。每项声明角色、request/response、错误码、幂等、是否写权威、Engagement 作用域及 capability。Core 从注册表授权；CLI 的 45 个标准命令与 MCP 的 6 个模型工具清单单独维护并通过契约测试核对。deferred 与永久非目标分别返回显式状态；归档变更不推导 runtime enabled。
 
 | 分组 | 操作（角色） |
 |---|---|
 | Engagement | `engagement.init`(operator)、`engagement.status` |
 | 能力诊断 | `capability.status`、`adapter.status/install/remove/config` |
 | 上下文 | `context.build/query`、`query`、`resource.query`、`evidence.query` |
-| 治理 | `proposal.submit/list`、`capture.observation`、`review.submit`(reviewer)、`admission.evaluate/commit` |
+| 治理 | `proposal.submit/list`、`capture.observation`、`review.submit`(reviewer)、`admission.evaluate/commit`(L1)、`admission.promote_l2`(writer/operator) |
 | 防护控制 | `control.observe`、`access.observe`、`control.list` |
 | 执行协作 | `work.claim/renew/reclaim/resume`(host)、`checkpoint.propose`、`checkpoint.commit`(host)、`action.recommend`、`action.host-decision/host-result/reconcile`(host)、`error.report`(host) |
 | Artifact | `artifact.session.bind`、`artifact.store.begin/append/commit`、`artifact.metadata`、`artifact.content.read`(需 content_read)、`artifact.content.list`、`artifact.session.output` |
@@ -334,7 +335,7 @@ checkpoint、宿主决定/结果、对账与错误持久化会写日期/ID 分�
 
 ### 7.2 统一响应与错误码
 
-所有操作返回 `ApiSuccess{ok:true,data}` 或 `ApiErrorEnvelope{ok:false,error{code,message,follow_up?}}`。9 个稳定错误码：`validation_error`、`authorization_error`、`unsupported_capability`、`unsupported_schema_version`、`idempotency_conflict`、`stale_version`、`conflict`、`unavailable_host`、`internal_error`。transport 必须原样保留错误码；`internal_error` 不泄漏堆栈；状态变更操作可带幂等键，重试返回原结果。
+操作返回 `ApiSuccess{ok:true,data}` 或 `ApiErrorEnvelope{ok:false,error{code,message,follow_up?}}`。声明的 Core 错误包括 validation/authorization/schema/capability/idempotency/version/conflict/unavailable，以及 `invalid_cursor` 和 `minimum_budget_required`。transport 保留 code；未知异常统一返回 `internal_error` 与通用 message，不按 free-form exception text 推断。状态变更可带 request-bound 幂等键。
 
 ### 7.3 MCP server
 
@@ -346,7 +347,7 @@ stdio JSON-RPC（协议 2024-11-05），只暴露 6 个模型工具：`context.q
 
 ### 7.5 宿主适配器
 
-- **Pi 1.1.0**（TypeScript）：生命周期 hooks + 绑定工具注册；session/context 注入已支持，proposal/checkpoint/action/result 原生 hooks 标 unsupported，回退 CLI/MCP；capability 只声明经测试验证的部分，运行时缺失 hook 显式报告不可用而非静默模拟。
+- **Pi 1.1.0**（TypeScript）：经锁定契约测试的 session/context/proposal/checkpoint/action/result/error hooks 可用；缺失的实际宿主 hook 显式报告 unavailable，未测试版本 unsupported。
 - **Hermes 0.19.0**（Python general plugin）：`TARIC_CORE_SOCKET`（Unix socket）/`TARIC_CORE_URL` 认证 JSON-RPC（`taric.dispatch`），要求 ≥32 字符 `TARIC_ADAPTER_TOKEN`；**不替换 Hermes MemoryProvider**，不直接打开 authority 数据库；7 个生命周期 hook，Core 不可用显式失败。
 - **DeepSeek Harness/Cordis**：仅注册已测试 API 的 session 事件（`session/created`、`session/event`、`session/flush`、`session/disposed`），只报告会话生命周期。
 - 共同约束：版本化 adapter contract 绑定宿主版本/commit、Taric 合同版本、实际暴露能力、回退操作、稳定错误与测试证据；未知宿主版本 → `unsupported_capability` + 仅列实际 MCP/CLI 回退；适配器不得暴露 authority store 或数据库句柄；retry/reload/cancellation 不丢失已提交状态。
@@ -430,7 +431,7 @@ Core 包 38+ 测试文件。Artifact 专项覆盖：二进制往返、external �
 
 ## 13. 已知差距与假设
 
-- PostgreSQL 多主机后端已实现但默认 profile 仍为单机 SQLite；多主机兼容性/runbook 仅在 conformance gate 通过后 enabled。
+- PostgreSQL 原语 available、完整 runtime disabled；运行时 conformance 和 live health/fencing 通过前不启用。质量统计函数 available，但人工 baseline 的独立标注 provenance 与足够分层样本 pending。
 - manifest 段物理滚动有意收敛于当前根 manifest 合同（实现报告注明）；未来变更可增加物理段滚动而不改 opaque 引用 API。
 - 100 GiB 验证使用合成元数据 fixture，不在单进程响应中物化 100 GiB。
 - Pi 原生 proposal/checkpoint/action/result hooks 未完成，经注册工具走受限操作；DeepSeek/Hermes 能力以 compatibility manifest 声明为准。
@@ -508,8 +509,8 @@ service.init({ id: engagementId, name: "example engagement" });
 |---|---|
 | Proposal（L0） | agent 提交的候选变更，不直接改变权威记忆；只在审核/提交者可见的隔离区。 |
 | Review / Reviewer | 对提案的评审记录/评审者；reviewer 身份来自 transport 验证，排除作者与验证 worker。 |
-| Admission / 硬门 | 非 LLM 的确定性准入评估；五个硬门为 schema、scope、evidence、freshness、independence，由代码重算，模型裁决无法影响。 |
-| L1（machine_approved） | 机审候选：通过 admission 硬门但未经独立验证；只在显式 candidate 查询中作为带标记的待验证线索。 |
+| Admission / 硬门 | 非 LLM 的确定性准入；L1 做结构/引用/归属/版本检查，L2 promotion 才重算 schema、scope、evidence、freshness、independence 五个硬门。 |
+| L1（machine_approved） | 通过确定性结构准入的机审候选；没有完成独立证据验证，只在显式 candidate 查询中作为带标记的待验证线索。 |
 | L2（independently_verified） | 独立验证记录：经固定证据快照、独立 reviewer 与全部硬门后升级，可进入普通召回。 |
 | provenance | 数据来源与归属链（谁、以何身份、在何上下文产生），随记录保存并在投影中传播。 |
 | 召回（recall） | 普通查询/上下文对记忆的默认可见集合；retracted/superseded/archived/过期/依赖 stale 项被排除。 |
@@ -603,6 +604,6 @@ service.init({ id: engagementId, name: "example engagement" });
 | Hermes | Hermes Agent 0.19.0；Taric 以通用 Python 插件经认证 Core RPC 接入，不替换其 MemoryProvider。 |
 | MemoryProvider | Hermes 的记忆提供者接口；Taric 刻意不替换它，二者共存。 |
 | DeepSeek Harness | DeepSeek Harness/Cordis 宿主；当前仅接入其已测试的 session 生命周期事件。 |
-| CLI | `taric` 命令行程序；JSON 对象入参、结构化 envelope 出参，覆盖全部 49 个操作。 |
+| CLI | `taric` JSON 命令行程序；标准清单 45 项，最终授权来自 50 项 operation 注册表。 |
 | API envelope | 统一响应包装：`{ok:true,data}` 或 `{ok:false,error{code,message,follow_up}}`。 |
 | p95 | 95 分位延迟；发布门槛要求 proposal/CAS 写入到查询可见 p95 ≤ 2 秒。 |

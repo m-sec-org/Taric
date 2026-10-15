@@ -1,0 +1,237 @@
+{
+  "version": "authority-scale/1",
+  "measured_at": "2026-10-15T02:06:33.448Z",
+  "source_commit": "23c6783ebd34703cc258a6981e8a83953f6f30e6",
+  "source_digest": "sha256:4a3d9dc119e603fd0773beb0cff710f298788b407331d6ce3c98de9664476f1b",
+  "configuration": {
+    "node": "v22.21.1",
+    "platform": "darwin",
+    "arch": "x64",
+    "cpu_model": "Intel(R) Core(TM) i5-7287U CPU @ 3.30GHz",
+    "cpu_count": 4,
+    "sqlite": "node:sqlite/WAL",
+    "fixture": "authority-scale-v1",
+    "admission_fixture": "admission-scale-v1",
+    "mutation_sample_count": 100,
+    "page_size": 1000,
+    "context_character_budget": 64000,
+    "memory_scope": "peak_process_rss_bytes includes worker startup validation; phases execute in separate processes",
+    "context_continuation_cost": "re-fetches and orders the pinned snapshot; three measured pages, not constant-time"
+  },
+  "samples": [
+    {
+      "fixture_count": 10000,
+      "mutation": {
+        "engagement_id": "01a13d49-9eea-7356-a1bf-c47d3957a798",
+        "read_seq": 10403,
+        "fixture_count": 10000,
+        "direct_mutation_count": 100,
+        "admission_count": 100,
+        "fixture_import": {
+          "elapsed_ms": 55815.817931,
+          "rss_before_bytes": 79015936,
+          "rss_after_bytes": 121458688,
+          "peak_process_rss_bytes": 128245760,
+          "read_seq": 10003,
+          "record_count": 10002,
+          "method": "validated_snapshot_import"
+        },
+        "commit": {
+          "elapsed_ms": 994.9800419999956,
+          "rss_before_bytes": 120262656,
+          "rss_after_bytes": 120356864,
+          "peak_process_rss_bytes": 128245760,
+          "sample_count": 100,
+          "p50_ms": 3.914912000000186,
+          "p95_ms": 9.266704000001482
+        },
+        "proposal_to_l1": {
+          "sample_count": 100,
+          "p50_ms": 7.1390489999976126,
+          "p95_ms": 139.4159639999998,
+          "peak_process_rss_bytes": 128245760
+        }
+      },
+      "list": {
+        "read_seq": 10403,
+        "record_count": 10200,
+        "first_page": {
+          "elapsed_ms": 67.5357439999998,
+          "rss_before_bytes": 70479872,
+          "rss_after_bytes": 71335936,
+          "peak_process_rss_bytes": 71335936
+        },
+        "continuation": {
+          "page_count": 10,
+          "p50_ms": 18.84474599999976,
+          "p95_ms": 190.9961890000004,
+          "peak_process_rss_bytes": 73183232
+        }
+      },
+      "snapshot": {
+        "elapsed_ms": 425.7411820000002,
+        "rss_before_bytes": 70639616,
+        "rss_after_bytes": 76771328,
+        "peak_process_rss_bytes": 76771328,
+        "read_seq": 10403,
+        "record_count": 10202,
+        "serialized_bytes": 4341050
+      },
+      "export": {
+        "elapsed_ms": 1231.9205030000003,
+        "rss_before_bytes": 70758400,
+        "rss_after_bytes": 117735424,
+        "peak_process_rss_bytes": 117821440,
+        "read_seq": 10403,
+        "record_count": 10202,
+        "serialized_bytes": 4341224,
+        "integrity_hash": "sha256:e4f2f6c71c9e58bd85575bcd08a1e237895325c51333958a99411b70ac0f6728"
+      },
+      "context": {
+        "read_seq": 10403,
+        "first_page": {
+          "elapsed_ms": 1226.7830880000001,
+          "rss_before_bytes": 69771264,
+          "rss_after_bytes": 120557568,
+          "peak_process_rss_bytes": 120565760,
+          "record_count": 161,
+          "cursor_bytes": 9189
+        },
+        "continuation_sample_count": 3,
+        "continuations": [
+          {
+            "elapsed_ms": 1048.250744,
+            "rss_before_bytes": 119541760,
+            "rss_after_bytes": 120643584,
+            "peak_process_rss_bytes": 120848384,
+            "record_count": 161,
+            "cursor_bytes": 17561
+          },
+          {
+            "elapsed_ms": 938.9769200000001,
+            "rss_before_bytes": 119959552,
+            "rss_after_bytes": 120897536,
+            "peak_process_rss_bytes": 121114624,
+            "record_count": 161,
+            "cursor_bytes": 25933
+          },
+          {
+            "elapsed_ms": 882.9925380000004,
+            "rss_before_bytes": 120139776,
+            "rss_after_bytes": 121102336,
+            "peak_process_rss_bytes": 121180160,
+            "record_count": 161,
+            "cursor_bytes": 34305
+          }
+        ]
+      }
+    },
+    {
+      "fixture_count": 50000,
+      "mutation": {
+        "engagement_id": "01a13d4a-d49e-7721-8fbf-2069f4f9f876",
+        "read_seq": 50403,
+        "fixture_count": 50000,
+        "direct_mutation_count": 100,
+        "admission_count": 100,
+        "fixture_import": {
+          "elapsed_ms": 266888.322047,
+          "rss_before_bytes": 119402496,
+          "rss_after_bytes": 213028864,
+          "peak_process_rss_bytes": 250363904,
+          "read_seq": 50003,
+          "record_count": 50002,
+          "method": "validated_snapshot_import"
+        },
+        "commit": {
+          "elapsed_ms": 823.1542870000121,
+          "rss_before_bytes": 182259712,
+          "rss_after_bytes": 182484992,
+          "peak_process_rss_bytes": 250363904,
+          "sample_count": 100,
+          "p50_ms": 4.213687999988906,
+          "p95_ms": 20.21540200000163
+        },
+        "proposal_to_l1": {
+          "sample_count": 100,
+          "p50_ms": 7.727526000002399,
+          "p95_ms": 66.16952800005674,
+          "peak_process_rss_bytes": 250363904
+        }
+      },
+      "list": {
+        "read_seq": 50403,
+        "record_count": 50200,
+        "first_page": {
+          "elapsed_ms": 57.21518999999989,
+          "rss_before_bytes": 69443584,
+          "rss_after_bytes": 70631424,
+          "peak_process_rss_bytes": 70631424
+        },
+        "continuation": {
+          "page_count": 50,
+          "p50_ms": 82.06498999999985,
+          "p95_ms": 244.70541500000036,
+          "peak_process_rss_bytes": 76099584
+        }
+      },
+      "snapshot": {
+        "elapsed_ms": 2018.706714,
+        "rss_before_bytes": 69750784,
+        "rss_after_bytes": 140083200,
+        "peak_process_rss_bytes": 140083200,
+        "read_seq": 50403,
+        "record_count": 50202,
+        "serialized_bytes": 21341050
+      },
+      "export": {
+        "elapsed_ms": 4977.9113990000005,
+        "rss_before_bytes": 69550080,
+        "rss_after_bytes": 245657600,
+        "peak_process_rss_bytes": 245702656,
+        "read_seq": 50403,
+        "record_count": 50202,
+        "serialized_bytes": 21341224,
+        "integrity_hash": "sha256:ce49b28cda785ff7853bcd46ea429e6033738ad3b4496a393ac9553e472139af"
+      },
+      "context": {
+        "read_seq": 50403,
+        "first_page": {
+          "elapsed_ms": 8380.254544,
+          "rss_before_bytes": 70045696,
+          "rss_after_bytes": 294338560,
+          "peak_process_rss_bytes": 294342656,
+          "record_count": 161,
+          "cursor_bytes": 9189
+        },
+        "continuation_sample_count": 3,
+        "continuations": [
+          {
+            "elapsed_ms": 3938.161832,
+            "rss_before_bytes": 280920064,
+            "rss_after_bytes": 290971648,
+            "peak_process_rss_bytes": 294494208,
+            "record_count": 161,
+            "cursor_bytes": 17561
+          },
+          {
+            "elapsed_ms": 3806.384361999999,
+            "rss_before_bytes": 281477120,
+            "rss_after_bytes": 291127296,
+            "peak_process_rss_bytes": 294494208,
+            "record_count": 161,
+            "cursor_bytes": 25933
+          },
+          {
+            "elapsed_ms": 4428.169448000001,
+            "rss_before_bytes": 281665536,
+            "rss_after_bytes": 292872192,
+            "peak_process_rss_bytes": 294494208,
+            "record_count": 161,
+            "cursor_bytes": 34305
+          }
+        ]
+      }
+    }
+  ]
+}

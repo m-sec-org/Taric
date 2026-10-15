@@ -1,0 +1,26 @@
+name: taric-authority
+
+services:
+  postgres:
+    image: postgres:17.11-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    restart: unless-stopped
+    shm_size: 128mb
+    environment:
+      # Public, local-development credentials only. Never use in production.
+      POSTGRES_DB: taric
+      POSTGRES_USER: taric
+      POSTGRES_PASSWORD: taric-local-only
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "taric", "-d", "taric"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  postgres-data:
+    name: taric-authority-postgres-data

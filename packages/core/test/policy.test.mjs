@@ -4,13 +4,13 @@ import { AuthorityStore, DEFAULT_ADMISSION_POLICY, evaluateAdmission, policyDige
 
 const sha = (letter = "a") => `sha256:${letter.repeat(64)}`;
 
-function build(store, overrides = {}) {
+async function build(store, overrides = {}) {
   const engagement_id = uuidv7();
-  const scope = store.commit({ id: uuidv7(), engagement_id, kind: "scope", allowed_targets: ["https://example.test/admin"], excluded_targets: ["https://example.test/logout"], rules_of_engagement_ref: "roe:1" }, "L2");
-  const claim = store.commit({ id: uuidv7(), engagement_id, kind: "claim", proposition: "admin endpoint is unauthenticated" }, "L2");
-  const evidence = store.commit({ id: uuidv7(), engagement_id, kind: "evidence", artifact_ref: { host_ref: "host-artifact:1" }, observed_at: new Date().toISOString(), limitations: ["single run"] }, "L2");
+  const scope = (await store.commit({ id: uuidv7(), engagement_id, kind: "scope", allowed_targets: ["https://example.test/admin"], excluded_targets: ["https://example.test/logout"], rules_of_engagement_ref: "roe:1" }, "L2"));
+  const claim = (await store.commit({ id: uuidv7(), engagement_id, kind: "claim", proposition: "admin endpoint is unauthenticated" }, "L2"));
+  const evidence = (await store.commit({ id: uuidv7(), engagement_id, kind: "evidence", artifact_ref: { host_ref: "host-artifact:1" }, observed_at: new Date().toISOString(), limitations: ["single run"] }, "L2"));
   const content = {
-    id: uuidv7(),
+    schema_version: "1.0.0",
     engagement_id,
     kind: "finding",
     title: "unauthenticated admin access",
@@ -26,97 +26,103 @@ function build(store, overrides = {}) {
   return { engagement_id, scope, claim, evidence, content };
 }
 
-test("hard gates are recomputed by the policy engine and ignore caller trust or accept flags", () => {
+test("hard gates are recomputed by the policy engine and ignore caller trust or accept flags", async () => {
   const store = new AuthorityStore();
   try {
-    const { content } = build(store);
-    const proposal = store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", base_version: 0, content });
-    const decision = store.evaluateAdmission(proposal.id, { policyDigest: sha("b") });
+    const { content } = (await build(store));
+    const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
+    assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
+    const decision = (await store.evaluateAdmission(proposal.id, { policyDigest: sha("b") }));
     assert.equal(decision.gates.find((gate) => gate.gate === "schema").passed, true);
     assert.equal(decision.gates.find((gate) => gate.gate === "independence").passed, false, "no review means no L2 promotion");
-    assert.equal(store.get(content.id), undefined, "an unadmitted proposal writes no canonical record");
+    assert.equal((await store.list(content.engagement_id, { trustLevel: "L2" })).some((record) => record.kind === "finding"), false, "L1 does not produce an ordinary fact");
   } finally {
-    store.close();
+    (await store.close());
   }
 });
 
-test("model verdict, accept=true and caller trust level cannot promote to L2", () => {
+test("model verdict, accept=true and caller trust level cannot promote to L2", async () => {
   const store = new AuthorityStore();
   try {
-    const { content } = build(store);
-    const proposal = store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", base_version: 0, content });
-    assert.throws(() => store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", base_version: 0, content: { ...content, trust_level: "L2" } }), /privileged fields/);
-    const promoted = store.promoteFinding(proposal.id, { expectedBaseVersion: 0, policyDigest: sha("b") });
+    const { content } = (await build(store));
+    const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
+    assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
+    (await assert.rejects(async () => (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content: { ...content, trust_level: "L2" } })), (error) => error.code === "validation_error"));
+    const promoted = (await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: sha("b") }));
     assert.equal(promoted.ok, false);
     assert.match(promoted.reason, /independence/);
-    assert.equal(store.get(content.id), undefined);
+    assert.equal((await store.list(content.engagement_id, { trustLevel: "L2" })).some((record) => record.kind === "finding"), false);
   } finally {
-    store.close();
+    (await store.close());
   }
 });
 
-test("self-review, stale evidence and elapsed review_after all fail closed", () => {
+test("self-review, stale evidence and elapsed review_after all fail closed", async () => {
   const store = new AuthorityStore();
   try {
-    const selfCase = build(store);
-    const selfProposal = store.submitProposal({ engagement_id: selfCase.content.engagement_id, subject_type: "finding", base_version: 0, content: selfCase.content });
-    assert.equal(store.submitReview({ proposal_id: selfProposal.id, reviewer_id: "worker-a", reviewer_kind: "reviewer", input_hash: selfProposal.content_hash, verdict: "pass", policy_digest: sha("b") }).accepted, false, "the author cannot review their own proposal");
-    assert.equal(store.promoteFinding(selfProposal.id, { expectedBaseVersion: 0, policyDigest: sha("b") }).ok, false);
+    const selfCase = (await build(store));
+    const selfProposal = (await store.submitProposal({ engagement_id: selfCase.content.engagement_id, subject_type: "finding", expected_version: 0, content: selfCase.content }));
+    assert.equal((await store.admitProposal(selfProposal.id, sha("b"))).ok, true);
+    assert.equal((await store.submitReview({ proposal_id: selfProposal.id, reviewer_id: "worker-a", reviewer_kind: "reviewer", input_hash: selfProposal.content_hash, verdict: "pass", policy_digest: sha("b") })).accepted, false, "the author cannot review their own proposal");
+    assert.equal((await store.promoteFinding(selfProposal.id, { expectedBaseVersion: 1, policyDigest: sha("b") })).ok, false);
 
-    const staleCase = build(store);
-    store.retract(staleCase.evidence.id, "evidence withdrawn");
-    const staleProposal = store.submitProposal({ engagement_id: staleCase.content.engagement_id, subject_type: "finding", base_version: 0, content: staleCase.content });
-    assert.equal(store.evaluateAdmission(staleProposal.id, { policyDigest: sha("b") }).gates.find((gate) => gate.gate === "evidence").passed, false, "recalled evidence cannot support a current claim");
+    const staleCase = (await build(store));
+    const staleProposal = (await store.submitProposal({ engagement_id: staleCase.content.engagement_id, subject_type: "finding", expected_version: 0, content: staleCase.content }));
+    (await store.retract(staleCase.evidence.id, "evidence withdrawn"));
+    assert.equal((await store.evaluateAdmission(staleProposal.id, { policyDigest: sha("b") })).gates.find((gate) => gate.gate === "evidence").passed, false, "recalled evidence cannot support a current claim");
 
-    const elapsedCase = build(store, { review_after: "2020-01-01T00:00:00.000Z" });
-    const elapsedProposal = store.submitProposal({ engagement_id: elapsedCase.content.engagement_id, subject_type: "finding", base_version: 0, content: elapsedCase.content });
-    assert.equal(store.evaluateAdmission(elapsedProposal.id, { policyDigest: sha("b") }).gates.find((gate) => gate.gate === "freshness").passed, false);
-    assert.equal(store.promoteFinding(elapsedProposal.id, { expectedBaseVersion: 0, policyDigest: sha("b") }).ok, false);
+    const elapsedCase = (await build(store, { review_after: "2020-01-01T00:00:00.000Z" }));
+    const elapsedProposal = (await store.submitProposal({ engagement_id: elapsedCase.content.engagement_id, subject_type: "finding", expected_version: 0, content: elapsedCase.content }));
+    assert.equal((await store.admitProposal(elapsedProposal.id, sha("b"))).ok, true);
+    assert.equal((await store.evaluateAdmission(elapsedProposal.id, { policyDigest: sha("b") })).gates.find((gate) => gate.gate === "freshness").passed, false);
+    assert.equal((await store.promoteFinding(elapsedProposal.id, { expectedBaseVersion: 1, policyDigest: sha("b") })).ok, false);
   } finally {
-    store.close();
+    (await store.close());
   }
 });
 
-test("L1 to L2 promotion requires a bound input hash, evidence snapshot and policy digest", () => {
+test("L1 to L2 promotion requires a bound input hash, evidence snapshot and policy digest", async () => {
   const store = new AuthorityStore();
   try {
-    const { content } = build(store);
-    const proposal = store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", base_version: 0, content });
-    assert.equal(store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: sha("c"), verdict: "pass", policy_digest: sha("b") }).accepted, false, "a review bound to a different input hash is rejected");
-    assert.equal(store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass" }).accepted, false, "a reviewer verdict requires the policy digest that decided it");
-    const bound = store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: sha("b"), reviewer_model: "model-a", prompt_digest: sha("d"), ruleset_digest: sha("e") });
+    const { content } = (await build(store));
+    const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
+    assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
+    assert.equal((await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: sha("c"), verdict: "pass", policy_digest: sha("b") })).accepted, false, "a review bound to a different input hash is rejected");
+    assert.equal((await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass" })).accepted, false, "a reviewer verdict requires the policy digest that decided it");
+    const bound = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: sha("b"), reviewer_model: "model-a", prompt_digest: sha("d"), ruleset_digest: sha("e") }));
     assert.equal(bound.accepted, true);
-    const promoted = store.promoteFinding(proposal.id, { expectedBaseVersion: 0, policyDigest: sha("b"), principal: "operator-a" });
+    const promoted = (await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: sha("b"), principal: "operator-a" }));
     assert.equal(promoted.ok, true);
     assert.equal(promoted.record.trust_level, "L2");
     assert.equal(promoted.record.review_ref, bound.id);
     assert.equal(promoted.record.policy_digest, sha("b"));
-    const event = store.events().find((item) => item.event_type === "proposal.promote_l2");
+    const event = (await store.events()).find((item) => item.event_type === "proposal.promote_l2");
     assert.equal(event.payload.evidence_snapshot_hash, bound.evidence_snapshot_hash, "the promotion pins the reviewed evidence snapshot");
   } finally {
-    store.close();
+    (await store.close());
   }
 });
 
-test("high risk findings require heterogeneous review; identical model and prompt is not strong independence", () => {
+test("high risk findings require heterogeneous review; identical model and prompt is not strong independence", async () => {
   const store = new AuthorityStore();
   try {
-    const { content } = build(store, { risk_class: "high" });
-    const proposal = store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", base_version: 0, content });
+    const { content } = (await build(store, { risk_class: "high" }));
+    const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
+    assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
     const digest = sha("b");
-    store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") });
-    assert.match(store.promoteFinding(proposal.id, { expectedBaseVersion: 0, policyDigest: digest }).reason, /requires 2 independent review/);
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
+    assert.match((await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest })).reason, /requires 2 independent review/);
 
-    store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-c", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") });
-    assert.match(store.promoteFinding(proposal.id, { expectedBaseVersion: 0, policyDigest: digest }).reason, /identical model and prompt/);
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-c", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
+    assert.match((await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest })).reason, /identical model and prompt/);
 
-    store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-d", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-b", prompt_digest: sha("2") });
-    const heterogeneous = store.promoteFinding(proposal.id, { expectedBaseVersion: 0, policyDigest: digest });
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-d", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-b", prompt_digest: sha("2") }));
+    const heterogeneous = (await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest }));
     assert.equal(heterogeneous.ok, true, "a heterogeneous second model satisfies strong independence");
     assert.equal(heterogeneous.record.risk_class, "high");
     assert.equal(heterogeneous.record.review_refs.length, 3, "all supporting reviews are bound to the promoted finding");
   } finally {
-    store.close();
+    (await store.close());
   }
 });
 

@@ -160,6 +160,38 @@ export interface Provenance {
   dispatch_id?: string;
 }
 
+export interface ProposalProvenance extends Omit<Provenance, "source_kind"> {
+  source_kind: "model" | "worker" | "host" | "tool" | "import";
+}
+export interface ProposalCandidate {
+  schema_version: "1.0.0";
+  engagement_id: Uuid;
+  kind: string;
+  provenance?: ProposalProvenance;
+  [key: string]: unknown;
+}
+export interface ProposalEnvelope {
+  engagement_id: Uuid;
+  subject_type: string;
+  expected_version: number;
+  proposal_id?: Uuid;
+  client_request_id?: string;
+  target_id?: Uuid;
+  subject_ref?: Uuid;
+  content: ProposalCandidate;
+}
+export interface PromotionL2 {
+  engagement_id: Uuid;
+  proposal_id: Uuid;
+  target_id: Uuid;
+  expected_version: number;
+  input_hash: Sha256;
+  evidence_snapshot_hash: Sha256;
+  policy_digest: Sha256;
+  review_refs: Uuid[];
+  idempotency_key?: string;
+}
+
 export interface RecordBase {
   id: Uuid;
   schema_version: "1.0.0";
@@ -176,6 +208,11 @@ export interface CoreManagedFields {
   display_id?: string;
   commit_seq?: number;
   policy_digest?: Sha256;
+  policy_version?: string;
+  trust_phase?: "proposal" | "machine_approved" | "independently_verified";
+  risk_class?: "informational" | "low" | "medium" | "high" | "critical" | "finding" | "action";
+  review_refs?: Uuid[];
+  review_after?: Timestamp;
   review_ref?: Uuid;
   recall_excluded?: boolean;
   stale_reason?: string;
@@ -421,7 +458,7 @@ export interface Finding extends RecordBase, CoreManagedFields {
   title: string;
   claim_refs: Uuid[];
   evidence_refs: Uuid[];
-  review_ref: Uuid;
+  review_ref?: Uuid;
   status: "draft" | "verified" | "retracted" | "stale";
   severity?: "informational" | "low" | "medium" | "high" | "critical";
   limitations?: string[];
@@ -465,7 +502,14 @@ export interface Proposal extends RecordBase, CoreManagedFields {
   subject_type: "observation" | "resource" | "relation" | "claim" | "work_item" | "evidence" | "finding" | "coverage" | "checkpoint" | "action_recommendation";
   content_hash: Sha256;
   status: ProposalStatus;
-  base_version: number;
+  expected_version: number;
+  proposal_id?: Uuid;
+  client_request_id?: string;
+  target_id?: Uuid;
+  subject_ref?: Uuid;
+  canonical_id?: Uuid;
+  canonical_version?: number;
+  content?: ProposalCandidate;
   evidence_refs?: Uuid[];
 }
 
@@ -700,6 +744,10 @@ export interface ContractTypeMap {
   coverageCell: CoverageCell;
   negativeObservation: NegativeObservation;
   proposal: Proposal;
+  proposalEnvelope: ProposalEnvelope;
+  proposalCandidate: ProposalCandidate;
+  proposalProvenance: ProposalProvenance;
+  promotionL2: PromotionL2;
   review: Review;
   protectiveControl: ProtectiveControl;
   protectiveControlRevision: ProtectiveControlRevision;

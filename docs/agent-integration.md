@@ -12,12 +12,12 @@ This guide describes the implemented single-host profile. The compatibility mani
 | Pi native adapter | Supported | `@earendil-works/pi-coding-agent` 1.1.0, commit `7c10bd4` |
 | Pi session lifecycle (`pi.session_lifecycle`) | Supported | `session_start` reaches Core through the authenticated client |
 | Pi context injection (`pi.context_injection`) | Supported | `context` and `before_agent_start` return a Taric Context Pack |
-| Pi proposal/checkpoint/action/result hooks (`pi.proposal_checkpoint_action_result_hooks`) | `unsupported_capability` | `integrate-native-host-adapters` |
+| Pi proposal/checkpoint/action/result hooks (`pi.proposal_checkpoint_action_result_hooks`) | Supported | Pinned Pi lifecycle contract tests |
 | DeepSeek native adapter (`deepseek_native_adapter`) | Partial: pinned DSH `0.2.0-rc.2` commit `639ed01` / Cordis `4.0.4` session events only; context, tool, checkpoint, action result, cancel and reload lifecycle hooks are unavailable in the pinned contract | MCP/CLI fallback |
 | Hermes general plugin (`hermes_native_adapter`) | Partial: pinned Hermes `0.19.0` commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`; pre-LLM context and session/tool observer hooks over authenticated Core RPC; proposal/checkpoint/action hooks are not exposed by this integration; does not replace MemoryProvider | MCP/CLI fallback |
-| PostgreSQL / shared authority (`storage.postgresql`) | `unsupported_capability` | `add-shared-authority-backend` |
+| PostgreSQL / shared authority (`storage.postgresql`) | Core implementation and live conformance verified; runtime disabled by default | Explicit multi-host activation requires a digest-matched report plus healthy schema and lease fencing; see [the runbook](multi-host-authority-runbook.md) |
 | Remote Git push (`git.remote_push`) and external secret scanner (`secrets.external_scanner`) | Supported only through Engagement-authorized callbacks | `evolve-engagement-memory` |
-| Full statistical quality evaluation (`quality.full_statistical_evaluation`) | `unsupported_capability` | `validate-memory-quality` |
+| Full statistical quality evaluation (`quality.full_statistical_evaluation`) | algorithms available; evidence pending; release claim disabled | Versioned human annotation/baseline provenance and sufficient strata required |
 | Versioned relation, patch merge, bounded impact and snapshot import | Supported through Core `resource.*` and `snapshot.import` operations |
 
 ## Boundaries
@@ -53,7 +53,7 @@ The runtime uses Node's `node:sqlite` binding. A single Core service owns its au
 | `validate-memory-quality` | Deterministic schema, governance, trust, context, coverage, and projection contracts | Run full poisoning corpus, human baseline, precision/recall and confidence-interval evaluation |
 | `add-shared-authority-backend` | SQLite authority boundary and single-host storage contract | Implement PostgreSQL, multi-host lease/event ordering, and backend conformance |
 
-Each handoff has a proposal, design, task list, and normative follow-up spec under `openspec/changes/<change>/`. The changes are prerequisites in the order stated by their task lists; this guide does not claim their deferred release gates have passed.
+Archived handoffs record implemented prerequisites; their archive status does not enable a runtime or establish quality evidence. Every capability exposes `implementation_state`, `runtime_state`, `evidence_state`, `evidence`, `follow_up_state`, and explicit remaining-work details. PostgreSQL Core implementation/evidence is available; single-host remains the default and multi-host activation still requires an operator's matching live report. Human quality evidence remains pending.
 
 ## Native adapter setup
 

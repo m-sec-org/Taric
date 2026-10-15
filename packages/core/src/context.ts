@@ -1,8 +1,23 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import type { AuthorityStore, CanonicalRecord, TrustLevel } from "./store.js";
+import { InvalidCursorError, loadAuthorityCursorKey, rotateAuthorityCursorKey } from "./cursor-key.js";
+import { ContractValidationError } from "./validation.js";
 
 const BUILDER_VERSION = "context-builder/1";
-const cursorSecret = randomBytes(32);
+const memoryKeyRoots = new WeakMap<AuthorityStore, string>();
+function cursorRoot(store: AuthorityStore, configured?: string): string {
+  if (configured) return configured;
+  if (store.filename === ":postgresql:") throw new ContractValidationError("validation_error", "shared authority cursors require an explicit content root");
+  if (store.filename && store.filename !== ":memory:") return join(dirname(store.filename), "content");
+  let root = memoryKeyRoots.get(store);
+  if (!root) { root = mkdtempSync(join(tmpdir(), "taric-context-")); memoryKeyRoots.set(store, root); }
+  return root;
+}
+/** Rotate the persisted key. Existing cursors become invalid immediately. */
+export function rotateContextCursorKey(root: string, authorityId: string): { version: number; key_id: string } { return rotateAuthorityCursorKey(root, authorityId); }
 const modelFields = new Set([
   "id", "display_id", "kind", "engagement_id", "trust_level", "version", "status", "title", "name",
   "proposition", "statement", "limitations", "scope", "scope_ref", "resource_ref", "resource_revision_ref",
@@ -112,16 +127,21 @@ export interface ContextOptions {
   checkpoint?: Record<string, unknown>;
   resumeFromSeq?: number;
   pendingActions?: Array<Record<string, unknown>>;
+  /** Core passes the configured content root so cursors work after restart. */
+  cursorKeyRoot?: string;
 }
 interface CursorState {
   v: 1; engagement_id: string; principal_id: string; read_seq: number; budget: number; offset: number; issued_at: number; expires_at: number;
   include_candidates: boolean; policy_version: string; snapshot_id: string; ordering: string;
   filters: Record<string, unknown>;
-  work_item_id: string | null; worker_role: string | null; delivered: string[]; records: CanonicalRecord[];
+  work_item_id: string | null; worker_role: string | null; delivered: string[]; records?: CanonicalRecord[];
   reviewer_mode: boolean;
   latest_checkpoint_id: string | null;
   delta_ids: string[];
   resume_delta?: ContextResumeSummary;
+  /** Time predicates and recalled dependency inclusion are fixed at first page. */
+  read_time: string;
+  supplemental_ids: string[];
 }
 const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const sensitiveField = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|hidden_reasoning|chain_of_thought|host_ref|location|summary|cookie|header|url)/i;
@@ -165,6 +185,26 @@ function priority(record: CanonicalRecord, workItemId: string | null, deltaIds: 
   if (["observation", "evidence", "coverage", "control_observation", "access_decision_observation", "finding", "claim", "resource"].includes(kind)) return 4;
   return 5;
 }
+function orderContextRecords(records: CanonicalRecord[], workItemId: string | null, deltaIds: ReadonlySet<string>): CanonicalRecord[] {
+  return records.sort((a, b) => {
+    const byPriority = priority(a, workItemId, deltaIds) - priority(b, workItemId, deltaIds);
+    if (byPriority) return byPriority;
+    if (a.kind === "checkpoint" && b.kind === "checkpoint") {
+      const byTime = String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
+      if (byTime) return byTime;
+    }
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+async function pinnedRecord(store: AuthorityStore, id: string, sequence: number): Promise<CanonicalRecord | undefined> {
+  return await store.getAt(id, sequence);
+}
+function contextRecords(records: CanonicalRecord[], state: Pick<CursorState, "include_candidates" | "reviewer_mode" | "filters">): CanonicalRecord[] {
+  return records.filter((record) => record.trust_level === "L2" || (state.include_candidates && record.trust_level === "L1"))
+    .filter((record) => !state.reviewer_mode || record.kind !== "review")
+    .filter((record) => Object.entries(state.filters).every(([key, value]) => JSON.stringify(canonical(record[key])) === JSON.stringify(canonical(value))))
+    .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record));
+}
 function mandatoryProjection(record: CanonicalRecord): CanonicalRecord {
   const identity = ["id", "display_id", "kind", "engagement_id", "trust_level", "version"];
   const fields = Object.fromEntries(Object.entries(record).filter(([key]) => identity.includes(key) || mandatoryFields.includes(key)));
@@ -194,28 +234,30 @@ function compactProjection(record: CanonicalRecord): CanonicalRecord {
     truncated: true
   } as CanonicalRecord;
 }
-function encodeCursor(state: CursorState): string {
+function encodeCursor(state: CursorState, keyRoot: string, authority: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", cursorSecret, iv);
-  const encrypted = Buffer.concat([cipher.update(JSON.stringify(state), "utf8"), cipher.final()]);
+  const { records: _records, ...slim } = state;
+  const cipher = createCipheriv("aes-256-gcm", loadAuthorityCursorKey(keyRoot, authority, true), iv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(slim), "utf8"), cipher.final()]);
   return `v1.${iv.toString("base64url")}.${encrypted.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}`;
 }
-function decodeCursor(value: string): CursorState {
+function decodeCursor(value: string, keyRoot: string, authority: string): CursorState {
   const [version, ivPart, encryptedPart, tagPart, extra] = value.split(".");
-  if (version !== "v1" || !ivPart || !encryptedPart || !tagPart || extra) throw new Error("invalid context continuation cursor");
+  if (version !== "v1" || !ivPart || !encryptedPart || !tagPart || extra) throw new InvalidCursorError();
   let parsed: CursorState;
   try {
-    const decipher = createDecipheriv("aes-256-gcm", cursorSecret, Buffer.from(ivPart, "base64url"));
+    const decipher = createDecipheriv("aes-256-gcm", loadAuthorityCursorKey(keyRoot, authority, false), Buffer.from(ivPart, "base64url"));
     decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
     parsed = JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedPart, "base64url")), decipher.final()]).toString("utf8")) as CursorState;
   } catch {
-    throw new Error("invalid context continuation cursor");
+    throw new InvalidCursorError();
   }
-  if (parsed.v !== 1 || !Array.isArray(parsed.records) || !Array.isArray(parsed.delivered) || !Number.isSafeInteger(parsed.offset) || parsed.offset < 0 || !Number.isSafeInteger(parsed.issued_at) || !Number.isSafeInteger(parsed.expires_at) || parsed.expires_at < parsed.issued_at) throw new Error("invalid context continuation cursor");
-  if (Date.now() > parsed.expires_at) throw new Error("context continuation cursor expired");
+  if (parsed.v !== 1 || !Array.isArray(parsed.delivered) || !Array.isArray(parsed.supplemental_ids) || !Array.isArray(parsed.delta_ids) || !Number.isSafeInteger(parsed.read_seq) || parsed.read_seq < 0 || !Number.isSafeInteger(parsed.offset) || parsed.offset < 0 || !Number.isSafeInteger(parsed.issued_at) || !Number.isSafeInteger(parsed.expires_at) || parsed.expires_at < parsed.issued_at || !Number.isFinite(Date.parse(parsed.read_time)) || parsed.records !== undefined) throw new InvalidCursorError();
+  if (Date.now() > parsed.expires_at) throw new InvalidCursorError("context continuation cursor expired");
   return parsed;
 }
-function packPage(state: CursorState, offset: number, budget: number): ContextPack {
+function packPage(state: CursorState, offset: number, budget: number, keyRoot: string, authority: string): ContextPack {
+  if (!Array.isArray(state.records)) throw new InvalidCursorError();
   const delivered = new Set(state.delivered);
   const pending = state.records.slice(offset);
   const deltaIds = new Set(state.delta_ids);
@@ -273,7 +315,7 @@ function packPage(state: CursorState, offset: number, budget: number): ContextPa
   const omittedCount = state.records.length - nextOffset;
   const nextDelivered = [...delivered, ...items.map((item) => item.id)];
   const exhausted = nextOffset >= state.records.length;
-  const cursor = exhausted ? undefined : encodeCursor({ ...state, offset: nextOffset, budget, delivered: nextDelivered });
+  const cursor = exhausted ? undefined : encodeCursor({ ...state, offset: nextOffset, budget, delivered: nextDelivered }, keyRoot, authority);
   const sourceRecords = items.map((item) => ({
     id: item.id,
     hash: digest(item),
@@ -310,65 +352,60 @@ function packPage(state: CursorState, offset: number, budget: number): ContextPa
   };
 }
 
-export function buildContextPack(store: AuthorityStore, engagementId: string, budget: number, options: ContextOptions = {}): ContextPack {
+export async function buildContextPack(store: AuthorityStore, engagementId: string, budget: number, options: ContextOptions = {}): Promise<ContextPack> {
+  await store.ready;
   const requestedBudget = options.characterBudget ?? budget;
-  if (!Number.isSafeInteger(requestedBudget) || requestedBudget < 1) throw new RangeError("character budget must be a positive integer");
+  if (!Number.isSafeInteger(requestedBudget) || requestedBudget < 1) throw new ContractValidationError("validation_error", "character budget must be a positive integer");
   const principalId = options.principalId ?? "local";
+  const keyRoot = cursorRoot(store, options.cursorKeyRoot);
+  const authority = store.authorityId;
   if (options.cursor) {
-    const state = decodeCursor(options.cursor);
-    if (state.engagement_id !== engagementId || state.principal_id !== principalId || state.include_candidates !== Boolean(options.includeCandidates) || state.policy_version !== (options.policyVersion ?? "policy/1")) throw new Error("context continuation cursor binding mismatch");
-    if ((options.workItemId ?? null) !== state.work_item_id || (options.workerRole ?? null) !== state.worker_role) throw new Error("context continuation cursor binding mismatch");
-    if (Boolean(options.reviewerMode) !== state.reviewer_mode) throw new Error("context continuation cursor binding mismatch");
-    if (options.ordering !== undefined && options.ordering !== state.ordering) throw new Error("context continuation cursor binding mismatch");
-    if (JSON.stringify(canonical(options.filters ?? {})) !== JSON.stringify(canonical(state.filters))) throw new Error("context continuation cursor binding mismatch");
-    if (options.readSeq !== undefined && options.readSeq !== state.read_seq) throw new Error("context continuation cursor binding mismatch");
-    if (requestedBudget !== state.budget) throw new Error("context continuation cursor budget mismatch");
-    return packPage(state, state.offset, requestedBudget);
+    const state = decodeCursor(options.cursor, keyRoot, authority);
+    if (state.engagement_id !== engagementId || state.principal_id !== principalId || state.include_candidates !== Boolean(options.includeCandidates) || state.policy_version !== (options.policyVersion ?? "policy/1")) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if ((options.workItemId ?? null) !== state.work_item_id || (options.workerRole ?? null) !== state.worker_role) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (Boolean(options.reviewerMode) !== state.reviewer_mode) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (options.ordering !== undefined && options.ordering !== state.ordering) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (JSON.stringify(canonical(options.filters ?? {})) !== JSON.stringify(canonical(state.filters))) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (options.readSeq !== undefined && options.readSeq !== state.read_seq) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (requestedBudget !== state.budget) throw new InvalidCursorError("context continuation cursor budget mismatch");
+    const snapshot = await store.snapshot(engagementId, { includeCandidates: state.include_candidates, asOf: state.read_seq, readTime: state.read_time });
+    const byId = new Map(snapshot.records.map((record) => [record.id, record]));
+    for (const id of state.supplemental_ids) {
+      const record = await pinnedRecord(store, id, state.read_seq);
+      if (record?.engagement_id === engagementId) byId.set(id, record);
+    }
+    state.records = orderContextRecords(contextRecords([...byId.values()], state), state.work_item_id, new Set(state.delta_ids));
+    if (state.offset > state.records.length) throw new InvalidCursorError();
+    return packPage(state, state.offset, requestedBudget, keyRoot, authority);
   }
-  if (options.cursorTtlMs !== undefined && (!Number.isSafeInteger(options.cursorTtlMs) || options.cursorTtlMs < 1)) throw new RangeError("cursor ttl must be a positive integer");
-  const snapshot = store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
-  let records = snapshot.records
-    .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
-    .filter((record) => !options.reviewerMode || record.kind !== "review")
-    .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
-    .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record))
-    .sort((a, b) => {
-      const byPriority = priority(a, options.workItemId ?? null) - priority(b, options.workItemId ?? null);
-      if (byPriority) return byPriority;
-      if (a.kind === "checkpoint" && b.kind === "checkpoint") return String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
-      return String(a.id).localeCompare(String(b.id));
-    });
+  if (options.cursorTtlMs !== undefined && (!Number.isSafeInteger(options.cursorTtlMs) || options.cursorTtlMs < 1)) throw new ContractValidationError("validation_error", "cursor ttl must be a positive integer");
+  const snapshot = await store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
+  const selection = { include_candidates: Boolean(options.includeCandidates), reviewer_mode: Boolean(options.reviewerMode), filters: options.filters ?? {} };
+  let records = orderContextRecords(contextRecords(snapshot.records, selection), options.workItemId ?? null, new Set());
   if (snapshot.read_seq === snapshot.committed_seq) {
     const existing = new Set(records.map((record) => record.id));
-    const staleIds = new Set(store.events()
+    const staleIds = new Set((await store.events())
       .filter((event) => event.commit_seq <= snapshot.read_seq && event.event_type === "record.stale" && event.subject_id)
       .map((event) => event.subject_id!));
-    const staleRecords = [...staleIds].filter((id) => !existing.has(id)).map((id) => store.get(id))
-      .filter((record): record is CanonicalRecord => Boolean(record && record.engagement_id === engagementId && record.status === "stale"))
-      .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
-      .filter((record) => !options.reviewerMode || record.kind !== "review")
-      .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
-      .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record));
+    const staleRecords = contextRecords((await Promise.all([...staleIds].filter((id) => !existing.has(id)).map((id) => pinnedRecord(store, id, snapshot.read_seq))))
+      .filter((record): record is CanonicalRecord => Boolean(record && record.engagement_id === engagementId && record.status === "stale")), selection);
     records = [...records, ...staleRecords];
   }
   const latestCheckpointId = records.find((record) => record.kind === "checkpoint")?.id ?? null;
   const resumeFromSeq = options.resumeFromSeq ?? (typeof options.checkpoint?.source_read_seq === "number" ? options.checkpoint.source_read_seq : undefined);
-  const resumeDelta = resumeFromSeq === undefined ? undefined : resumeContextDelta(store, engagementId, resumeFromSeq, {
+  const resumeDelta = resumeFromSeq === undefined ? undefined : await resumeContextDelta(store, engagementId, resumeFromSeq, {
     checkpoint: options.checkpoint,
     principalId,
     workItemId: options.workItemId,
     workerRole: options.workerRole,
     includeCandidates: options.includeCandidates,
     readSeq: snapshot.read_seq,
+    readTime: snapshot.read_time,
     pendingActions: options.pendingActions
   });
   if (resumeDelta && snapshot.read_seq === snapshot.committed_seq) {
     const existing = new Set(records.map((record) => record.id));
-    const staleDeltaRecords = resumeDelta.updated.filter((record) => !existing.has(record.id))
-      .filter((record) => record.trust_level === "L2" || (options.includeCandidates && record.trust_level === "L1"))
-      .filter((record) => !options.reviewerMode || record.kind !== "review")
-      .filter((record) => Object.entries(options.filters ?? {}).every(([key, value]) => record[key] === value))
-      .map(allowedRecord).filter((record): record is CanonicalRecord => Boolean(record));
+    const staleDeltaRecords = contextRecords(resumeDelta.updated.filter((record) => !existing.has(record.id)), selection);
     records = [...records, ...staleDeltaRecords];
   }
   const resumeSummary: ContextResumeSummary | undefined = resumeDelta ? {
@@ -386,15 +423,11 @@ export function buildContextPack(store: AuthorityStore, engagementId: string, bu
   } : undefined;
   const deltaIds = [...new Set([...(resumeDelta?.added.map((record) => record.id) ?? []), ...(resumeDelta?.updated.map((record) => record.id) ?? [])])];
   const deltaIdSet = new Set(deltaIds);
-  records.sort((a, b) => {
-    const byPriority = priority(a, options.workItemId ?? null, deltaIdSet) - priority(b, options.workItemId ?? null, deltaIdSet);
-    if (byPriority) return byPriority;
-    if (a.kind === "checkpoint" && b.kind === "checkpoint") return String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""));
-    return String(a.id).localeCompare(String(b.id));
-  });
+  orderContextRecords(records, options.workItemId ?? null, deltaIdSet);
   const issuedAt = Date.now();
   const ttl = options.cursorTtlMs ?? 60 * 60 * 1000;
-  if (!Number.isSafeInteger(ttl) || ttl < 1 || !Number.isSafeInteger(issuedAt + ttl)) throw new RangeError("cursor ttl must be a positive safe integer");
+  if (!Number.isSafeInteger(ttl) || ttl < 1 || !Number.isSafeInteger(issuedAt + ttl)) throw new ContractValidationError("validation_error", "cursor ttl must be a positive safe integer");
+  const snapshotIds = new Set(snapshot.records.map((record) => record.id));
   const state: CursorState = {
     v: 1, engagement_id: engagementId, principal_id: principalId, read_seq: snapshot.read_seq,
     budget: requestedBudget, offset: 0, include_candidates: Boolean(options.includeCandidates),
@@ -403,9 +436,11 @@ export function buildContextPack(store: AuthorityStore, engagementId: string, bu
     filters: structuredClone(options.filters ?? {}),
     worker_role: options.workerRole ?? null, reviewer_mode: Boolean(options.reviewerMode), latest_checkpoint_id: latestCheckpointId, delivered: [], records,
     delta_ids: deltaIds, resume_delta: resumeSummary,
+    read_time: snapshot.read_time ?? new Date().toISOString(),
+    supplemental_ids: records.filter((record) => !snapshotIds.has(record.id)).map((record) => record.id),
     issued_at: issuedAt, expires_at: issuedAt + ttl
   };
-  return packPage(state, 0, requestedBudget);
+  return packPage(state, 0, requestedBudget, keyRoot, authority);
 }
 
 export interface ResumeContextDelta {
@@ -434,16 +469,17 @@ export interface ResumeDeltaOptions {
   workerRole?: string;
   includeCandidates?: boolean;
   readSeq?: number;
+  readTime?: string;
   pendingActions?: Array<Record<string, unknown>>;
 }
 
 /** Return only changes after a pinned checkpoint sequence. This is a read-only
  * helper; it never promotes late results or writes a new authority record. */
-export function resumeContextDelta(store: AuthorityStore, engagementId: string, fromReadSeq: number, options: ResumeDeltaOptions = {}): ResumeContextDelta {
-  if (!Number.isSafeInteger(fromReadSeq) || fromReadSeq < 0) throw new RangeError("from_read_seq must be a non-negative integer");
-  const current = store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
-  if (fromReadSeq > current.read_seq) throw new Error("resume delta source sequence is unavailable");
-  const before = store.snapshot(engagementId, { asOf: fromReadSeq, includeCandidates: options.includeCandidates });
+export async function resumeContextDelta(store: AuthorityStore, engagementId: string, fromReadSeq: number, options: ResumeDeltaOptions = {}): Promise<ResumeContextDelta> {
+  if (!Number.isSafeInteger(fromReadSeq) || fromReadSeq < 0) throw new ContractValidationError("validation_error", "from_read_seq must be a non-negative integer");
+  const current = await store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq, readTime: options.readTime });
+  if (fromReadSeq > current.read_seq) throw new ContractValidationError("conflict", "resume delta source sequence is unavailable");
+  const before = await store.snapshot(engagementId, { asOf: fromReadSeq, includeCandidates: options.includeCandidates });
   const beforeById = new Map(before.records.map((record) => [record.id, record]));
   const afterById = new Map(current.records.map((record) => [record.id, record]));
   const added: CanonicalRecord[] = [];
@@ -456,16 +492,16 @@ export function resumeContextDelta(store: AuthorityStore, engagementId: string, 
   const removed = [...beforeById.keys()].filter((id) => !afterById.has(id));
   const ids = new Set([...beforeById.keys(), ...afterById.keys()]);
   const checkpointWorkItem = typeof options.checkpoint?.work_item_ref === "string" ? options.checkpoint.work_item_ref : options.workItemId;
-  const relevantEvent = (event: ReturnType<AuthorityStore["events"]>[number]) =>
+  const relevantEvent = (event: Awaited<ReturnType<AuthorityStore["events"]>>[number]) =>
     (event.subject_id !== undefined && ids.has(event.subject_id))
     || event.payload.engagement_id === engagementId
     || (checkpointWorkItem !== undefined && event.payload.work_item_id === checkpointWorkItem);
-  const events = store.events().filter((event) => event.commit_seq > fromReadSeq && event.commit_seq <= current.read_seq && relevantEvent(event))
+  const events = (await store.events()).filter((event) => event.commit_seq > fromReadSeq && event.commit_seq <= current.read_seq && relevantEvent(event))
     .map((event) => ({ commit_seq: event.commit_seq, event_id: event.event_id, event_type: event.event_type, subject_id: event.subject_id, hash: event.hash }));
   const changedRecordIds = new Set([...added, ...updated].map((record) => record.id));
   for (const event of events) {
     if (!event.subject_id || changedRecordIds.has(event.subject_id)) continue;
-    const record = store.get(event.subject_id);
+    const record = await pinnedRecord(store, event.subject_id, current.read_seq);
     if (record?.engagement_id === engagementId && record.trust_level !== "L0") {
       updated.push(record);
       changedRecordIds.add(record.id);
@@ -488,7 +524,7 @@ export function resumeContextDelta(store: AuthorityStore, engagementId: string, 
   const reasons: string[] = [];
   const checkpoint = options.checkpoint;
   if (checkpoint) {
-    if (typeof checkpoint.engagement_id === "string" && checkpoint.engagement_id !== engagementId) throw new Error("checkpoint engagement binding mismatch");
+    if (typeof checkpoint.engagement_id === "string" && checkpoint.engagement_id !== engagementId) throw new ContractValidationError("authorization_error", "checkpoint engagement binding mismatch");
     const scopeRef = typeof checkpoint.scope_ref === "string" ? checkpoint.scope_ref : undefined;
     if (scopeRef && scopeChanges.includes(scopeRef)) reasons.push("scope_changed");
     if (scopeRef) {
@@ -560,8 +596,8 @@ export interface SealedDraft {
 
 /** Freeze a private draft while retaining its original Attempt/generation attribution. */
 export function sealDraft(input: { draft_id?: string; engagement_id: string; attempt_ref?: string; generation?: number; owner?: Record<string, unknown>; content: Record<string, unknown> }): SealedDraft {
-  if (!input.engagement_id || !input.content || typeof input.content !== "object" || Array.isArray(input.content)) throw new Error("draft engagement and object content are required");
-  if ((input.attempt_ref === undefined) !== (input.generation === undefined) || (input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 0))) throw new Error("draft attempt and generation attribution must be complete");
+  if (!input.engagement_id || !input.content || typeof input.content !== "object" || Array.isArray(input.content)) throw new ContractValidationError("validation_error", "draft engagement and object content are required");
+  if ((input.attempt_ref === undefined) !== (input.generation === undefined) || (input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 0))) throw new ContractValidationError("validation_error", "draft attempt and generation attribution must be complete");
   const sealedAt = new Date().toISOString();
   return {
     draft_id: input.draft_id ?? `draft_${randomBytes(16).toString("hex")}`,
@@ -573,12 +609,12 @@ export function sealDraft(input: { draft_id?: string; engagement_id: string; att
 
 /** Explicitly rebase a sealed draft. The old attribution remains available for audit. */
 export function rebaseDraft(draft: SealedDraft, target: { engagement_id: string; attempt_ref: string; generation: number; read_seq?: number }): SealedDraft {
-  if (!draft || draft.status !== "sealed") throw new Error("only a sealed draft may be rebased");
-  if (draft.engagement_id !== target.engagement_id) throw new Error("draft engagement binding mismatch");
-  if (!target.attempt_ref || !Number.isSafeInteger(target.generation) || target.generation < 0 || (target.read_seq !== undefined && (!Number.isSafeInteger(target.read_seq) || target.read_seq < 0))) throw new Error("rebase target requires attempt and generation");
-  if (draft.original_attempt_ref === target.attempt_ref) throw new Error("rebase requires a new Attempt");
-  if (draft.original_generation !== undefined && target.generation <= draft.original_generation) throw new Error("rebase target generation must be newer");
-  if (digest(draft.content) !== draft.content_hash) throw new Error("sealed draft integrity check failed");
+  if (!draft || draft.status !== "sealed") throw new ContractValidationError("validation_error", "only a sealed draft may be rebased");
+  if (draft.engagement_id !== target.engagement_id) throw new ContractValidationError("authorization_error", "draft engagement binding mismatch");
+  if (!target.attempt_ref || !Number.isSafeInteger(target.generation) || target.generation < 0 || (target.read_seq !== undefined && (!Number.isSafeInteger(target.read_seq) || target.read_seq < 0))) throw new ContractValidationError("validation_error", "rebase target requires attempt and generation");
+  if (draft.original_attempt_ref === target.attempt_ref) throw new ContractValidationError("stale_version", "rebase requires a new Attempt");
+  if (draft.original_generation !== undefined && target.generation <= draft.original_generation) throw new ContractValidationError("stale_version", "rebase target generation must be newer");
+  if (digest(draft.content) !== draft.content_hash) throw new ContractValidationError("validation_error", "sealed draft integrity check failed");
   const rebasedAt = new Date().toISOString();
   return { ...draft, status: "rebased", attempt_ref: target.attempt_ref, generation: target.generation, content: structuredClone(draft.content), rebase: { attempt_ref: target.attempt_ref, generation: target.generation, read_seq: target.read_seq, rebased_at: rebasedAt } };
 }

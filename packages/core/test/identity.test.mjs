@@ -26,12 +26,12 @@ test("separate authority connections atomically allocate one shared display sequ
   const b = new AuthorityStore(path);
   try {
     const engagement = uuidv7();
-    const records = await Promise.all(Array.from({ length: 40 }, (_, i) => Promise.resolve().then(() => (i % 2 ? a : b).commit({ id: uuidv7(), engagement_id: engagement, kind: "observation" }, "L1"))));
+    const records = await Promise.all(Array.from({ length: 40 }, async (_, i) => (await Promise.resolve().then(async () => (await (i % 2 ? a : b).commit({ id: uuidv7(), engagement_id: engagement, kind: "observation" }, "L1"))))));
     const aliases = records.map((record) => record.display_id).sort();
     assert.equal(new Set(aliases).size, 40);
     assert.deepEqual(aliases, Array.from({ length: 40 }, (_, i) => `TAR-${String(i + 1).padStart(6, "0")}`));
   } finally {
-    a.close(); b.close();
+    (await a.close()); (await b.close());
     await rm(dir, { recursive: true, force: true });
   }
 });

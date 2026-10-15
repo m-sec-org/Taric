@@ -34,7 +34,7 @@ test("adapter contract rejects unsupported versions, capabilities and API mismat
 
 test("adapter client never exposes the store and keeps engagement attribution", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const engagement_id = uuidv7();
   const adapter = createPiAdapter(service, createPrincipal("model", "model-a", engagement_id));
   assert.equal("db" in store, false);
@@ -48,8 +48,8 @@ test("adapter client never exposes the store and keeps engagement attribution", 
   const accepted = await adapter.call("proposal.submit", {
     engagement_id,
     subject_type: "claim",
-    base_version: 0,
-    content: { id: uuidv7(), engagement_id, kind: "claim", proposition: "x", trust_level: "L2" },
+    expected_version: 0,
+    content: { schema_version: "1.0.0", engagement_id, kind: "claim", proposition: "x", trust_level: "L2" },
   });
   assert.equal(accepted.ok, false);
   assert.equal(accepted.error.code, "validation_error");
@@ -57,12 +57,12 @@ test("adapter client never exposes the store and keeps engagement attribution", 
   const denied = await adapter.call("checkpoint.commit", { engagement_id, work_run_id: uuidv7(), host_id: "pi", generation: 1, checkpoint: {} });
   assert.equal(denied.ok, false);
   assert.equal(denied.error.code, "authorization_error");
-  store.close();
+  (await store.close());
 });
 
-test("DeepSeek and Hermes adapters expose only the locked native integration evidence", () => {
+test("DeepSeek and Hermes adapters expose only the locked native integration evidence", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const principal = createPrincipal("host", "host-a", uuidv7());
   const deepseek = createDeepSeekHarnessAdapter(service, principal);
   const hermes = createHermesAdapter(service, principal);
@@ -73,20 +73,20 @@ test("DeepSeek and Hermes adapters expose only the locked native integration evi
   }
   assert.equal(deepseek.status().unsupported_capabilities.length, 0);
   assert.equal(hermes.status().unsupported_capabilities.length, 0);
-  store.close();
+  (await store.close());
 });
 
 test("native adapters dispatch only through the authenticated Core client", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const principal = createPrincipal("host", "host-a", uuidv7());
   const adapters = [createDeepSeekHarnessAdapter(service, principal), createHermesAdapter(service, principal)];
   for (const adapter of adapters) {
     const response = await adapter.call("engagement.status", { engagement_id: principal.engagement_id });
     assert.equal(response.ok, true);
   }
-  assert.equal(store.events().length, 0);
-  store.close();
+  assert.equal((await store.events()).length, 0);
+  (await store.close());
 });
 
 test("authenticated adapter Artifact calls use Core authorization and content contracts", async () => {
@@ -95,7 +95,7 @@ test("authenticated adapter Artifact calls use Core authorization and content co
   const engagement_id = uuidv7();
   const session_id = "adapter-session";
   const contentRoot = join(dir, "content");
-  const service = createCoreService(store, contentRoot);
+  const service = (await createCoreService(store, contentRoot));
   const host = createDeepSeekHarnessAdapter(service, createPrincipal("host", "host-a", engagement_id));
   const reader = createHermesAdapter(service, createPrincipal("host", "reader-a", engagement_id, ["content_read"]));
   const bytes = Buffer.from("adapter artifact bytes");
@@ -114,7 +114,7 @@ test("authenticated adapter Artifact calls use Core authorization and content co
     assert.equal(read.ok, true);
     assert.deepEqual(Buffer.from(read.data.data, "base64"), bytes);
   } finally {
-    store.close();
+    (await store.close());
     rmSync(dir, { recursive: true, force: true });
   }
 });

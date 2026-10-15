@@ -114,12 +114,16 @@ test("taric runs a capture, list, review and admission round trip against one au
   try {
     const env = { ...process.env, TARIC_DB: join(dir, "authority.sqlite"), TARIC_PRINCIPAL_ROLE: "operator" };
     const run = async (op, body) => JSON.parse((await execFileAsync(process.execPath, [cliPath, op, JSON.stringify(body)], { env })).stdout);
-    const engagement_id = "0193a0f0-0000-7000-8000-000000000001";
-    assert.equal((await run("engagement.init", { id: engagement_id, name: "roundtrip" })).ok, true);
-    const captured = await run("capture.observation", { engagement_id, subject_type: "observation", base_version: 0, content: { id: "0193a0f0-0000-7000-8000-000000000002", engagement_id, kind: "observation", statement: "port 443 open", evidence_refs: [] } });
+    const initialized = await run("engagement.init", { name: "roundtrip", scope: { allowed_targets: ["example.test:443"], excluded_targets: [], rules_of_engagement_ref: "roe:roundtrip" } });
+    assert.equal(initialized.ok, true);
+    const engagement_id = initialized.data.id;
+    const resourceProposal = await run("proposal.submit", { engagement_id, subject_type: "resource", expected_version: 0, content: { schema_version: "1.0.0", engagement_id, kind: "resource", asset_type: "endpoint", identity: { target: "example.test:443" }, revision: 1 } });
+    const resourceAdmission = await run("admission.evaluate", { engagement_id, proposal_id: resourceProposal.data.id, expected_version: 0, policy_digest: `sha256:${"a".repeat(64)}` });
+    const resource_ref = resourceAdmission.data.record.id;
+    const captured = await run("capture.observation", { engagement_id, subject_type: "observation", expected_version: 0, content: { schema_version: "1.0.0", engagement_id, kind: "observation", resource_ref, observed_at: new Date().toISOString(), statement: "port 443 open", artifact_refs: [] } });
     assert.equal(captured.ok, true);
     assert.equal(captured.data.status, "pending");
     const listed = await run("proposal.list", { engagement_id });
-    assert.equal(listed.data.length, 1);
+    assert.equal(listed.data.proposals.length, 2);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

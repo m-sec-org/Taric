@@ -9,7 +9,7 @@ import { ARTIFACT_CHUNK_BYTES, AuthorityStore, createCoreService, createPrincipa
 
 const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
-test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC partitions", () => {
+test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC partitions", async () => {
   const dir = mkdtempSync(join(tmpdir(), "taric-artifact-scale-"));
   const dbPath = join(dir, "authority.sqlite");
   const contentRoot = join(dir, "content");
@@ -17,7 +17,8 @@ test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC part
   const session_id = "scale-session";
   const count = (100 * 1024 ** 3) / ARTIFACT_CHUNK_BYTES;
   const database = new AuthorityStore(dbPath);
-  database.close();
+  await database.events();
+  (await database.close());
 
   const fixture = new DatabaseSync(dbPath);
   const insert = fixture.prepare("INSERT INTO artifact_catalog(content_ref,engagement_id,session_id,artifact_id,version,category,stored_at,work_run_id,attempt_id,body) VALUES(?,?,?,?,?,?,?,?,?,?)");
@@ -66,16 +67,16 @@ test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC part
   let store;
   try {
     store = new AuthorityStore(dbPath);
-    const service = createCoreService(store, contentRoot);
+    const service = (await createCoreService(store, contentRoot));
     const host = createPrincipal("host", "scale-host", engagement_id);
-    service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(contentRoot, session_id) });
+    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(contentRoot, session_id) }));
 
     let cursor;
     let seen = 0;
     let totalBytes = 0;
     const cursorSet = new Set();
     do {
-      const response = service.dispatch("artifact.content.list", host, { engagement_id, session_id, page_size: 37, cursor });
+      const response = (await service.dispatch("artifact.content.list", host, { engagement_id, session_id, page_size: 37, cursor }));
       assert.equal(response.ok, true);
       assert.ok(response.data.items.length <= 37);
       assert.ok(Buffer.byteLength(JSON.stringify(response.data)) < 256 * 1024);
@@ -96,37 +97,37 @@ test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC part
     assert.equal(cursorSet.size, Math.ceil(count / 37) - 1);
     assert.deepEqual(readdirSync(join(contentRoot, session_id)).sort(), ["manifest.json"], "metadata paging does not open payload or per-Artifact manifest files");
   } finally {
-    store?.close();
+    (await store?.close());
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("session output resumes within the 64 MiB response bound", () => {
+test("session output resumes within the 64 MiB response bound", async () => {
   const dir = mkdtempSync(join(tmpdir(), "taric-artifact-output-scale-"));
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
   const session_id = "output-session";
   const host = createPrincipal("host", "output-host", engagement_id);
   const reader = createPrincipal("host", "output-reader", engagement_id, ["content_read"]);
-  const service = createCoreService(store, join(dir, "content"));
+  const service = (await createCoreService(store, join(dir, "content")));
   const bytes = Buffer.from("bounded resumable output");
   const digest = sha256(bytes);
   try {
-    service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(dir, "content", session_id) });
-    const begun = service.dispatch("artifact.store.begin", host, { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: digest });
+    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(dir, "content", session_id) }));
+    const begun = (await service.dispatch("artifact.store.begin", host, { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: digest }));
     assert.equal(begun.ok, true);
-    service.dispatch("artifact.store.append", host, { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest });
-    const committed = service.dispatch("artifact.store.commit", host, { engagement_id, session_id, upload_id: begun.data.upload_id, total_bytes: bytes.length, chunk_count: 1, content_hash: digest });
+    (await service.dispatch("artifact.store.append", host, { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest }));
+    const committed = (await service.dispatch("artifact.store.commit", host, { engagement_id, session_id, upload_id: begun.data.upload_id, total_bytes: bytes.length, chunk_count: 1, content_hash: digest }));
     assert.equal(committed.ok, true);
 
-    const output = service.dispatch("artifact.session.output", reader, { engagement_id, session_id, page_size: 1, include_content: true, max_response_bytes: 1024 });
+    const output = (await service.dispatch("artifact.session.output", reader, { engagement_id, session_id, page_size: 1, include_content: true, max_response_bytes: 1024 }));
     assert.equal(output.ok, true);
     assert.equal(output.data.content.content_ref, committed.data.content_ref);
     assert.deepEqual(Buffer.from(output.data.content.data, "base64"), bytes);
     assert.equal(output.data.content.max_response_bytes, 1024);
     assert.ok(output.data.max_response_bytes <= ARTIFACT_CHUNK_BYTES);
   } finally {
-    store.close();
+    (await store.close());
     rmSync(dir, { recursive: true, force: true });
   }
 });

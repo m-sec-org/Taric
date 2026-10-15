@@ -1,11 +1,14 @@
 import {
   evaluateMemoryQuality,
+  qualityProvenanceFailures,
+  type QualityEvidenceProvenance,
   type QualityEvaluationOptions,
   type QualityEvaluationReport,
   type QualitySample,
   type QualityStratum,
   type QualityStratumReport
 } from "./quality.js";
+import { TARIC_COMPATIBILITY_MANIFEST, type ManifestCapability } from "./compatibility.js";
 
 /** Version of the deterministic release report contract. */
 export const RELEASE_REPORT_VERSION = "release-report/1" as const;
@@ -83,13 +86,18 @@ export interface QualityEvaluationFailure {
   sampleCount: number;
 }
 
-export type ReleaseFailureEvidence = RequiredGateFailure | InsufficientStratumFailure | QualityEvaluationFailure;
+export interface QualityProvenanceFailure { kind: "quality-provenance"; reason: string; }
+export interface CapabilityEvidenceFailure { kind: "capability-evidence"; capabilityId: string; reason: string; }
+
+export type ReleaseFailureEvidence = RequiredGateFailure | InsufficientStratumFailure | QualityEvaluationFailure | QualityProvenanceFailure | CapabilityEvidenceFailure;
 
 export interface ReleaseReportInput {
   samples: readonly QualitySample[];
   digests: ReleaseReportDigests;
   config: ReleaseReportConfigurationInput;
   gates?: readonly ReleaseGateInput[];
+  quality_provenance?: QualityEvidenceProvenance;
+  capabilities?: readonly ManifestCapability[];
 }
 
 export interface ReleaseReport {
@@ -104,6 +112,9 @@ export interface ReleaseReport {
   gates: readonly ReleaseGateOutcome[];
   failures: readonly ReleaseFailureEvidence[];
   passed: boolean;
+  quality_provenance: QualityEvidenceProvenance | null;
+  evidence_state: "verified" | "pending" | "failed";
+  capabilities: readonly ManifestCapability[];
 }
 
 const SHA256 = /^sha256:([0-9a-f]{64})$/i;
@@ -242,8 +253,14 @@ export function buildReleaseReport(input: ReleaseReportInput): ReleaseReport {
   const gates = normalizeGates(input.gates, configuration.requiredGateIds);
   const failures: ReleaseFailureEvidence[] = [
     ...gateFailures(gates),
-    ...insufficientFailures(quality.strata)
+    ...insufficientFailures(quality.strata),
+    ...qualityProvenanceFailures(samples, input.quality_provenance).map((reason) => ({ kind: "quality-provenance" as const, reason })),
   ];
+  const capabilities = input.capabilities ?? TARIC_COMPATIBILITY_MANIFEST.capabilities;
+  for (const capability of capabilities) {
+    if (capability.state === "supported" && (capability.implementation_state !== "available" || capability.evidence_state !== "verified" || capability.evidence.length === 0)) failures.push({ kind: "capability-evidence", capabilityId: capability.id, reason: "supported capability lacks available implementation or verified evidence" });
+    if (capability.follow_up_state === "pending" && (!capability.follow_up || !capability.follow_up_detail)) failures.push({ kind: "capability-evidence", capabilityId: capability.id, reason: "pending capability lacks explicit remaining-work ownership" });
+  }
   if (!quality.passed && quality.strata.length === 0) {
     failures.push({ kind: "quality-evaluation", reason: "quality evaluation has no strata", sampleCount: samples.length });
   }
@@ -256,7 +273,10 @@ export function buildReleaseReport(input: ReleaseReportInput): ReleaseReport {
     strata: quality.strata,
     gates,
     failures,
-    passed: quality.passed && failures.length === 0
+    passed: quality.passed && failures.length === 0,
+    quality_provenance: input.quality_provenance ?? null,
+    evidence_state: failures.length === 0 ? "verified" : input.quality_provenance ? "failed" : "pending",
+    capabilities,
   };
 }
 

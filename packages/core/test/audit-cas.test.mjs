@@ -10,28 +10,28 @@ test("audit verification detects tampered event payload", async () => {
   const directory = await mkdtemp(join(tmpdir(), "taric-audit-"));
   const filename = join(directory, "authority.db");
   const store = new AuthorityStore(filename);
-  const record = store.commit({ id: uuidv7(), engagement_id: uuidv7(), kind: "claim" }, "L1");
-  store.close();
+  const record = (await store.commit({ id: uuidv7(), engagement_id: uuidv7(), kind: "claim" }, "L1"));
+  (await store.close());
   // Database access is confined to this corruption fixture; AuthorityStore exposes no handle.
   const fixture = new DatabaseSync(filename);
   fixture.prepare("UPDATE events SET payload=? WHERE subject_id=?").run("{\"tampered\":true}", record.id);
   fixture.close();
   const verifier = new AuthorityStore(filename);
-  const result = verifier.verifyAudit();
+  const result = (await verifier.verifyAudit());
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((error) => error.includes("hash mismatch")));
-  verifier.close();
+  (await verifier.close());
   await rm(directory, { recursive: true, force: true });
 });
 
-test("snapshots pin an authority sequence and CAS rejects stale writes", () => {
+test("snapshots pin an authority sequence and CAS rejects stale writes", async () => {
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
-  const record = store.commit({ id: uuidv7(), engagement_id, kind: "resource", name: "before" }, "L1");
-  const snapshot = store.snapshot(engagement_id, { includeCandidates: true });
-  store.compareAndSet(record.id, record.version, { name: "after" });
+  const record = (await store.commit({ id: uuidv7(), engagement_id, kind: "resource", name: "before" }, "L1"));
+  const snapshot = (await store.snapshot(engagement_id, { includeCandidates: true }));
+  (await store.compareAndSet(record.id, record.version, { name: "after" }));
   assert.equal(snapshot.records[0].name, "before");
-  assert.ok(snapshot.read_seq < store.snapshot(engagement_id, { includeCandidates: true }).read_seq);
-  assert.throws(() => store.compareAndSet(record.id, record.version, { name: "conflict" }), /version conflict/);
-  store.close();
+  assert.ok(snapshot.read_seq < (await store.snapshot(engagement_id, { includeCandidates: true })).read_seq);
+  (await assert.rejects(async () => (await store.compareAndSet(record.id, record.version, { name: "conflict" })), /version conflict/));
+  (await store.close());
 });

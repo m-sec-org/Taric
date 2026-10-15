@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation.js";
 import { uuidv7 } from "./identity.js";
 import type { CanonicalRecord, AuthorityStore } from "./store.js";
 
@@ -53,48 +54,56 @@ export interface CoverageGateResult {
 }
 
 function stringList(value: unknown, name: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new Error(`${name} must be a string array`);
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new ContractValidationError("validation_error", `${name} must be a string array`);
   return value as string[];
 }
 const safeAuthMetadataKeys = new Set(["scheme", "principal_class", "session_ref", "session_state", "authentication_method"]);
 function validateAuthMetadata(value: Record<string, string> | undefined): void {
   if (value === undefined) return;
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("auth_metadata must contain non-secret metadata");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ContractValidationError("validation_error", "auth_metadata must contain non-secret metadata");
   for (const [key, item] of Object.entries(value)) {
     if (!safeAuthMetadataKeys.has(key) || typeof item !== "string" || item.length > 256 || /(?:bearer\s+|password\s*[:=]|token\s*[:=]|secret\s*[:=])/i.test(item)) {
-      throw new Error("auth_metadata must contain non-secret authentication/session metadata only");
+      throw new ContractValidationError("validation_error", "auth_metadata must contain non-secret authentication/session metadata only");
     }
   }
 }
 function assertOriginEvidence(origin_reached: boolean | "unknown", evidence_refs: string[]): void {
-  if (origin_reached === true && evidence_refs.length === 0) throw new Error("origin_reached=true requires evidence references");
+  if (origin_reached === true && evidence_refs.length === 0) throw new ContractValidationError("validation_error", "origin_reached=true requires evidence references");
 }
 function assertLayer(input: { decision_layer: DecisionLayer; control_ref?: string; origin_reached: boolean | "unknown"; origin_outcome: OriginOutcome; outcome?: ControlOutcome; fingerprint?: string }): void {
-  if (input.decision_layer === "unknown" && input.control_ref) throw new Error("unknown decision layer cannot name a control");
-  if (input.decision_layer === "edge" && input.origin_reached === false && input.origin_outcome !== "not_reached") throw new Error("edge block before origin must use origin_outcome=not_reached");
-  if (input.fingerprint && input.outcome && input.outcome !== "suspected") throw new Error("fingerprint attribution is only suspected");
+  if (input.decision_layer === "unknown" && input.control_ref) throw new ContractValidationError("validation_error", "unknown decision layer cannot name a control");
+  if (input.decision_layer === "edge" && input.origin_reached === false && input.origin_outcome !== "not_reached") throw new ContractValidationError("validation_error", "edge block before origin must use origin_outcome=not_reached");
+  if (input.fingerprint && input.outcome && input.outcome !== "suspected") throw new ContractValidationError("validation_error", "fingerprint attribution is only suspected");
 }
 export function validateControlObservation(input: ControlObservationInput): void {
   const evidence = stringList(input.evidence_refs, "evidence_refs"); stringList(input.conditions, "conditions");
-  if (!input.resource_ref || !input.operation || !input.outcome || !input.origin_outcome) throw new Error("control observation requires resource, operation, outcome and origin outcome");
-  if (!input.decision_layer || !["edge", "network", "origin", "unknown"].includes(input.decision_layer) || !["observed", "suspected", "not_observed", "inconclusive", "changed"].includes(input.outcome)) throw new Error("invalid control observation layer or outcome");
+  if (!input.resource_ref || !input.operation || !input.outcome || !input.origin_outcome) throw new ContractValidationError("validation_error", "control observation requires resource, operation, outcome and origin outcome");
+  if (!input.decision_layer || !["edge", "network", "origin", "unknown"].includes(input.decision_layer) || !["observed", "suspected", "not_observed", "inconclusive", "changed"].includes(input.outcome)) throw new ContractValidationError("validation_error", "invalid control observation layer or outcome");
   validateAuthMetadata(input.auth_metadata);
   assertLayer({ decision_layer: input.decision_layer, control_ref: input.control_ref, origin_reached: input.origin_reached, origin_outcome: input.origin_outcome, outcome: input.outcome, fingerprint: input.fingerprint });
   assertOriginEvidence(input.origin_reached, evidence);
 }
 export function validateAccessDecisionObservation(input: AccessDecisionObservationInput): void {
   const evidence = stringList(input.evidence_refs, "evidence_refs"); stringList(input.conditions, "conditions");
-  if (!input.resource_ref || !input.operation || !input.decision || !input.origin_outcome) throw new Error("access decision requires resource, operation, decision and origin outcome");
-  if (!input.decision_layer || !["edge", "network", "origin", "unknown"].includes(input.decision_layer) || !["allow", "deny", "challenge", "filtered", "unknown"].includes(input.decision)) throw new Error("invalid access decision layer or decision");
+  if (!input.resource_ref || !input.operation || !input.decision || !input.origin_outcome) throw new ContractValidationError("validation_error", "access decision requires resource, operation, decision and origin outcome");
+  if (!input.decision_layer || !["edge", "network", "origin", "unknown"].includes(input.decision_layer) || !["allow", "deny", "challenge", "filtered", "unknown"].includes(input.decision)) throw new ContractValidationError("validation_error", "invalid access decision layer or decision");
   validateAuthMetadata(input.auth_metadata);
   assertLayer({ decision_layer: input.decision_layer, control_ref: input.control_ref, origin_reached: input.origin_reached, origin_outcome: input.origin_outcome });
   assertOriginEvidence(input.origin_reached, evidence);
 }
-export function createControlObservation(store: AuthorityStore, input: ControlObservationInput): ControlObservation {
-  validateControlObservation(input); const observation = store.commit({ ...input, evidence_refs: [...input.evidence_refs], conditions: [...input.conditions], id: uuidv7(), kind: "control_observation" } as CanonicalRecord, "L1") as ControlObservation; const control = input.control_ref ? store.get(input.control_ref) : undefined; if (control && ["protective_control", "protective_control_revision", "control_observation", "access_decision_observation"].includes(String(control.kind))) store.impact(input.control_ref!, { engagement_id: input.engagement_id, limit: 100 }); return observation;
+export async function createControlObservation(store: AuthorityStore, input: ControlObservationInput): Promise<ControlObservation> {
+  validateControlObservation(input);
+  const observation = await store.commit({ ...input, evidence_refs: [...input.evidence_refs], conditions: [...input.conditions], id: uuidv7(), kind: "control_observation" } as CanonicalRecord, "L1") as ControlObservation;
+  const control = input.control_ref ? await store.get(input.control_ref) : undefined;
+  if (control && ["protective_control", "protective_control_revision", "control_observation", "access_decision_observation"].includes(String(control.kind))) await store.impact(input.control_ref!, { engagement_id: input.engagement_id, limit: 100 });
+  return observation;
 }
-export function createAccessDecisionObservation(store: AuthorityStore, input: AccessDecisionObservationInput): AccessDecisionObservation {
-  validateAccessDecisionObservation(input); const observation = store.commit({ ...input, evidence_refs: [...input.evidence_refs], conditions: [...input.conditions], id: uuidv7(), kind: "access_decision_observation" } as CanonicalRecord, "L1") as AccessDecisionObservation; const resource = store.get(input.resource_ref); if (resource && ["resource", "resource_revision", "service", "endpoint"].includes(String(resource.kind))) store.impact(input.resource_ref, { engagement_id: input.engagement_id, limit: 100 }); return observation;
+export async function createAccessDecisionObservation(store: AuthorityStore, input: AccessDecisionObservationInput): Promise<AccessDecisionObservation> {
+  validateAccessDecisionObservation(input);
+  const observation = await store.commit({ ...input, evidence_refs: [...input.evidence_refs], conditions: [...input.conditions], id: uuidv7(), kind: "access_decision_observation" } as CanonicalRecord, "L1") as AccessDecisionObservation;
+  const resource = await store.get(input.resource_ref);
+  if (resource && ["resource", "resource_revision", "service", "endpoint"].includes(String(resource.kind))) await store.impact(input.resource_ref, { engagement_id: input.engagement_id, limit: 100 });
+  return observation;
 }
 export interface CoverageCellInput {
   engagement_id: string; resource_ref: string; resource_revision_ref?: string; test_category: string;
@@ -107,18 +116,18 @@ export interface CoverageCellInput {
   /** Counter-evidence that contradicts this cell's outcome (task 2.2). */
   counter_evidence_refs?: string[];
 }
-export function createCoverageCell(store: AuthorityStore, input: CoverageCellInput): CoverageCell {
+export async function createCoverageCell(store: AuthorityStore, input: CoverageCellInput): Promise<CoverageCell> {
   const conditions = [...new Set(stringList(input.conditions ?? [], "conditions"))].sort(); const evidence = stringList(input.evidence_refs ?? [], "evidence_refs");
   const counterEvidence = stringList(input.counter_evidence_refs ?? [], "counter_evidence_refs");
-  if (!input.resource_ref || !input.test_category) throw new Error("coverage requires resource_ref and test_category");
-  if (!["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"].includes(input.status)) throw new Error("invalid coverage status");
-  if (input.status === "blocked_by_control" && input.origin_reached === true) throw new Error("blocked_by_control cannot claim origin_reached=true");
-  if (input.status === "blocked_by_control" && !input.control_observation_ref && !input.limitations.length) throw new Error("blocked_by_control requires control evidence or limitations");
+  if (!input.resource_ref || !input.test_category) throw new ContractValidationError("validation_error", "coverage requires resource_ref and test_category");
+  if (!["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"].includes(input.status)) throw new ContractValidationError("validation_error", "invalid coverage status");
+  if (input.status === "blocked_by_control" && input.origin_reached === true) throw new ContractValidationError("validation_error", "blocked_by_control cannot claim origin_reached=true");
+  if (input.status === "blocked_by_control" && !input.control_observation_ref && !input.limitations.length) throw new ContractValidationError("validation_error", "blocked_by_control requires control evidence or limitations");
   // not_applicable must carry a reason; it cannot be used to mask an untested cell.
-  if (input.status === "not_applicable" && !input.not_applicable_reason?.trim()) throw new Error("not_applicable requires an explicit reason");
-  if (input.status !== "not_applicable" && input.not_applicable_reason) throw new Error("not_applicable_reason is only valid for a not_applicable cell");
+  if (input.status === "not_applicable" && !input.not_applicable_reason?.trim()) throw new ContractValidationError("validation_error", "not_applicable requires an explicit reason");
+  if (input.status !== "not_applicable" && input.not_applicable_reason) throw new ContractValidationError("validation_error", "not_applicable_reason is only valid for a not_applicable cell");
   assertOriginEvidence(input.origin_reached ?? "unknown", evidence);
-  return store.commit({ ...input, tested_at: input.tested_at ?? new Date().toISOString(), conditions, evidence_refs: evidence, counter_evidence_refs: counterEvidence, id: uuidv7(), kind: "coverage" } as CanonicalRecord, "L1") as CoverageCell;
+  return await store.commit({ ...input, tested_at: input.tested_at ?? new Date().toISOString(), conditions, evidence_refs: evidence, counter_evidence_refs: counterEvidence, id: uuidv7(), kind: "coverage" } as CanonicalRecord, "L1") as CoverageCell;
 }
 export interface NegativeObservationInput {
   engagement_id: string; statement: string; method: string; baseline_ref?: string; control_ref?: string;
@@ -126,12 +135,12 @@ export interface NegativeObservationInput {
   conditions: string[]; tested_at?: string; evidence_refs: string[]; limitations: string[];
   role?: string; tenant_ref?: string; path?: string; network_condition?: string;
 }
-export function createNegativeObservation(store: AuthorityStore, input: NegativeObservationInput): NegativeObservation {
+export async function createNegativeObservation(store: AuthorityStore, input: NegativeObservationInput): Promise<NegativeObservation> {
   const conditions = [...new Set(stringList(input.conditions, "conditions"))].sort(); const resources = stringList(input.tested_resource_refs, "tested_resource_refs");
   const evidence = stringList(input.evidence_refs, "evidence_refs"); const limitations = stringList(input.limitations, "limitations");
-  if (!input.statement || !input.method || resources.length === 0 || conditions.length === 0 || limitations.length === 0 || (!input.baseline_ref && !input.control_ref)) throw new Error("negative observations require a bounded method, resource, baseline or control, conditions, and limitations");
+  if (!input.statement || !input.method || resources.length === 0 || conditions.length === 0 || limitations.length === 0 || (!input.baseline_ref && !input.control_ref)) throw new ContractValidationError("validation_error", "negative observations require a bounded method, resource, baseline or control, conditions, and limitations");
   // Scope comes from structured test dimensions, not a keyword heuristic over the claim text.
-  return store.commit({ ...input, tested_at: input.tested_at ?? new Date().toISOString(), conditions, tested_resource_refs: resources, evidence_refs: evidence, limitations, bounded: true, id: uuidv7(), kind: "negative_observation" } as CanonicalRecord, "L1") as NegativeObservation;
+  return await store.commit({ ...input, tested_at: input.tested_at ?? new Date().toISOString(), conditions, tested_resource_refs: resources, evidence_refs: evidence, limitations, bounded: true, id: uuidv7(), kind: "negative_observation" } as CanonicalRecord, "L1") as NegativeObservation;
 }
 /**
  * Full coverage-matrix identity (design §9.2). Two cells may only be compared when
@@ -175,17 +184,19 @@ export function evaluateCoverageGate(cells: CoverageCell[]): CoverageGateResult 
   }
   return { can_close: gaps.length === 0, action_authorized: false, gaps };
 }
-export function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string): CoverageGateResult {
-  const cells = Array.isArray(source) ? source : source.list(engagementId ?? "", { includeCandidates: true }).filter((record) => record.kind === "coverage") as CoverageCell[];
-  const result = evaluateCoverageGate(cells);
-  if (!Array.isArray(source)) {
-    const visibility = coverageVisibility(source, engagementId ?? "");
+export async function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string): Promise<CoverageGateResult> {
+  if (Array.isArray(source)) return evaluateCoverageGate(source);
+  // Current cells and unresolved operator-visible history must share one read view.
+  return source.maintenanceRead(async () => {
+    const cells = (await source.list(engagementId ?? "", { includeCandidates: true })).filter((record) => record.kind === "coverage") as CoverageCell[];
+    const result = evaluateCoverageGate(cells);
+    const visibility = await coverageVisibility(source, engagementId ?? "");
     if (visibility.pending_impact.length > 0) result.gaps.push({ kind: "pending_impact", cell_ids: [], reason: "impact propagation is incomplete; pending watermark remains visible" });
     if (visibility.revalidation_queue.length > 0) result.gaps.push({ kind: "pending_revalidation", cell_ids: [], reason: "revalidation work remains queued" });
     if (visibility.conflicted.length > 0) result.gaps.push({ kind: "conflicting", cell_ids: visibility.conflicted.map((cell) => cell.id), reason: "contradicted or inconclusive coverage remains unresolved" });
-  }
-  result.can_close = result.gaps.length === 0;
-  return result;
+    result.can_close = result.gaps.length === 0;
+    return result;
+  });
 }
 
 export interface CoverageVisibility {
@@ -206,10 +217,10 @@ export interface CoverageVisibility {
  * external results and counter-evidence must be visible; a report may only claim
  * complete coverage when none of them exist.
  */
-export function coverageVisibility(store: AuthorityStore, engagementId: string): CoverageVisibility {
+export async function coverageVisibility(store: AuthorityStore, engagementId: string): Promise<CoverageVisibility> {
   // Reports are an operator surface: include recalled current records so stale,
   // contradicted and retracted outcomes remain visible as unresolved history.
-  const records = store.list(engagementId, { includeCandidates: true, includeRecalled: true });
+  const records = await store.list(engagementId, { includeCandidates: true, includeRecalled: true });
   const cells = records.filter((record) => record.kind === "coverage") as CoverageCell[];
   const pending_external_results = cells.filter((cell) => cell.external_result_state === "pending" || cell.external_result_state === "unavailable");
   const conflicted = cells.filter((cell) => (Array.isArray(cell.counter_evidence_refs) ? cell.counter_evidence_refs : []).length > 0 || cell.status === "inconclusive");

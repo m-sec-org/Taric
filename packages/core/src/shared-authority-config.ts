@@ -1,6 +1,7 @@
 import { SCHEMA_VERSION } from "@taric/schemas";
 import { policyDigest } from "./policy.js";
 import { checkDeploymentGuard, type DeploymentGuardResult } from "./deployment-guard.js";
+import { runtimeConformancePassed, type AuthorityRuntimeConformance } from "./storage-contract.js";
 
 export const SINGLE_HOST_SQLITE_PROFILE = "single_host_sqlite" as const;
 export const MULTI_HOST_AUTHORITY_PROFILE = "multi_host_authority" as const;
@@ -34,7 +35,7 @@ export interface SharedAuthorityBackendManifest {
   default_profile: typeof SINGLE_HOST_SQLITE_PROFILE;
   profiles: {
     single_host_sqlite: { backend: "sqlite"; default: true; enabled: true; postgres_dependency: false; lease_mode: "local" };
-    multi_host_authority: { backend: "postgresql"; default: false; enabled: "explicit"; postgres_dependency: "optional"; lease_mode: "server_side" };
+    multi_host_authority: { backend: "postgresql"; default: false; enabled: false; implementation_state: "available"; runtime_state: "disabled"; evidence_state: "verified"; postgres_dependency: "optional"; lease_mode: "server_side" };
   };
   postgresql: { minimum_major: number; maximum_major: number; supported_majors: readonly number[]; version_source: "postgresql.org/support/versioning" };
   schema_version: string;
@@ -47,7 +48,7 @@ export const SHARED_AUTHORITY_BACKEND_MANIFEST: SharedAuthorityBackendManifest =
   default_profile: SINGLE_HOST_SQLITE_PROFILE,
   profiles: {
     single_host_sqlite: { backend: "sqlite", default: true, enabled: true, postgres_dependency: false, lease_mode: "local" },
-    multi_host_authority: { backend: "postgresql", default: false, enabled: "explicit", postgres_dependency: "optional", lease_mode: "server_side" },
+    multi_host_authority: { backend: "postgresql", default: false, enabled: false, implementation_state: "available", runtime_state: "disabled", evidence_state: "verified", postgres_dependency: "optional", lease_mode: "server_side" },
   },
   postgresql: {
     minimum_major: POSTGRESQL_SUPPORTED_MAJOR_VERSIONS[0],
@@ -60,7 +61,7 @@ export const SHARED_AUTHORITY_BACKEND_MANIFEST: SharedAuthorityBackendManifest =
   policy_digest: policyDigest(),
 } as const);
 
-export type AuthorityDiagnosticCode = "ready" | "postgresql_unavailable" | "unsupported_deployment" | "configuration_invalid";
+export type AuthorityDiagnosticCode = "ready" | "postgresql_unavailable" | "backend_conformance_failed" | "unsupported_deployment" | "configuration_invalid";
 export interface AuthorityStartupDiagnostics {
   ok: boolean;
   enabled: boolean;
@@ -74,6 +75,9 @@ export interface AuthorityStartupDiagnostics {
   message: string;
   follow_up?: string;
   deployment_guard?: DeploymentGuardResult;
+  implementation_state: "available";
+  runtime_state: "enabled" | "disabled";
+  evidence_state: "verified" | "pending" | "failed";
 }
 
 export class AuthorityConfigurationError extends Error {
@@ -99,12 +103,13 @@ export function resolveAuthorityConfiguration(input?: SharedAuthorityConfigurati
   if (!multi.postgresql || typeof multi.postgresql.connection_string !== "string" || multi.postgresql.connection_string.trim() === "") throw new AuthorityConfigurationError("multi_host_authority requires postgresql.connection_string");
   if (typeof multi.host_id !== "string" || multi.host_id.trim() === "") throw new AuthorityConfigurationError("multi_host_authority requires a non-empty host_id");
   if (multi.lease_mode !== "server_side") throw new AuthorityConfigurationError("multi_host_authority requires lease_mode=server_side");
-  return { profile, backend: "postgresql", enabled: true, postgresql: { connection_string: multi.postgresql.connection_string }, host_id: multi.host_id, lease_mode: "server_side" };
+  return { profile, backend: "postgresql", enabled: false, postgresql: { connection_string: multi.postgresql.connection_string }, host_id: multi.host_id, lease_mode: "server_side" };
 }
 
 /** Build startup diagnostics from an explicit service availability probe. No probe means the selected backend is not ready. */
-export function authorityStartupDiagnostics(config: ResolvedAuthorityConfiguration, postgresqlAvailable?: boolean, deploymentFacts: Parameters<typeof checkDeploymentGuard>[0] = {}): AuthorityStartupDiagnostics {
+export function authorityStartupDiagnostics(config: ResolvedAuthorityConfiguration, postgresqlAvailable?: boolean, deploymentFacts: Parameters<typeof checkDeploymentGuard>[0] = {}, conformance?: AuthorityRuntimeConformance): AuthorityStartupDiagnostics {
   const unavailable = config.backend === "postgresql" && postgresqlAvailable !== true;
+  const primitiveOnly = config.backend === "postgresql" && !runtimeConformancePassed(conformance);
   const observedService = deploymentFacts.authority_service ?? deploymentFacts.authorityService ?? {};
   const deploymentGuard = checkDeploymentGuard({
     ...deploymentFacts,
@@ -121,17 +126,20 @@ export function authorityStartupDiagnostics(config: ResolvedAuthorityConfigurati
       : {},
   });
   return {
-    ok: !unavailable && deploymentGuard.supported,
-    enabled: !unavailable && deploymentGuard.supported && config.enabled,
+    ok: !unavailable && !primitiveOnly && deploymentGuard.supported,
+    enabled: !unavailable && !primitiveOnly && deploymentGuard.supported,
     profile: config.profile,
     backend: config.backend,
     schema_version: SCHEMA_VERSION,
     policy_digest: policyDigest(),
     host_id: config.host_id,
     lease_mode: config.lease_mode,
-    code: !deploymentGuard.supported && config.backend === "sqlite" ? "unsupported_deployment" : unavailable || !deploymentGuard.supported ? "postgresql_unavailable" : "ready",
-    message: !deploymentGuard.supported ? deploymentGuard.reasons.join("; ") : unavailable ? "PostgreSQL shared authority is unavailable; authority writes are blocked and no SQLite fallback is allowed" : `${config.profile} authority is ready`,
-    ...(!deploymentGuard.supported || unavailable ? { follow_up: "restore PostgreSQL service/configuration and retry startup" } : {}),
+    code: !deploymentGuard.supported && config.backend === "sqlite" ? "unsupported_deployment" : unavailable || !deploymentGuard.supported ? "postgresql_unavailable" : primitiveOnly ? "backend_conformance_failed" : "ready",
+    message: unavailable ? "PostgreSQL shared authority is unavailable; authority writes are blocked" : !deploymentGuard.supported ? "authority deployment is unsupported" : primitiveOnly ? "matching full Core runtime conformance evidence is required before PostgreSQL activation" : `${config.profile} authority is ready`,
+    ...(!deploymentGuard.supported || unavailable || primitiveOnly ? { follow_up: primitiveOnly ? "complete shared Core runtime conformance and retry startup" : "restore authority service/configuration and retry startup" } : {}),
     deployment_guard: deploymentGuard,
+    implementation_state: "available",
+    runtime_state: !unavailable && !primitiveOnly && deploymentGuard.supported ? "enabled" : "disabled",
+    evidence_state: primitiveOnly ? conformance ? "failed" : "pending" : "verified",
   };
 }

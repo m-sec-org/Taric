@@ -109,3 +109,19 @@ test("evolution memory contracts preserve immutable revisions and typed applicab
   const controlObservation = { ...base, resource_ref: revision.resource_ref, control_ref: "018f47a1-7c00-7000-8000-000000000008", outcome: "inconclusive", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", observed_at: revision.valid_from, evidence_refs: [], limitations: ["origin not attributable"] };
   assert.equal(validators.get("controlObservation")(controlObservation), true);
 });
+
+test("canonical identities require UUIDv7 and create candidates reject writer fields", () => {
+  const canonical = structuredClone(fixtures.valid.claim);
+  for (const id of ["legacy-1", "018f47a1-7c00-4000-8000-000000000001", "01HZZ3GBR91HYZPJ0QVANQM32H"]) {
+    assert.equal(validators.get("claim")({ ...canonical, id }), false);
+  }
+  const content = { schema_version: "1.0.0", engagement_id: canonical.engagement_id, kind: "claim", proposition: "candidate", status: "proposed", evidence_refs: [], limitations: [] };
+  const envelope = { engagement_id: canonical.engagement_id, subject_type: "claim", expected_version: 0, content };
+  assert.equal(validators.get("proposalEnvelope")(envelope), true);
+  for (const field of ["id", "trust_level", "display_id", "version", "commit_seq", "review_ref", "policy_digest", "accept"]) {
+    assert.equal(validators.get("proposalEnvelope")({ ...envelope, content: { ...content, [field]: field === "accept" ? true : canonical.id } }), false, `${field} is writer-owned`);
+  }
+  assert.equal(validators.get("proposalEnvelope")({ ...envelope, content: { ...content, kind: undefined } }), false);
+  assert.equal(validators.get("proposalProvenance")({ host_id: "pi", producer_id: "model", source_kind: "model" }), true);
+  assert.equal(validators.get("proposalProvenance")({ host_id: "pi", producer_id: "model", source_kind: "reviewer" }), false);
+});

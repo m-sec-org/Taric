@@ -1,4 +1,5 @@
-import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalCapability, type PrincipalRole } from "./service.js";
+import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalCapability, type PrincipalRole, type ReviewerAttestation } from "./service.js";
+import { ContractValidationError } from "./validation.js";
 
 /** Adapter 契约版本与 Core API 版本分开演进；两者都必须显式声明。 */
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
@@ -122,7 +123,7 @@ export class TaricAdapterClient implements AdapterClient {
     if (!this.descriptor.supported) {
       return { ok: false, error: { code: "unsupported_capability", message: `${this.descriptor.host_id} adapter is unsupported`, follow_up: this.descriptor.unsupported_capabilities?.[0] } };
     }
-    return this.#service.dispatch(operation, this.#principal, request) as { ok: true; data: T } | { ok: false; error: AdapterError };
+    return await this.#service.dispatch(operation, this.#principal, request) as { ok: true; data: T } | { ok: false; error: AdapterError };
   }
 
   status(): AdapterCapabilityReport {
@@ -141,12 +142,12 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   async register(extension: PiExtensionApi, binding: PiRuntimeBinding = {}): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }> {
-    if (this.descriptor.host_id !== "pi" || !this.descriptor.supported) throw new Error("unsupported_capability");
-    if (this.#principal.role !== "host" || !this.#principal.id || this.#principal.transport_verified !== true || !this.#principal.engagement_id) throw new Error("authorization_error");
+    if (this.descriptor.host_id !== "pi" || !this.descriptor.supported) throw new ContractValidationError("unsupported_capability", "unsupported_capability");
+    if (this.#principal.role !== "host" || !this.#principal.id || this.#principal.transport_verified !== true || !this.#principal.engagement_id) throw new ContractValidationError("authorization_error", "authorization_error");
     // /reload 会重新调用工厂。这里保证同一实例重复注册不会产生第二次业务副作用。
     if (this.#loaded) return { loaded: true, callbacks: [], hooks: [], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
-    if (binding.generation !== undefined && (!Number.isInteger(binding.generation) || binding.generation < 1)) throw new Error("validation_error");
-    if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new Error("validation_error");
+    if (binding.generation !== undefined && (!Number.isInteger(binding.generation) || binding.generation < 1)) throw new ContractValidationError("validation_error", "validation_error");
+    if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new ContractValidationError("validation_error", "validation_error");
 
     const hooks = ["session_start", "context", "before_agent_start", "agent_before_settle", "tool_result", "session_shutdown"];
     // `callbacks` is the stable Taric lifecycle vocabulary. `hooks` below is
@@ -211,10 +212,14 @@ export class TaricAdapterClient implements AdapterClient {
         type: "object",
         properties: {
           subject_type: { type: "string", minLength: 1 },
-          base_version: { type: "integer", minimum: 0 },
+          expected_version: { type: "integer", minimum: 0 },
+          proposal_id: { type: "string" },
+          client_request_id: { type: "string", maxLength: 128 },
+          target_id: { type: "string" },
+          subject_ref: { type: "string" },
           content: { type: "object" },
         },
-        required: ["subject_type", "base_version", "content"],
+        required: ["subject_type", "expected_version", "content"],
         additionalProperties: false,
       },
       execute: async (_toolCallId, params) => {
@@ -279,14 +284,14 @@ export class TaricAdapterClient implements AdapterClient {
   }
 }
 
-export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string, grant: readonly PrincipalCapability[] = []): Principal {
+export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string, grant: readonly PrincipalCapability[] = [], reviewerAttestation?: ReviewerAttestation): Principal {
   const defaults: Record<PrincipalRole, Principal["capabilities"]> = {
     model: ["read", "propose"],
     host: ["read", "propose", "work", "checkpoint", "action", "content"],
     reviewer: ["read", "review"],
-    writer: ["read", "propose", "admit", "audit"],
-    operator: ["read", "propose", "admit", "audit", "operator", "content"],
+    writer: ["read", "propose", "admit", "writer"],
+    operator: ["read", "propose", "admit", "writer", "audit", "operator", "content"],
   };
-  const principal = { id, role, engagement_id: engagementId, capabilities: [...new Set([...(defaults[role] ?? []), ...grant])], transport_verified: true } as Principal;
+  const principal = { id, role, engagement_id: engagementId, capabilities: [...new Set([...(defaults[role] ?? []), ...grant])], ...(reviewerAttestation ? { reviewer_attestation: { ...reviewerAttestation } } : {}), transport_verified: true } as Principal;
   return registerTransportPrincipal(principal);
 }

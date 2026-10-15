@@ -4,12 +4,12 @@
   "api_contract_version": "1.0.0",
   "change": "complete-taric-runtime-gaps",
   "description": "Phase 1 版本化 fixture 语料：正例、负例、安全不变量与状态机迁移。",
-  "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+  "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
   "valid": {
     "scope": {
-      "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+      "id": "a17d24d3-44d7-77d5-b5a0-65d95db662ff",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -28,9 +28,9 @@
       "valid_until": "2026-10-31T00:00:00.000Z"
     },
     "engagement": {
-      "id": "fcdfdd1e-5577-4173-870e-79d917388bc1",
+      "id": "fcdfdd1e-5577-7173-870e-79d917388bc1",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -39,15 +39,15 @@
       },
       "kind": "engagement",
       "name": "phase-one",
-      "scope_ref": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+      "scope_ref": "a17d24d3-44d7-77d5-b5a0-65d95db662ff",
       "status": "active",
       "action_mode": "host_hitl",
       "trust_level": "L2"
     },
     "resource": {
-      "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "id": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -66,9 +66,9 @@
       "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "observation": {
-      "id": "e92e5633-40b5-4568-9062-01df070067c1",
+      "id": "e92e5633-40b5-7568-9062-01df070067c1",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -76,7 +76,7 @@
         "source_kind": "tool"
       },
       "kind": "observation",
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "observed_at": "2026-10-09T00:00:00.000Z",
       "statement": "admin returns 200 for user",
       "artifact_refs": [
@@ -91,9 +91,9 @@
       "trust_level": "L1"
     },
     "relation": {
-      "id": "9efcfc42-07b2-41e7-9048-8d8a4a3314f4",
+      "id": "9efcfc42-07b2-71e7-9048-8d8a4a3314f4",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -101,12 +101,12 @@
         "source_kind": "worker"
       },
       "kind": "relation",
-      "from_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "from_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "predicate": "protects",
-      "to_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "to_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
       "version": 1,
       "source_observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "from_type": "resource",
       "to_type": "protective_control",
@@ -114,9 +114,9 @@
       "criticality": "high"
     },
     "claim": {
-      "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+      "id": "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -127,16 +127,16 @@
       "proposition": "/admin is reachable without authorization",
       "status": "proposed",
       "evidence_refs": [
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
       "limitations": [
         "single identity"
       ]
     },
     "workItem": {
-      "id": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "id": "3e8a43c3-76d2-7070-9185-7b83cae723cd",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -156,9 +156,9 @@
       }
     },
     "evidence": {
-      "id": "5eee9386-a285-40b9-8ce5-995fafcc348c",
+      "id": "5eee9386-a285-70b9-8ce5-995fafcc348c",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -174,13 +174,13 @@
       "limitations": [
         "single identity"
       ],
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "trust_level": "L1"
     },
     "finding": {
-      "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+      "id": "c2f6ea96-5032-774d-9fc7-dabaee428ee4",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -190,12 +190,12 @@
       "kind": "finding",
       "title": "admin exposure",
       "claim_refs": [
-        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
       ],
       "evidence_refs": [
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
-      "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+      "review_ref": "8998ef6d-671a-7bd7-afa1-e37c283a1ae9",
       "status": "draft",
       "severity": "high",
       "limitations": [
@@ -203,9 +203,9 @@
       ]
     },
     "coverageCell": {
-      "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+      "id": "d96b8d61-41cc-7bd0-897a-130af0d6cd2a",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -213,7 +213,7 @@
         "source_kind": "worker"
       },
       "kind": "coverage",
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "test_category": "authz",
       "status": "blocked_by_control",
       "limitations": [
@@ -227,9 +227,9 @@
       "origin_reached": false
     },
     "negativeObservation": {
-      "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+      "id": "6bb41392-499f-7dc0-8e11-ffa9e9fd53d7",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -239,9 +239,9 @@
       "kind": "negative_observation",
       "statement": "no bypass observed in this run",
       "method": "GET /admin",
-      "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "baseline_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "tested_resource_refs": [
-        "702c37b3-7267-4a6e-a660-05026635f9d7"
+        "702c37b3-7267-7a6e-a660-05026635f9d7"
       ],
       "conditions": [
         "role=user"
@@ -253,9 +253,9 @@
       "bounded": true
     },
     "proposal": {
-      "id": "414d7114-9278-4ea2-a41b-f0ec4269738f",
+      "id": "414d7114-9278-7ea2-a41b-f0ec4269738f",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -266,13 +266,13 @@
       "subject_type": "finding",
       "content_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "status": "pending",
-      "base_version": 0,
+      "expected_version": 0,
       "evidence_refs": []
     },
     "review": {
-      "id": "0d6fc404-aeac-40f5-8fe7-a3895d48c24b",
+      "id": "0d6fc404-aeac-70f5-8fe7-a3895d48c24b",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -280,7 +280,7 @@
         "source_kind": "reviewer"
       },
       "kind": "review",
-      "proposal_ref": "b6cc709d-9d5b-4eb1-b132-b615f4e4d30c",
+      "proposal_ref": "b6cc709d-9d5b-7eb1-b132-b615f4e4d30c",
       "reviewer_id": "reviewer-b",
       "reviewer_kind": "reviewer",
       "input_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -288,9 +288,9 @@
       "policy_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     },
     "protectiveControl": {
-      "id": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "id": "d2063d59-2382-7d06-a615-e9745bbd4dab",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -300,13 +300,13 @@
       "kind": "protective_control",
       "name": "edge WAF",
       "layer": "edge",
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "control_kind": "waf"
     },
     "controlObservation": {
-      "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+      "id": "3bb376bf-8608-7600-bb78-c71fa7a7639f",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -314,8 +314,8 @@
         "source_kind": "tool"
       },
       "kind": "control_observation",
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-      "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+      "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
       "operation": "GET /admin",
       "conditions": [
         "role=user"
@@ -326,16 +326,16 @@
       "origin_outcome": "not_reached",
       "observed_at": "2026-10-09T00:00:00.000Z",
       "evidence_refs": [
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
       "limitations": [
         "single identity"
       ]
     },
     "accessDecisionObservation": {
-      "id": "cdc4f81c-6fcc-4f72-a8f4-8aafa25cc531",
+      "id": "cdc4f81c-6fcc-7f72-a8f4-8aafa25cc531",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -343,8 +343,8 @@
         "source_kind": "worker"
       },
       "kind": "access_decision_observation",
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-      "identity_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+      "identity_ref": "47920b78-1c5a-75a9-9e02-63fab5b9d5cf",
       "operation": "GET /admin",
       "decision": "deny",
       "observed_at": "2026-10-09T00:00:00.000Z",
@@ -361,9 +361,9 @@
       }
     },
     "attempt": {
-      "id": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "id": "0ce1f10f-e8b0-756c-8d00-ab39d6b0939e",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -371,7 +371,7 @@
         "source_kind": "worker"
       },
       "kind": "attempt",
-      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "work_item_ref": "3e8a43c3-76d2-7070-9185-7b83cae723cd",
       "status": "running",
       "generation": 1,
       "owner": {
@@ -382,9 +382,9 @@
       "lease_expires_at": "2026-10-09T00:02:00.000Z"
     },
     "workRun": {
-      "id": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
+      "id": "e801a701-4a2a-76f2-a9ae-33edca60f1f6",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -392,10 +392,10 @@
         "source_kind": "worker"
       },
       "kind": "work_run",
-      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
+      "work_item_ref": "3e8a43c3-76d2-7070-9185-7b83cae723cd",
       "status": "running",
       "generation": 1,
-      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "attempt_ref": "0ce1f10f-e8b0-756c-8d00-ab39d6b0939e",
       "owner": {
         "host_id": "pi",
         "agent_id": "worker-a",
@@ -405,9 +405,9 @@
       "lease_expires_at": "2026-10-09T00:02:00.000Z"
     },
     "checkpoint": {
-      "id": "39451de3-2d97-4292-bbd4-a5c29fbac543",
+      "id": "39451de3-2d97-7292-bbd4-a5c29fbac543",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -415,9 +415,9 @@
         "source_kind": "worker"
       },
       "kind": "checkpoint",
-      "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
-      "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
-      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "work_run_ref": "e801a701-4a2a-76f2-a9ae-33edca60f1f6",
+      "work_item_ref": "3e8a43c3-76d2-7070-9185-7b83cae723cd",
+      "attempt_ref": "0ce1f10f-e8b0-756c-8d00-ab39d6b0939e",
       "generation": 1,
       "target_version": 1,
       "work_item_version": 1,
@@ -435,10 +435,10 @@
         "verify"
       ],
       "observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "evidence_refs": [
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
       "negative_results": [],
       "unresolved_work": [],
@@ -452,23 +452,23 @@
         "actions": 1
       },
       "context_manifest": {
-        "context_snapshot_id": "17d1229b-0d62-4676-983b-8660bcc94816",
+        "context_snapshot_id": "17d1229b-0d62-7676-983b-8660bcc94816",
         "read_seq": 1,
         "budget_unit": "characters",
         "budget": 4000,
         "builder_version": "context/1.0",
         "sources": [
           {
-            "id": "e92e5633-40b5-4568-9062-01df070067c1",
+            "id": "e92e5633-40b5-7568-9062-01df070067c1",
             "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           }
         ]
       }
     },
     "actionIntent": {
-      "id": "dee24c64-5865-449c-ac77-597652c714e5",
+      "id": "dee24c64-5865-749c-ac77-597652c714e5",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -486,13 +486,13 @@
         "read-only"
       ],
       "memory_refs": [
-        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
       ],
       "evidence_refs": [
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
-      "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
-      "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+      "work_run_ref": "e801a701-4a2a-76f2-a9ae-33edca60f1f6",
+      "attempt_ref": "0ce1f10f-e8b0-756c-8d00-ab39d6b0939e",
       "generation": 1,
       "owner": {
         "host_id": "pi",
@@ -500,10 +500,10 @@
       }
     },
     "auditEvent": {
-      "event_id": "a87ba61f-7097-490b-b4f1-086a191c9255",
+      "event_id": "a87ba61f-7097-790b-b4f1-086a191c9255",
       "commit_seq": 1,
       "event_type": "record.commit",
-      "subject_id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "subject_id": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "created_at": "2026-10-09T00:00:00.000Z",
       "hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "prev_hash": null,
@@ -529,14 +529,14 @@
     "resourceRevision": {
       "id": "018f47a1-7c00-7000-8000-000000000001",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
         "producer_id": "worker-a",
         "source_kind": "tool"
       },
-      "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "revision": 2,
       "logical_identity": {
         "origin": "https://example.test",
@@ -546,11 +546,11 @@
       "variant": {
         "method": "GET",
         "path_template": "/admin",
-        "principal_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf"
+        "principal_ref": "47920b78-1c5a-75a9-9e02-63fab5b9d5cf"
       },
       "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "source_observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "valid_from": "2026-10-09T00:00:00.000Z",
       "supersedes": "018f47a1-7c00-7000-8000-000000000002"
@@ -558,7 +558,7 @@
     "testHypothesis": {
       "id": "018f47a1-7c00-7000-8000-000000000003",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -570,7 +570,7 @@
       "status": "proposed",
       "version": 1,
       "source_observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "resource_revision_refs": [
         "018f47a1-7c00-7000-8000-000000000001"
@@ -584,7 +584,7 @@
     "attackPath": {
       "id": "018f47a1-7c00-7000-8000-000000000004",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -601,7 +601,7 @@
         }
       ],
       "source_observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "valid_from": "2026-10-09T00:00:00.000Z",
       "criticality": "critical"
@@ -609,7 +609,7 @@
     "patchSet": {
       "id": "018f47a1-7c00-7000-8000-000000000005",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -619,13 +619,13 @@
       "base_generation": 1,
       "read_set": [
         {
-          "entity_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+          "entity_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
           "version": 1
         }
       ],
       "write_set": [
         {
-          "entity_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+          "entity_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
           "base_version": 1,
           "fields": [
             "name"
@@ -636,7 +636,7 @@
         "replace_property"
       ],
       "source_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "merge_status": "pending"
@@ -644,14 +644,14 @@
     "conflict": {
       "id": "018f47a1-7c00-7000-8000-000000000006",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
         "producer_id": "worker-a",
         "source_kind": "tool"
       },
-      "subject_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+      "subject_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
       "field_path": "name",
       "base_version": 1,
       "current_version": 2,
@@ -659,19 +659,19 @@
         {
           "value": "portal-a",
           "source_refs": [
-            "e92e5633-40b5-4568-9062-01df070067c1"
+            "e92e5633-40b5-7568-9062-01df070067c1"
           ]
         },
         {
           "value": "portal-b",
           "source_refs": [
-            "5eee9386-a285-40b9-8ce5-995fafcc348c"
+            "5eee9386-a285-70b9-8ce5-995fafcc348c"
           ]
         }
       ],
       "source_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1",
-        "5eee9386-a285-40b9-8ce5-995fafcc348c"
+        "e92e5633-40b5-7568-9062-01df070067c1",
+        "5eee9386-a285-70b9-8ce5-995fafcc348c"
       ],
       "diff": {
         "name": [
@@ -684,7 +684,7 @@
     "impactEvent": {
       "id": "018f47a1-7c00-7000-8000-000000000007",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -694,7 +694,7 @@
       "source_ref": "018f47a1-7c00-7000-8000-000000000001",
       "changed_dependency_ref": "018f47a1-7c00-7000-8000-000000000001",
       "affected_refs": [
-        "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+        "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
       ],
       "criticality": "high",
       "disposition": "requires_revalidation",
@@ -705,14 +705,14 @@
     "protectiveControlRevision": {
       "id": "018f47a1-7c00-7000-8000-000000000008",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
         "producer_id": "worker-a",
         "source_kind": "tool"
       },
-      "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+      "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
       "revision": 1,
       "layer": "edge",
       "protected_resource_revision_refs": [
@@ -724,14 +724,14 @@
       "network_conditions": [],
       "valid_from": "2026-10-09T00:00:00.000Z",
       "source_observation_refs": [
-        "e92e5633-40b5-4568-9062-01df070067c1"
+        "e92e5633-40b5-7568-9062-01df070067c1"
       ],
       "policy_snapshot_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     },
     "controlApplicabilityEvent": {
       "id": "018f47a1-7c00-7000-8000-000000000009",
       "schema_version": "1.0.0",
-      "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
       "created_at": "2026-10-09T00:00:00.000Z",
       "provenance": {
         "host_id": "pi",
@@ -739,13 +739,13 @@
         "source_kind": "tool"
       },
       "subject_refs": [
-        "3bb376bf-8608-4600-bb78-c71fa7a7639f"
+        "3bb376bf-8608-7600-bb78-c71fa7a7639f"
       ],
       "changed_dependency_ref": "018f47a1-7c00-7000-8000-000000000008",
       "previous_policy_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "current_policy_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "affected_current_view_refs": [
-        "d96b8d61-41cc-4bd0-897a-130af0d6cd2a"
+        "d96b8d61-41cc-7bd0-897a-130af0d6cd2a"
       ],
       "disposition": "requires_revalidation",
       "reason_code": "policy_changed",
@@ -756,9 +756,9 @@
     "missing_required": {
       "reason": "缺失 required 字段",
       "record": {
-        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "id": "c2f6ea96-5032-774d-9fc7-dabaee428ee4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -768,9 +768,9 @@
         "kind": "finding",
         "title": "admin exposure",
         "claim_refs": [
-          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+          "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
         ],
-        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "review_ref": "8998ef6d-671a-7bd7-afa1-e37c283a1ae9",
         "status": "draft",
         "severity": "high",
         "limitations": [
@@ -781,9 +781,9 @@
     "extra_field": {
       "reason": "额外字段必须被拒绝",
       "record": {
-        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "id": "c2f6ea96-5032-774d-9fc7-dabaee428ee4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -793,12 +793,12 @@
         "kind": "finding",
         "title": "admin exposure",
         "claim_refs": [
-          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+          "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
         ],
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
-        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "review_ref": "8998ef6d-671a-7bd7-afa1-e37c283a1ae9",
         "status": "draft",
         "severity": "high",
         "limitations": [
@@ -810,9 +810,9 @@
     "malformed_uuid": {
       "reason": "引用不是 UUID",
       "record": {
-        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "id": "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -823,7 +823,7 @@
         "proposition": "/admin is reachable without authorization",
         "status": "proposed",
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "limitations": [
           "single identity"
@@ -834,9 +834,9 @@
     "malformed_timestamp": {
       "reason": "时间戳格式错误",
       "record": {
-        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "id": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "yesterday",
         "provenance": {
           "host_id": "pi",
@@ -857,9 +857,9 @@
     "bad_enum_status": {
       "reason": "非法枚举值",
       "record": {
-        "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+        "id": "d96b8d61-41cc-7bd0-897a-130af0d6cd2a",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -867,7 +867,7 @@
           "source_kind": "worker"
         },
         "kind": "coverage",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "test_category": "authz",
         "status": "DONE",
         "limitations": [
@@ -884,9 +884,9 @@
     "bad_enum_trust": {
       "reason": "非法 trust level",
       "record": {
-        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "id": "c2f6ea96-5032-774d-9fc7-dabaee428ee4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -896,12 +896,12 @@
         "kind": "finding",
         "title": "admin exposure",
         "claim_refs": [
-          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+          "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
         ],
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
-        "review_ref": "8998ef6d-671a-4bd7-afa1-e37c283a1ae9",
+        "review_ref": "8998ef6d-671a-7bd7-afa1-e37c283a1ae9",
         "status": "draft",
         "severity": "high",
         "limitations": [
@@ -913,9 +913,9 @@
     "bad_schema_version": {
       "reason": "不支持的 schema 版本",
       "record": {
-        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "id": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "schema_version": "0.9.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -936,9 +936,9 @@
     "bad_hash": {
       "reason": "hash 不符合 sha256 格式",
       "record": {
-        "id": "0d6fc404-aeac-40f5-8fe7-a3895d48c24b",
+        "id": "0d6fc404-aeac-70f5-8fe7-a3895d48c24b",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -946,7 +946,7 @@
           "source_kind": "reviewer"
         },
         "kind": "review",
-        "proposal_ref": "b6cc709d-9d5b-4eb1-b132-b615f4e4d30c",
+        "proposal_ref": "b6cc709d-9d5b-7eb1-b132-b615f4e4d30c",
         "reviewer_id": "reviewer-b",
         "reviewer_kind": "reviewer",
         "input_hash": "md5:abc",
@@ -957,7 +957,7 @@
     "cross_engagement": {
       "reason": "记录属于其他 Engagement",
       "record": {
-        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "id": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "schema_version": "1.0.0",
         "engagement_id": "deadbeef-dead-dead-dead-deaddeaddead",
         "created_at": "2026-10-09T00:00:00.000Z",
@@ -980,9 +980,9 @@
     "claim_without_evidence": {
       "reason": "verified claim 缺少 evidence",
       "record": {
-        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "id": "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1001,9 +1001,9 @@
     "claim_without_limitations": {
       "reason": "verified claim 缺少 limitations",
       "record": {
-        "id": "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4",
+        "id": "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1014,7 +1014,7 @@
         "proposition": "/admin is reachable without authorization",
         "status": "verified",
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "limitations": []
       }
@@ -1022,9 +1022,9 @@
     "l2_worker_self_assert": {
       "reason": "worker 来源不能自行断言 L1/L2",
       "record": {
-        "id": "e92e5633-40b5-4568-9062-01df070067c1",
+        "id": "e92e5633-40b5-7568-9062-01df070067c1",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1032,7 +1032,7 @@
           "source_kind": "worker"
         },
         "kind": "observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "observed_at": "2026-10-09T00:00:00.000Z",
         "statement": "admin returns 200 for user",
         "artifact_refs": [
@@ -1050,9 +1050,9 @@
     "unknown_layer_with_control": {
       "reason": "unknown 层不能指向具体控制",
       "record": {
-        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "id": "3bb376bf-8608-7600-bb78-c71fa7a7639f",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1060,8 +1060,8 @@
           "source_kind": "tool"
         },
         "kind": "control_observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
         "operation": "GET /admin",
         "conditions": [
           "role=user"
@@ -1072,7 +1072,7 @@
         "origin_outcome": "not_reached",
         "observed_at": "2026-10-09T00:00:00.000Z",
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "limitations": [
           "single identity"
@@ -1082,9 +1082,9 @@
     "edge_block_reached_origin": {
       "reason": "edge 未达源站却声称 reached",
       "record": {
-        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "id": "3bb376bf-8608-7600-bb78-c71fa7a7639f",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1092,8 +1092,8 @@
           "source_kind": "tool"
         },
         "kind": "control_observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
         "operation": "GET /admin",
         "conditions": [
           "role=user"
@@ -1104,7 +1104,7 @@
         "origin_outcome": "reached",
         "observed_at": "2026-10-09T00:00:00.000Z",
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "limitations": [
           "single identity"
@@ -1114,9 +1114,9 @@
     "origin_reached_without_evidence": {
       "reason": "origin_reached=true 缺少证据",
       "record": {
-        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "id": "3bb376bf-8608-7600-bb78-c71fa7a7639f",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1124,8 +1124,8 @@
           "source_kind": "tool"
         },
         "kind": "control_observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
         "operation": "GET /admin",
         "conditions": [
           "role=user"
@@ -1144,9 +1144,9 @@
     "fingerprint_confirmed": {
       "reason": "指纹归因只能是 suspected",
       "record": {
-        "id": "3bb376bf-8608-4600-bb78-c71fa7a7639f",
+        "id": "3bb376bf-8608-7600-bb78-c71fa7a7639f",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1154,8 +1154,8 @@
           "source_kind": "tool"
         },
         "kind": "control_observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-        "control_ref": "d2063d59-2382-4d06-a615-e9745bbd4dab",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "control_ref": "d2063d59-2382-7d06-a615-e9745bbd4dab",
         "operation": "GET /admin",
         "conditions": [
           "role=user"
@@ -1166,7 +1166,7 @@
         "origin_outcome": "not_reached",
         "observed_at": "2026-10-09T00:00:00.000Z",
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "limitations": [
           "single identity"
@@ -1177,9 +1177,9 @@
     "blocked_by_control_reached": {
       "reason": "blocked_by_control 不能声称已到达源站",
       "record": {
-        "id": "d96b8d61-41cc-4bd0-897a-130af0d6cd2a",
+        "id": "d96b8d61-41cc-7bd0-897a-130af0d6cd2a",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1187,7 +1187,7 @@
           "source_kind": "worker"
         },
         "kind": "coverage",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "test_category": "authz",
         "status": "blocked_by_control",
         "limitations": [
@@ -1204,9 +1204,9 @@
     "negative_unbounded": {
       "reason": "阴性观察必须声明 bounded",
       "record": {
-        "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+        "id": "6bb41392-499f-7dc0-8e11-ffa9e9fd53d7",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1216,9 +1216,9 @@
         "kind": "negative_observation",
         "statement": "no bypass observed in this run",
         "method": "GET /admin",
-        "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "baseline_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "tested_resource_refs": [
-          "702c37b3-7267-4a6e-a660-05026635f9d7"
+          "702c37b3-7267-7a6e-a660-05026635f9d7"
         ],
         "conditions": [
           "role=user"
@@ -1233,9 +1233,9 @@
     "negative_no_limitations": {
       "reason": "阴性观察必须声明 limitations",
       "record": {
-        "id": "6bb41392-499f-4dc0-8e11-ffa9e9fd53d7",
+        "id": "6bb41392-499f-7dc0-8e11-ffa9e9fd53d7",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1245,9 +1245,9 @@
         "kind": "negative_observation",
         "statement": "no bypass observed in this run",
         "method": "GET /admin",
-        "baseline_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "baseline_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "tested_resource_refs": [
-          "702c37b3-7267-4a6e-a660-05026635f9d7"
+          "702c37b3-7267-7a6e-a660-05026635f9d7"
         ],
         "conditions": [
           "role=user"
@@ -1260,9 +1260,9 @@
     "scope_allows_and_excludes": {
       "reason": "scope 目标同时允许和排除",
       "record": {
-        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "id": "a17d24d3-44d7-77d5-b5a0-65d95db662ff",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1284,9 +1284,9 @@
     "scope_inverted_window": {
       "reason": "valid_from 晚于 valid_until",
       "record": {
-        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "id": "a17d24d3-44d7-77d5-b5a0-65d95db662ff",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1308,9 +1308,9 @@
     "finding_without_review": {
       "reason": "finding 缺少 review_ref",
       "record": {
-        "id": "c2f6ea96-5032-474d-9fc7-dabaee428ee4",
+        "id": "c2f6ea96-5032-774d-9fc7-dabaee428ee4",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1320,10 +1320,10 @@
         "kind": "finding",
         "title": "admin exposure",
         "claim_refs": [
-          "1d38071d-7fe7-4427-8f17-1e8cc3cc82c4"
+          "1d38071d-7fe7-7427-8f17-1e8cc3cc82c4"
         ],
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "status": "draft",
         "severity": "high",
@@ -1335,9 +1335,9 @@
     "empty_scope_targets": {
       "reason": "allowed_targets 不能为空",
       "record": {
-        "id": "a17d24d3-44d7-47d5-b5a0-65d95db662ff",
+        "id": "a17d24d3-44d7-77d5-b5a0-65d95db662ff",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1357,9 +1357,9 @@
     "secret_in_auth_metadata": {
       "reason": "auth_metadata 不允许凭据",
       "record": {
-        "id": "cdc4f81c-6fcc-4f72-a8f4-8aafa25cc531",
+        "id": "cdc4f81c-6fcc-7f72-a8f4-8aafa25cc531",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1367,8 +1367,8 @@
           "source_kind": "worker"
         },
         "kind": "access_decision_observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
-        "identity_ref": "47920b78-1c5a-45a9-9e02-63fab5b9d5cf",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "identity_ref": "47920b78-1c5a-75a9-9e02-63fab5b9d5cf",
         "operation": "GET /admin",
         "decision": "deny",
         "observed_at": "2026-10-09T00:00:00.000Z",
@@ -1387,9 +1387,9 @@
     "caller_display_id": {
       "reason": "调用者不得设置 display_id",
       "record": {
-        "id": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "id": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1411,9 +1411,9 @@
     "secret_ref_in_projection": {
       "reason": "Artifact 内容不得进入记录",
       "record": {
-        "id": "e92e5633-40b5-4568-9062-01df070067c1",
+        "id": "e92e5633-40b5-7568-9062-01df070067c1",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1421,7 +1421,7 @@
           "source_kind": "tool"
         },
         "kind": "observation",
-        "resource_ref": "702c37b3-7267-4a6e-a660-05026635f9d7",
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
         "observed_at": "2026-10-09T00:00:00.000Z",
         "statement": "admin returns 200 for user",
         "artifact_refs": [
@@ -1454,9 +1454,9 @@
     "missing_checkpoint_lists": {
       "reason": "checkpoint 空结果列表必须显式为空",
       "record": {
-        "id": "39451de3-2d97-4292-bbd4-a5c29fbac543",
+        "id": "39451de3-2d97-7292-bbd4-a5c29fbac543",
         "schema_version": "1.0.0",
-        "engagement_id": "a76d2d76-3a91-4928-b3c1-b4e80b6e4778",
+        "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
         "created_at": "2026-10-09T00:00:00.000Z",
         "provenance": {
           "host_id": "pi",
@@ -1464,9 +1464,9 @@
           "source_kind": "worker"
         },
         "kind": "checkpoint",
-        "work_run_ref": "e801a701-4a2a-46f2-a9ae-33edca60f1f6",
-        "work_item_ref": "3e8a43c3-76d2-4070-9185-7b83cae723cd",
-        "attempt_ref": "0ce1f10f-e8b0-456c-8d00-ab39d6b0939e",
+        "work_run_ref": "e801a701-4a2a-76f2-a9ae-33edca60f1f6",
+        "work_item_ref": "3e8a43c3-76d2-7070-9185-7b83cae723cd",
+        "attempt_ref": "0ce1f10f-e8b0-756c-8d00-ab39d6b0939e",
         "generation": 1,
         "target_version": 1,
         "work_item_version": 1,
@@ -1484,10 +1484,10 @@
           "verify"
         ],
         "observation_refs": [
-          "e92e5633-40b5-4568-9062-01df070067c1"
+          "e92e5633-40b5-7568-9062-01df070067c1"
         ],
         "evidence_refs": [
-          "5eee9386-a285-40b9-8ce5-995fafcc348c"
+          "5eee9386-a285-70b9-8ce5-995fafcc348c"
         ],
         "negative_results": [],
         "unresolved_work": [],
@@ -1501,14 +1501,14 @@
           "actions": 1
         },
         "context_manifest": {
-          "context_snapshot_id": "17d1229b-0d62-4676-983b-8660bcc94816",
+          "context_snapshot_id": "17d1229b-0d62-7676-983b-8660bcc94816",
           "read_seq": 1,
           "budget_unit": "characters",
           "budget": 4000,
           "builder_version": "context/1.0",
           "sources": [
             {
-              "id": "e92e5633-40b5-4568-9062-01df070067c1",
+              "id": "e92e5633-40b5-7568-9062-01df070067c1",
               "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             }
           ]

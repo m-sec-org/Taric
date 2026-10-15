@@ -1,5 +1,6 @@
 import { ADAPTER_CONTRACT_VERSION, TaricAdapterClient, type AdapterDescriptor, type AdapterCapability, type AdapterError } from "./adapter.js";
 import { API_CONTRACT_VERSION, type CoreService, type Principal } from "./service.js";
+import { ContractValidationError } from "./validation.js";
 
 /** Locked DSH/Cordis build validated against the published 0.2.0-rc.2 package contract. */
 export const SUPPORTED_DEEPSEEK_HOST = {
@@ -52,10 +53,10 @@ export class DeepSeekHarnessAdapter {
   call<T = unknown>(operation: string, request: Record<string, unknown>) { return this.client.call<T>(operation, request); }
   status() { return { ...this.client.status(), service_connected: this.#principal.transport_verified === true, hooks: this.#loaded ? [...deepSeekHooks] : [], fallback: [...(this.descriptor.fallback ?? [])], test_evidence: [...(this.descriptor.test_evidence ?? [])] }; }
   async register(ctx: DeepSeekCordisContext, binding: DeepSeekBinding) {
-    if (!this.descriptor.supported) throw new Error("unsupported_capability");
-    if (this.#principal.role !== "host" || !this.#principal.transport_verified || !this.#principal.engagement_id || binding.engagement_id !== this.#principal.engagement_id) throw new Error("authorization_error");
+    if (!this.descriptor.supported) throw new ContractValidationError("unsupported_capability", "unsupported_capability");
+    if (this.#principal.role !== "host" || !this.#principal.transport_verified || !this.#principal.engagement_id || binding.engagement_id !== this.#principal.engagement_id) throw new ContractValidationError("authorization_error", "authorization_error");
     if (this.#loaded) return { loaded: true, hooks: [], available_capabilities: [...this.descriptor.capabilities], reload_idempotent: true };
-    if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new Error("validation_error");
+    if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new ContractValidationError("validation_error", "validation_error");
     const handlers: Record<DeepSeekHook, (...args: unknown[]) => Promise<unknown> | undefined> = {
       "session/created": async () => this.call("engagement.status", { engagement_id: binding.engagement_id }),
       "session/event": (_session, event) => {
@@ -67,7 +68,7 @@ export class DeepSeekHarnessAdapter {
     };
     for (const event of deepSeekHooks) {
       const disposer = ctx.on(event, (...args) => handlers[event](...args));
-      if (typeof disposer !== "function") throw new Error(`unavailable_host: Cordis did not register ${event}`);
+      if (typeof disposer !== "function") throw new ContractValidationError("unavailable_host", "Cordis lifecycle registration is unavailable");
       this.#disposers.push(disposer);
     }
     this.#loaded = true;

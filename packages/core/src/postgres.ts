@@ -1,604 +1,217 @@
-import { createHash } from "node:crypto";
-import { uuidv7 } from "./identity.js";
-import { ContractValidationError, validateAuthorityReferences, validateCanonicalRecord } from "./validation.js";
-import type { CanonicalRecord, DoctorReport, ReadSnapshot, TrustLevel } from "./store.js";
 import { SCHEMA_VERSION } from "@taric/schemas";
+import { AuthorityStore, type ReadSnapshot, type TrustLevel } from "./store.js";
+import { PostgresAuthorityDriver, quotePostgresSchema, type PostgresQueryable, type PostgresQueryResult } from "./sql-driver.js";
+import { AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION } from "./sql-schema.js";
+import { ContractValidationError } from "./validation.js";
+import { uuidv7 } from "./identity.js";
+import { AUTHORITY_RUNTIME_SCENARIOS, runAuthorityRuntimeConformance, runtimeConformancePassed, type AuthorityBackendMethod, type AuthorityRuntimeConformance, type AuthorityRuntimeScenario } from "./storage-contract.js";
 
-/**
- * A deliberately small subset of the node-postgres API.  Keeping this type in
- * Core means the default SQLite installation does not load or depend on `pg`.
- * Pool and Client both satisfy this interface.
- */
-export interface PostgresQueryResult<Row = Record<string, unknown>> {
-  rows: Row[];
-  rowCount?: number | null;
-}
-
-export interface PostgresQueryable {
-  query<Row = Record<string, unknown>>(text: string, values?: readonly unknown[]): Promise<PostgresQueryResult<Row>>;
-  connect?: () => Promise<PostgresQueryable & { release?: () => void }>;
-}
-
+export type { PostgresQueryable, PostgresQueryResult };
 export type PostgresBackendProfile = "single_host_sqlite" | "multi_host_authority";
-
 export interface PostgresAuthorityOptions {
   profile?: PostgresBackendProfile;
   schema?: string;
   policyDigest?: string;
   leaseMode?: "server_expiry_fencing";
-  /** Set false only for a caller that has already run migrations. */
+  /** Already migrated schemas are still validated before authority operations. */
   migrate?: boolean;
 }
-
-export interface PostgresLease {
-  run_id: string;
-  work_item_id: string;
-  engagement_id: string;
-  status: string;
-  owner: { host_id: string; agent_id: string };
-  generation: number;
-  attempt_ref: string;
-  lease_expires_at: string;
-  heartbeat_at: string;
-  read_seq: number;
+export interface PostgresLease extends Record<string, unknown> {
+  run_id: string; work_item_id: string; engagement_id: string; status: string;
+  owner: { host_id: string; agent_id: string }; generation: number; attempt_ref: string;
+  lease_expires_at: string; heartbeat_at: string; read_seq: number;
 }
-
 export interface PostgresPinnedSnapshot extends ReadSnapshot {
-  generation: number;
-  indexed_seq: number;
+  generation: number; indexed_seq: number; snapshot_id: string;
   watermark: { committed_seq: number; projected_seq: number; indexed_seq: number };
-  snapshot_id: string;
 }
-
 export interface PostgresBackendManifest {
-  backend: "postgresql";
-  profile: "multi_host_authority";
-  enabled: boolean;
-  schema_version: string;
-  supported_postgres: { minimum: string; maximum: string };
-  policy_digest?: string;
+  backend: "postgresql"; profile: "multi_host_authority"; enabled: boolean;
+  implementation_state: "available"; runtime_state: "disabled" | "enabled";
+  evidence_state: "pending" | "failed" | "verified"; primitive_state: "ready" | "uninitialized";
+  schema_version: string; storage_format: string;
+  supported_postgres: { minimum: string; maximum: string }; policy_digest?: string;
   lease_mode: "server_expiry_fencing";
 }
-
-export const POSTGRES_SCHEMA_VERSION = "1.0.0" as const;
+export interface PostgresRuntimeReadiness {
+  version: "postgres-runtime-readiness/1"; backend: "postgresql";
+  implementation_state: "available"; runtime_state: "disabled" | "enabled";
+  evidence_state: "failed" | "verified";
+  code: "ready" | "backend_conformance_failed" | "postgresql_unavailable";
+  health: {
+    available: boolean; schema_valid: boolean; fencing: boolean; read_seq?: number;
+    watermarks?: { committed_seq: number; projected_seq: number; indexed_seq: number };
+  };
+  domains: readonly {
+    id: AuthorityRuntimeScenario; missing_methods: readonly AuthorityBackendMethod[];
+    missing_tables: readonly string[]; missing_columns: readonly string[];
+    persistence_shape: "available" | "missing"; runtime_evidence: "missing" | "passed" | "failed";
+  }[];
+  conformance: AuthorityRuntimeConformance;
+  blocker?: "runtime_conformance_evidence_required" | "backend_health_failed";
+}
+const runtimeDomainMethods = {
+  proposal: ["submitProposal", "proposals", "proposalsPage"], review: ["submitReview"],
+  admission_l1: ["admitProposal", "createRecord", "initializeEngagement"], admission_l2: ["evaluateAdmission", "promoteFinding"],
+  checkpoint: ["commitCheckpoint", "resumePacket", "getWorkRun"],
+  action: ["recordActionIntent", "getActionIntent", "pendingActionIntents", "reconcileAction"],
+  artifact: ["validateArtifactFence", "artifactSessions", "saveArtifactSession", "artifactCatalogRow", "saveArtifactCatalogRow", "artifactUploads", "saveArtifactUpload", "deleteArtifactUpload", "artifactPublications", "startArtifactPublication", "prepareArtifactPublication", "markArtifactPublication", "completeArtifactPublication", "failArtifactPublication", "artifactIdempotencyResult", "saveArtifactIdempotency", "executionCatalogPage", "artifactMutation"],
+  lease: ["claimWorkRun", "renewWorkRun", "reclaimWorkRun", "getWorkRun"],
+  fencing: ["validateArtifactFence", "commitCheckpoint", "recordActionIntent"],
+  audit_outbox: ["events", "verifyAudit", "consumeOutbox", "doctor", "previewRecovery", "reconcileDerived"],
+  pinned_read: ["snapshot", "getAt", "recordsPage"], backup_restore: ["exportSnapshot", "importSnapshot"],
+} as const satisfies Record<AuthorityRuntimeScenario, readonly AuthorityBackendMethod[]>;
+const runtimeDomainTables = {
+  proposal: ["proposals", "proposal_versions", "object_refs"], review: ["proposals", "reviews", "object_refs"],
+  admission_l1: ["proposals", "records", "record_versions", "object_refs", "idempotency", "events", "outbox"],
+  admission_l2: ["proposals", "reviews", "records", "record_versions", "object_refs", "events", "outbox"],
+  checkpoint: ["work_runs", "attempts", "checkpoints", "records", "object_refs"],
+  action: ["work_runs", "attempts", "action_intents", "records", "object_refs"],
+  artifact: ["artifact_sessions", "artifact_catalog", "artifact_chunks", "artifact_uploads", "artifact_publications", "artifact_idempotency", "artifact_catalog_watermarks", "execution_catalog"],
+  lease: ["work_runs", "attempts"], fencing: ["work_runs", "attempts"],
+  audit_outbox: ["metadata", "events", "outbox", "operation_markers"], pinned_read: ["record_versions", "reader_pins"],
+  backup_restore: ["records", "record_versions", "metadata"],
+} as const satisfies Record<AuthorityRuntimeScenario, readonly string[]>;
+const requiredRuntimeColumns: Readonly<Record<string, readonly string[]>> = {
+  metadata: ["key", "value"], records: ["id", "engagement_id", "kind", "trust_level", "version", "body", "display_id"],
+  proposals: ["id", "engagement_id", "subject_type", "expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version", "content_hash", "body", "status"],
+  proposal_versions: ["id", "engagement_id", "commit_seq", "body"], reviews: ["id", "proposal_id", "reviewer_id", "input_hash", "verdict", "body"],
+  work_runs: ["run_id", "work_item_id", "engagement_id", "generation", "owner_host", "owner_agent", "lease_expires_at", "status", "body"],
+  attempts: ["attempt_id", "run_id", "generation", "owner_host", "owner_agent", "lease_expires_at", "status", "body"],
+  checkpoints: ["checkpoint_id", "run_id", "generation", "body"], action_intents: ["action_id", "run_id", "generation", "status", "body"],
+  record_versions: ["id", "engagement_id", "commit_seq", "trust_level", "body"], object_refs: ["id", "engagement_id", "kind"],
+  events: ["commit_seq", "event_id", "event_type", "subject_id", "payload", "prev_hash", "hash"], outbox: ["id", "commit_seq", "status"],
+  operation_markers: ["operation_id", "event_id", "commit_seq", "status", "retry_owner"],
+  reader_pins: ["snapshot_id", "engagement_id", "read_seq", "read_time", "expires_at"],
+  artifact_sessions: ["engagement_id", "session_id", "root", "binding_id"], artifact_catalog: ["content_ref", "engagement_id", "session_id", "artifact_id", "version", "body"],
+  artifact_chunks: ["content_ref", "ordinal", "byte_offset", "byte_count", "chunk_hash", "relative_path"], artifact_uploads: ["upload_id", "engagement_id", "session_id", "body"],
+  artifact_publications: ["upload_id", "engagement_id", "session_id", "content_ref", "phase", "body"], artifact_idempotency: ["key", "operation", "principal", "engagement_id", "request_hash", "result"],
+  artifact_catalog_watermarks: ["engagement_id", "session_id", "catalog_watermark", "index_watermark", "index_status"],
+  execution_catalog: ["execution_id", "engagement_id", "session_id", "work_run_id", "attempt_id", "sequence", "body"],
+};
+export const POSTGRES_SCHEMA_VERSION = SCHEMA_VERSION;
 export const POSTGRES_SUPPORTED_VERSIONS = Object.freeze({ minimum: "14", maximum: "18" });
 export const POSTGRES_SCHEMA_NAME = "taric";
+/** Offline SQL is derived from the same versioned layout used by the drivers. */
+export const POSTGRES_MIGRATIONS: readonly { version: string; sql: string }[] = Object.freeze([{
+  version: AUTHORITY_SQL_SCHEMA_VERSION,
+  sql: `CREATE SCHEMA IF NOT EXISTS taric; SET search_path TO taric,pg_catalog;\n${AUTHORITY_SQL_TABLES.replace("commit_seq INTEGER PRIMARY KEY AUTOINCREMENT", "commit_seq BIGINT PRIMARY KEY").replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id BIGSERIAL PRIMARY KEY")}\n${AUTHORITY_SQL_INDEXES}\n${AUTHORITY_SQL_INITIAL_METADATA.map(([key, value]) => `INSERT INTO metadata(key,value) VALUES('${key}','${value}') ON CONFLICT(key) DO NOTHING;`).join("\n")}\nINSERT INTO metadata(key,value) VALUES('authority_id',overlay(gen_random_uuid()::text placing '7' from 15 for 1)) ON CONFLICT(key) DO NOTHING;`,
+}]);
+type SnapshotOptions = { asOf?: number; trustLevel?: TrustLevel; includeCandidates?: boolean; readTime?: string };
 
-/** Migrations are plain SQL so operators can review and run them offline. */
-export const POSTGRES_MIGRATIONS: readonly { version: string; sql: string }[] = Object.freeze([
-  {
-    version: POSTGRES_SCHEMA_VERSION,
-    sql: `
-CREATE SCHEMA IF NOT EXISTS taric;
-CREATE SEQUENCE IF NOT EXISTS taric.display_sequence AS bigint START WITH 1 INCREMENT BY 1;
-CREATE TABLE IF NOT EXISTS taric.metadata (
-  key text PRIMARY KEY,
-  value jsonb NOT NULL
-);
-INSERT INTO taric.metadata(key, value) VALUES ('schema_version', '"1.0.0"'::jsonb)
-  ON CONFLICT (key) DO NOTHING;
-INSERT INTO taric.metadata(key, value) VALUES ('indexed_seq', '0'::jsonb)
-  ON CONFLICT (key) DO NOTHING;
-INSERT INTO taric.metadata(key, value) VALUES ('commit_sequence', '0'::jsonb)
-  ON CONFLICT (key) DO NOTHING;
-CREATE TABLE IF NOT EXISTS taric.records (
-  id text PRIMARY KEY,
-  engagement_id text NOT NULL,
-  kind text NOT NULL,
-  trust_level text NOT NULL,
-  version bigint NOT NULL CHECK (version > 0),
-  display_id text UNIQUE,
-  body jsonb NOT NULL,
-  created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL
-);
-CREATE INDEX IF NOT EXISTS records_engagement_idx ON taric.records(engagement_id, id);
-CREATE TABLE IF NOT EXISTS taric.record_versions (
-  id text NOT NULL,
-  commit_seq bigint NOT NULL,
-  engagement_id text NOT NULL,
-  trust_level text NOT NULL,
-  body jsonb NOT NULL,
-  PRIMARY KEY (id, commit_seq)
-);
-CREATE INDEX IF NOT EXISTS record_versions_engagement_idx ON taric.record_versions(engagement_id, commit_seq, id);
-CREATE TABLE IF NOT EXISTS taric.events (
-  commit_seq bigint PRIMARY KEY CHECK (commit_seq > 0),
-  event_id text UNIQUE NOT NULL,
-  event_type text NOT NULL,
-  subject_id text,
-  payload jsonb NOT NULL,
-  prev_hash text,
-  hash text NOT NULL,
-  created_at timestamptz NOT NULL
-);
-CREATE TABLE IF NOT EXISTS taric.outbox (
-  commit_seq bigint PRIMARY KEY REFERENCES taric.events(commit_seq),
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'failed')),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE TABLE IF NOT EXISTS taric.idempotency (
-  key text PRIMARY KEY,
-  operation text NOT NULL,
-  principal text NOT NULL,
-  engagement_id text NOT NULL,
-  request_hash text NOT NULL,
-  result jsonb NOT NULL
-);
-CREATE TABLE IF NOT EXISTS taric.operation_markers (
-  operation_id text PRIMARY KEY,
-  event_id text UNIQUE NOT NULL REFERENCES taric.events(event_id),
-  engagement_id text,
-  commit_seq bigint UNIQUE NOT NULL REFERENCES taric.events(commit_seq),
-  kind text NOT NULL,
-  input_hash text NOT NULL,
-  status text NOT NULL DEFAULT 'pending',
-  error text,
-  updated_at timestamptz NOT NULL
-);
-CREATE TABLE IF NOT EXISTS taric.work_leases (
-  run_id text PRIMARY KEY,
-  work_item_id text NOT NULL,
-  engagement_id text NOT NULL,
-  status text NOT NULL,
-  owner_host text NOT NULL,
-  owner_agent text NOT NULL,
-  generation bigint NOT NULL CHECK (generation > 0),
-  attempt_ref text NOT NULL,
-  lease_expires_at timestamptz NOT NULL,
-  heartbeat_at timestamptz NOT NULL,
-  read_seq bigint NOT NULL DEFAULT 0,
-  body jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS work_leases_active_item_idx
-  ON taric.work_leases(work_item_id)
-  WHERE status NOT IN ('completed', 'failed', 'cancelled', 'lost');
-CREATE TABLE IF NOT EXISTS taric.attempts (
-  attempt_id text PRIMARY KEY,
-  run_id text NOT NULL REFERENCES taric.work_leases(run_id),
-  generation bigint NOT NULL,
-  owner_host text NOT NULL,
-  owner_agent text NOT NULL,
-  status text NOT NULL,
-  lease_expires_at timestamptz NOT NULL,
-  heartbeat_at timestamptz NOT NULL,
-  body jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL
-);
-CREATE INDEX IF NOT EXISTS attempts_run_generation_idx ON taric.attempts(run_id, generation);
-CREATE TABLE IF NOT EXISTS taric.reader_pins (
-  snapshot_id text PRIMARY KEY,
-  engagement_id text NOT NULL,
-  generation bigint NOT NULL,
-  read_seq bigint NOT NULL,
-  committed_seq bigint NOT NULL,
-  projected_seq bigint NOT NULL,
-  indexed_seq bigint NOT NULL,
-  expires_at timestamptz,
-  created_at timestamptz NOT NULL
-);`,
-  },
-]);
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map((item) => item === undefined ? "null" : canonical(item)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
-}
-
-function asNumber(value: unknown, fallback = 0): number {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function parseJson(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  try { return JSON.parse(value); } catch { return value; }
-}
-
-function isoTimestamp(value: unknown): string {
-  return value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
-}
-
-function quoteSchema(schema: string): string {
-  if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) throw new ContractValidationError("validation_error", "invalid PostgreSQL schema name");
-  return `"${schema}"`;
-}
-
-/**
- * PostgreSQL authority implementation.  It intentionally owns only storage
- * invariants; admission and domain policy remain in Core's shared code.
- */
-export class PostgresAuthorityStore {
-  readonly #queryable: PostgresQueryable;
-  readonly #options: Required<Pick<PostgresAuthorityOptions, "profile" | "schema" | "leaseMode" | "migrate">> & Pick<PostgresAuthorityOptions, "policyDigest">;
-  readonly #schema: string;
-  #migrated = false;
-
+/** Both adapters execute the complete shared Core governance and unit of work. */
+export class PostgresAuthorityStore extends AuthorityStore {
+  private readonly driver: PostgresAuthorityDriver;
+  private readonly options: PostgresAuthorityOptions;
+  private readiness?: PostgresRuntimeReadiness;
   constructor(queryable: PostgresQueryable, options: PostgresAuthorityOptions = {}) {
-    if (!queryable || typeof queryable.query !== "function") throw new ContractValidationError("validation_error", "a PostgreSQL query client is required");
-    if (options.profile !== "multi_host_authority") throw new ContractValidationError("conflict", "PostgreSQL backend requires the explicit multi_host_authority profile");
-    this.#queryable = queryable;
-    this.#options = { profile: options.profile, schema: options.schema ?? POSTGRES_SCHEMA_NAME, leaseMode: options.leaseMode ?? "server_expiry_fencing", migrate: options.migrate ?? true, policyDigest: options.policyDigest };
-    this.#schema = quoteSchema(this.#options.schema);
-    if (!this.#options.migrate) this.#migrated = true;
+    if (options.profile === "single_host_sqlite") throw new ContractValidationError("unsupported_capability", "PostgreSQL requires the multi_host_authority profile");
+    const driver = new PostgresAuthorityDriver(queryable, options.schema ?? POSTGRES_SCHEMA_NAME, options.migrate !== false);
+    super(driver); this.driver = driver; this.options = options;
   }
-
   manifest(): PostgresBackendManifest {
-    return { backend: "postgresql", profile: "multi_host_authority", enabled: this.#migrated, schema_version: POSTGRES_SCHEMA_VERSION, supported_postgres: POSTGRES_SUPPORTED_VERSIONS, policy_digest: this.#options.policyDigest, lease_mode: this.#options.leaseMode };
+    const enabled = this.readiness?.runtime_state === "enabled";
+    return { backend: "postgresql", profile: "multi_host_authority", enabled, implementation_state: "available", runtime_state: enabled ? "enabled" : "disabled", evidence_state: this.readiness?.evidence_state ?? "pending", primitive_state: this.driver.migrated ? "ready" : "uninitialized", schema_version: POSTGRES_SCHEMA_VERSION, storage_format: AUTHORITY_SQL_SCHEMA_VERSION, supported_postgres: POSTGRES_SUPPORTED_VERSIONS, policy_digest: this.options.policyDigest, lease_mode: "server_expiry_fencing" };
   }
-
-  private async query<Row = Record<string, unknown>>(text: string, values: readonly unknown[] = [], client: PostgresQueryable = this.#queryable): Promise<PostgresQueryResult<Row>> {
-    const scoped = text.replaceAll("CREATE SCHEMA IF NOT EXISTS taric;", `CREATE SCHEMA IF NOT EXISTS ${this.#schema};`).replaceAll("taric.", `${this.#schema}.`);
-    return client.query<Row>(scoped, values);
-  }
-
-  private async withTransaction<T>(operation: (client: PostgresQueryable) => Promise<T>): Promise<T> {
-    const owned = this.#queryable.connect ? await this.#queryable.connect() : this.#queryable;
+  async migrate(): Promise<void> { await this.driver.ready; }
+  /** No migrations, authority writes or invented scenario evidence during inspection. */
+  async runtimeReadiness(report?: AuthorityRuntimeConformance): Promise<PostgresRuntimeReadiness> {
+    const missingEvidence = await runAuthorityRuntimeConformance(this, {});
+    let conformance = runtimeConformancePassed(report) ? report! : missingEvidence;
+    let unavailable = false;
+    const columns = new Map<string, Set<string>>();
+    let health: PostgresRuntimeReadiness["health"] = { available: false, schema_valid: false, fencing: false };
     try {
-      await owned.query("BEGIN");
-      // This lock serializes hash-chain construction and gives all hosts one
-      // authority commit order while identity/display sequences remain server side.
-      await owned.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["taric:authority"]);
-      const result = await operation({ query: (text, values) => this.query(text, values, owned) });
-      await owned.query("COMMIT");
-      return result;
-    } catch (error) {
-      try { await owned.query("ROLLBACK"); } catch { /* preserve the original error */ }
-      throw error;
-    } finally {
-      if (owned !== this.#queryable) (owned as PostgresQueryable & { release?: () => void }).release?.();
-    }
-  }
-
-  private async appendEvent(client: PostgresQueryable, eventType: string, subjectId: string, payload: Record<string, unknown>): Promise<number> {
-    const previous = await client.query<{ hash: string }>(`SELECT hash FROM taric.events ORDER BY commit_seq DESC LIMIT 1`);
-    const prevHash = previous.rows[0]?.hash ?? null;
-    const eventId = uuidv7();
-    const createdAt = new Date().toISOString();
-    const eventHash = digest({ event_id: eventId, event_type: eventType, subject_id: subjectId, payload, prev_hash: prevHash, created_at: createdAt });
-    const sequence = await client.query<{ value: unknown }>(`UPDATE taric.metadata SET value=to_jsonb((value #>> '{}')::bigint + 1) WHERE key='commit_sequence' RETURNING value`);
-    const commitSeq = asNumber(sequence.rows[0]?.value);
-    await client.query(`INSERT INTO taric.events(commit_seq,event_id,event_type,subject_id,payload,prev_hash,hash,created_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8)`, [commitSeq, eventId, eventType, subjectId, JSON.stringify(payload), prevHash, eventHash, createdAt]);
-    await client.query(`INSERT INTO taric.outbox(commit_seq,status,updated_at) VALUES($1,'pending',$2)`, [commitSeq, createdAt]);
-    await client.query(`INSERT INTO taric.operation_markers(operation_id,event_id,engagement_id,commit_seq,kind,input_hash,status,updated_at) VALUES($1,$2,$3,$4,$5,$6,'pending',$7)`, [`operation:${eventId}`, eventId, typeof payload.engagement_id === "string" ? payload.engagement_id : null, commitSeq, eventType, digest({ event_type: eventType, subject_id: subjectId, payload }), createdAt]);
-    return commitSeq;
-  }
-
-  async migrate(): Promise<void> {
-    if (this.#migrated) return;
-    for (const migration of POSTGRES_MIGRATIONS) {
-      await this.query(migration.sql);
-    }
-    const current = await this.query<{ value: unknown }>(`SELECT value FROM taric.metadata WHERE key='schema_version'`);
-    const version = parseJson(current.rows[0]?.value);
-    if (version !== POSTGRES_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", `unsupported PostgreSQL authority schema version: ${String(version)}`);
-    this.#migrated = true;
-  }
-
-  async close(): Promise<void> {
-    const candidate = this.#queryable as PostgresQueryable & { end?: () => Promise<void> };
-    if (candidate.end) await candidate.end();
-  }
-
-  async health(): Promise<{ available: true; backend: "postgresql"; schema_version: string; committed_seq: number; projected_seq: number; indexed_seq: number }> {
-    await this.migrate();
-    const rows = await this.query<{ committed_seq: unknown; projected_seq: unknown; indexed_seq: unknown }>(`
-      SELECT
-        COALESCE((SELECT max(commit_seq) FROM taric.events), 0) AS committed_seq,
-        COALESCE((SELECT min(commit_seq) - 1 FROM taric.outbox WHERE status <> 'applied'), COALESCE((SELECT max(commit_seq) FROM taric.events), 0)) AS projected_seq,
-        COALESCE((SELECT (value #>> '{}')::bigint FROM taric.metadata WHERE key='indexed_seq'), 0) AS indexed_seq`);
-    const row = rows.rows[0] ?? {};
-    return { available: true, backend: "postgresql", schema_version: POSTGRES_SCHEMA_VERSION, committed_seq: asNumber(row.committed_seq), projected_seq: asNumber(row.projected_seq), indexed_seq: asNumber(row.indexed_seq) };
-  }
-
-  /** Atomically commit a canonical record, audit event, outbox row and marker. */
-  async commit(record: CanonicalRecord, trustLevel: TrustLevel = "L1", idempotencyKey?: string, context: { operation?: string; principal?: string; engagement_id?: string; expected_version?: number } = {}): Promise<CanonicalRecord> {
-    await this.migrate();
-    if (!record || typeof record.id !== "string" || typeof record.engagement_id !== "string") throw new ContractValidationError("validation_error", "canonical record requires id and engagement_id");
-    if (record.display_id !== undefined || record.trust_level !== undefined) throw new ContractValidationError("validation_error", "caller cannot set PostgreSQL-managed display_id or trust_level");
-    const operation = context.operation ?? "record.commit";
-    const principal = context.principal ?? "core";
-    const engagementId = context.engagement_id ?? record.engagement_id;
-    const requestHash = digest(record);
-    return this.withTransaction(async (client) => {
-      if (idempotencyKey) {
-        const prior = await client.query<{ result: unknown; operation: string; principal: string; engagement_id: string; request_hash: string }>(`SELECT result,operation,principal,engagement_id,request_hash FROM taric.idempotency WHERE key=$1`, [idempotencyKey]);
-        const row = prior.rows[0];
-        if (row) {
-          if (row.request_hash !== requestHash || row.operation !== operation || row.principal !== principal || row.engagement_id !== engagementId) throw new ContractValidationError("idempotency_conflict", "idempotency key is bound to another request");
-          return parseJson(row.result) as CanonicalRecord;
+      await this.driver.inspect(async (client) => {
+        const shape = await client.query<{ table_name: string; column_name: string; data_type?: string }>("SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema=$1", [this.driver.schema]);
+        for (const row of shape.rows) { const entry = columns.get(row.table_name) ?? new Set<string>(); entry.add(row.column_name); columns.set(row.table_name, entry); }
+        const schema = quotePostgresSchema(this.driver.schema);
+        const metadataText = shape.rows.some((row) => row.table_name === "metadata" && row.column_name === "value" && row.data_type === "text");
+        let schema_valid = false;
+        if (metadataText) {
+          const metadata = await client.query<{ key: string; value: string }>(`SELECT key,value FROM ${schema}.metadata WHERE key IN ('schema_version','storage_format','authority_id')`);
+          schema_valid = metadata.rows.find((row) => row.key === "schema_version")?.value === SCHEMA_VERSION && metadata.rows.find((row) => row.key === "storage_format")?.value === AUTHORITY_SQL_SCHEMA_VERSION && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(metadata.rows.find((row) => row.key === "authority_id")?.value ?? "");
         }
-      }
-      const existingResult = await client.query<{ version: unknown; display_id: string | null; body: unknown }>(`SELECT version,display_id,body FROM taric.records WHERE id=$1 FOR UPDATE`, [record.id]);
-      const existing = existingResult.rows[0];
-      const expected = context.expected_version;
-      if (existing && (expected === undefined || asNumber(existing.version) !== expected)) throw new ContractValidationError("stale_version", "canonical update requires the current expected version");
-      if (!existing && expected !== undefined && expected !== 0) throw new ContractValidationError("stale_version", "canonical create expected version must be zero");
-      if (existing) {
-        const previous = parseJson(existing.body) as CanonicalRecord;
-        if (previous.engagement_id !== record.engagement_id || String(previous.kind ?? "record") !== String(record.kind ?? "record")) throw new ContractValidationError("conflict", "canonical engagement ownership and kind are immutable");
-      }
-      const version = asNumber(existing?.version) + 1;
-      const display = existing?.display_id ?? `TAR-${String(asNumber((await client.query<{ value: unknown }>(`SELECT nextval('${this.#schema}.display_sequence') AS value`)).rows[0]?.value)).padStart(6, "0")}`;
-      const now = new Date().toISOString();
-      if (record.schema_version !== undefined && record.schema_version !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "record schema version is not supported");
-      const normalized = { schema_version: SCHEMA_VERSION, created_at: now, provenance: { host_id: "taric-postgresql", producer_id: principal, source_kind: "host" }, ...record } as CanonicalRecord;
-      validateCanonicalRecord(normalized, trustLevel);
-      const committed = { ...normalized, version, trust_level: trustLevel, display_id: display } as CanonicalRecord;
-      await client.query(`INSERT INTO taric.records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$8)
-        ON CONFLICT(id) DO UPDATE SET body=excluded.body,trust_level=excluded.trust_level,version=excluded.version,updated_at=excluded.updated_at`,
-        [record.id, record.engagement_id, String(record.kind ?? "record"), trustLevel, version, display, JSON.stringify(committed), now]);
-      const payload = { engagement_id: record.engagement_id, version, trust_level: trustLevel, before_hash: existing ? digest(parseJson(existing.body)) : null, after_hash: digest(committed), actor_id: principal };
-      const commitSeq = await this.appendEvent(client, "record.commit", record.id, payload);
-      await client.query(`INSERT INTO taric.record_versions(id,commit_seq,engagement_id,trust_level,body) VALUES($1,$2,$3,$4,$5::jsonb)`, [record.id, commitSeq, record.engagement_id, trustLevel, JSON.stringify(committed)]);
-      const result = { ...committed, commit_seq: commitSeq };
-      if (idempotencyKey) await client.query(`INSERT INTO taric.idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES($1,$2,$3,$4,$5,$6::jsonb)`, [idempotencyKey, operation, principal, engagementId, requestHash, JSON.stringify(result)]);
-      return result;
+        let watermarks: PostgresRuntimeReadiness["health"]["watermarks"];
+        const has = (table: string, fields: readonly string[]) => fields.every((field) => columns.get(table)?.has(field));
+        if (metadataText && has("events", ["commit_seq"]) && has("outbox", ["commit_seq", "status"])) {
+          const result = await client.query<{ committed_seq: unknown; projected_seq: unknown; indexed_seq: unknown }>(`SELECT COALESCE((SELECT MAX(commit_seq) FROM ${schema}.events),0) AS committed_seq, COALESCE((SELECT MIN(e.commit_seq)-1 FROM ${schema}.events e LEFT JOIN ${schema}.outbox o ON o.commit_seq=e.commit_seq WHERE o.commit_seq IS NULL OR o.status<>'applied'),(SELECT COALESCE(MAX(commit_seq),0) FROM ${schema}.events)) AS projected_seq,COALESCE((SELECT value::bigint FROM ${schema}.metadata WHERE key='indexed_seq'),0) AS indexed_seq`);
+          const row = result.rows[0]; if (row) watermarks = { committed_seq: Number(row.committed_seq), projected_seq: Number(row.projected_seq), indexed_seq: Number(row.indexed_seq) };
+        }
+        let fencing = has("work_runs", requiredRuntimeColumns.work_runs!) && has("attempts", requiredRuntimeColumns.attempts!);
+        if (fencing) {
+          const mismatch = await client.query<{ invalid: unknown }>(`SELECT COUNT(*) AS invalid FROM ${schema}.work_runs w LEFT JOIN ${schema}.attempts a ON a.attempt_id=(w.body::jsonb->>'attempt_ref') AND a.run_id=w.run_id AND a.generation=w.generation WHERE w.lease_expires_at::timestamptz > clock_timestamp() AND w.status NOT IN ('completed','failed','cancelled','lost') AND (a.attempt_id IS NULL OR a.owner_host IS DISTINCT FROM w.owner_host OR a.owner_agent IS DISTINCT FROM w.owner_agent OR a.status IN ('completed','failed','cancelled','lost') OR a.lease_expires_at IS DISTINCT FROM w.lease_expires_at OR (a.body::jsonb->>'status') IS DISTINCT FROM a.status OR (w.body::jsonb->>'status') IS DISTINCT FROM w.status)`);
+          fencing = Number(mismatch.rows[0]?.invalid ?? 1) === 0;
+        }
+        health = { available: true, schema_valid, fencing, read_seq: watermarks?.committed_seq, watermarks };
+      });
+    } catch { unavailable = true; }
+    const domains = AUTHORITY_RUNTIME_SCENARIOS.map((id) => {
+      const missing_methods = runtimeDomainMethods[id].filter((method) => typeof this[method] !== "function");
+      const missing_tables = runtimeDomainTables[id].filter((table) => !columns.has(table));
+      const missing_columns = runtimeDomainTables[id].flatMap((table) => (requiredRuntimeColumns[table] ?? []).filter((field) => !columns.get(table)?.has(field)).map((field) => `${table}.${field}`));
+      const evidence = conformance.scenarios.find((scenario) => scenario.id === id);
+      return { id, missing_methods, missing_tables, missing_columns, persistence_shape: missing_methods.length || missing_tables.length || missing_columns.length ? "missing" as const : "available" as const, runtime_evidence: evidence?.passed ? "passed" as const : report ? "failed" as const : "missing" as const };
+    });
+    const healthy = health.available && health.schema_valid && health.fencing && domains.every((domain) => domain.persistence_shape === "available");
+    if (!healthy && conformance.passed) conformance = { ...conformance, passed: false, failures: [...conformance.failures, "PostgreSQL runtime health did not conform"] };
+    const enabled = healthy && runtimeConformancePassed(conformance);
+    const result: PostgresRuntimeReadiness = { version: "postgres-runtime-readiness/1", backend: "postgresql", implementation_state: "available", runtime_state: enabled ? "enabled" : "disabled", evidence_state: enabled ? "verified" : "failed", code: enabled ? "ready" : unavailable ? "postgresql_unavailable" : "backend_conformance_failed", health, domains, conformance, ...(enabled ? {} : { blocker: healthy ? "runtime_conformance_evidence_required" as const : "backend_health_failed" as const }) };
+    this.readiness = result; return result;
+  }
+  async health(): Promise<{ available: true; backend: "postgresql"; schema_version: string; fencing: boolean; committed_seq: number; projected_seq: number; indexed_seq: number }> {
+    await this.migrate();
+    const report = await this.runtimeReadiness(this.readiness?.conformance);
+    if (!report.health.available || !report.health.schema_valid || !report.health.fencing || report.domains.some((domain) => domain.persistence_shape !== "available") || !report.health.watermarks) throw new ContractValidationError("conflict", "PostgreSQL authority health checks failed");
+    return { available: true, backend: "postgresql", schema_version: POSTGRES_SCHEMA_VERSION, fencing: true, ...report.health.watermarks };
+  }
+  async pinSnapshot(engagementId: string, options: SnapshotOptions & { ttlMs?: number } = {}): Promise<PostgresPinnedSnapshot> {
+    const ttl = options.ttlMs ?? 60_000;
+    if (!Number.isSafeInteger(ttl) || ttl < 1) throw new ContractValidationError("validation_error", "snapshot pin ttl must be a positive integer");
+    return this.sql.transaction("write", async () => {
+      const snapshot = await super.snapshot(engagementId, options);
+      const indexed = Number((await this.sql.get<{ value: string }>("SELECT value FROM metadata WHERE key='indexed_seq'"))?.value ?? 0);
+      const now = await this.sql.now(); const snapshot_id = uuidv7(); const indexed_seq = Math.min(indexed, snapshot.read_seq);
+      await this.sql.run("INSERT INTO reader_pins(snapshot_id,engagement_id,generation,read_seq,committed_seq,projected_seq,indexed_seq,read_time,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", snapshot_id, engagementId, snapshot.read_seq, snapshot.read_seq, snapshot.committed_seq, snapshot.projected_seq, indexed_seq, snapshot.read_time, new Date(Date.parse(now) + ttl).toISOString(), now);
+      return { ...snapshot, snapshot_id, generation: snapshot.read_seq, indexed_seq, watermark: { committed_seq: snapshot.committed_seq, projected_seq: snapshot.projected_seq, indexed_seq } };
     });
   }
-
-  async compareAndSet(id: string, expectedVersion: number, patch: Record<string, unknown>, trustLevel: TrustLevel = "L1"): Promise<CanonicalRecord> {
-    await this.migrate();
-    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw new ContractValidationError("validation_error", "expected version must be a positive integer");
-    const result = await this.query<{ version: unknown; body: unknown }>(`SELECT version,body FROM taric.records WHERE id=$1`, [id]);
-    const row = result.rows[0];
-    if (!row || asNumber(row.version) !== expectedVersion) throw new ContractValidationError("stale_version", "canonical update requires the current expected version");
-    const current = parseJson(row.body) as CanonicalRecord;
-    const forbidden = ["id", "engagement_id", "kind", "version", "trust_level", "display_id", "commit_seq"];
-    if (forbidden.some((field) => field in patch)) throw new ContractValidationError("validation_error", "compare-and-set patch cannot change Core-managed identity fields");
-    const candidate = { ...current, ...patch };
-    delete candidate.version;
-    delete candidate.trust_level;
-    delete candidate.display_id;
-    delete candidate.commit_seq;
-    return this.commit(candidate, trustLevel, undefined, { expected_version: expectedVersion, engagement_id: current.engagement_id });
-  }
-
-  async consumeOutbox(limit = 100): Promise<Array<{ commit_seq: number; status: "applied" }>> {
-    await this.migrate();
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) throw new ContractValidationError("validation_error", "outbox limit must be between 1 and 10000");
-    return this.withTransaction(async (client) => {
-      const pending = await client.query<{ commit_seq: unknown }>(`SELECT commit_seq FROM taric.outbox WHERE status='pending' ORDER BY commit_seq FOR UPDATE SKIP LOCKED LIMIT $1`, [limit]);
-      const applied: Array<{ commit_seq: number; status: "applied" }> = [];
-      for (const row of pending.rows) {
-        const seq = asNumber(row.commit_seq);
-        await client.query(`UPDATE taric.outbox SET status='applied',updated_at=now() WHERE commit_seq=$1 AND status='pending'`, [seq]);
-        await client.query(`UPDATE taric.operation_markers SET status='applied',updated_at=now() WHERE commit_seq=$1 AND status='pending'`, [seq]);
-        applied.push({ commit_seq: seq, status: "applied" });
-      }
-      return applied;
+  async snapshot(engagementId: string, options: SnapshotOptions & { snapshotId: string }): Promise<PostgresPinnedSnapshot>;
+  async snapshot(engagementId: string, options?: SnapshotOptions): Promise<ReadSnapshot>;
+  async snapshot(engagementId: string, options: SnapshotOptions & { snapshotId?: string } = {}): Promise<ReadSnapshot | PostgresPinnedSnapshot> {
+    if (!options.snapshotId) return super.snapshot(engagementId, options);
+    return this.readTransaction(async () => {
+      const pin = await this.sql.get<Record<string, unknown>>("SELECT * FROM reader_pins WHERE snapshot_id=?", options.snapshotId!);
+      const now = await this.sql.now();
+      if (!pin || pin.engagement_id !== engagementId || typeof pin.expires_at !== "string" || pin.expires_at <= now || options.asOf !== undefined && options.asOf !== Number(pin.read_seq)) throw new ContractValidationError("stale_version", "snapshot pin is expired or has a mismatched binding");
+      const snapshot = await super.snapshot(engagementId, { ...options, asOf: Number(pin.read_seq), readTime: String(pin.read_time) });
+      const committed_seq = Number(pin.committed_seq); const projected_seq = Number(pin.projected_seq); const indexed_seq = Number(pin.indexed_seq);
+      return { ...snapshot, committed_seq, projected_seq, indexed_seq, generation: Number(pin.generation), snapshot_id: String(pin.snapshot_id), watermark: { committed_seq, projected_seq, indexed_seq } };
     });
   }
-
-  async pinSnapshot(engagementId: string, options: { asOf?: number; ttlMs?: number; trustLevel?: TrustLevel; includeCandidates?: boolean } = {}): Promise<PostgresPinnedSnapshot> {
-    await this.migrate();
-    return this.withTransaction(async (client) => {
-      const current = asNumber((await client.query<{ seq: unknown }>(`SELECT COALESCE(max(commit_seq),0) AS seq FROM taric.events`)).rows[0]?.seq);
-      const readSeq = options.asOf ?? current;
-      if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current) throw new ContractValidationError("conflict", `unsupported authority sequence: ${readSeq}`);
-      const watermarks = await this.watermarks(client, current);
-      const rows = await client.query<{ body: unknown; trust_level: TrustLevel }>(`SELECT DISTINCT ON (id) body,trust_level FROM taric.record_versions WHERE engagement_id=$1 AND commit_seq <= $2 ORDER BY id,commit_seq DESC`, [engagementId, readSeq]);
-      const records = rows.rows.map((row) => parseJson(row.body) as CanonicalRecord).filter((record) => record.trust_level !== "L0" && (options.includeCandidates || record.trust_level !== "L1")).filter((record) => !options.trustLevel || record.trust_level === options.trustLevel).filter((record) => !["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(record.status ?? "active"))).sort((a, b) => a.id.localeCompare(b.id));
-      const snapshotId = uuidv7();
-      const now = new Date().toISOString();
-      const expires = options.ttlMs === undefined ? null : new Date(Date.now() + options.ttlMs).toISOString();
-      await client.query(`INSERT INTO taric.reader_pins(snapshot_id,engagement_id,generation,read_seq,committed_seq,projected_seq,indexed_seq,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [snapshotId, engagementId, readSeq, readSeq, current, Math.min(watermarks.projected_seq, readSeq), Math.min(watermarks.indexed_seq, readSeq), expires, now]);
-      return { read_seq: readSeq, committed_seq: current, projected_seq: Math.min(watermarks.projected_seq, readSeq), indexed_seq: Math.min(watermarks.indexed_seq, readSeq), generation: readSeq, watermark: { committed_seq: current, projected_seq: Math.min(watermarks.projected_seq, readSeq), indexed_seq: Math.min(watermarks.indexed_seq, readSeq) }, snapshot_id: snapshotId, records };
-    });
-  }
-
-  async snapshot(engagementId: string, options: { asOf?: number; trustLevel?: TrustLevel; includeCandidates?: boolean; snapshotId?: string } = {}): Promise<PostgresPinnedSnapshot> {
-    await this.migrate();
-    if (options.snapshotId) {
-      const pin = await this.query<{ snapshot_id: string; engagement_id: string; generation: unknown; read_seq: unknown; committed_seq: unknown; projected_seq: unknown; indexed_seq: unknown; expires_at: string | Date | null }>(`SELECT * FROM taric.reader_pins WHERE snapshot_id=$1`, [options.snapshotId]);
-      const row = pin.rows[0];
-      if (!row || row.engagement_id !== engagementId || (row.expires_at !== null && Date.parse(String(row.expires_at)) <= Date.now())) throw new ContractValidationError("stale_version", "reader snapshot pin is unavailable or expired");
-      const records = await this.query<{ body: unknown; trust_level: TrustLevel }>(`SELECT DISTINCT ON (id) body,trust_level FROM taric.record_versions WHERE engagement_id=$1 AND commit_seq <= $2 ORDER BY id,commit_seq DESC`, [engagementId, asNumber(row.read_seq)]);
-      const selected = records.rows.map((entry) => parseJson(entry.body) as CanonicalRecord).filter((record) => record.trust_level !== "L0" && (options.includeCandidates || record.trust_level !== "L1")).filter((record) => !options.trustLevel || record.trust_level === options.trustLevel).filter((record) => !["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(record.status ?? "active"))).sort((a, b) => a.id.localeCompare(b.id));
-      return { read_seq: asNumber(row.read_seq), committed_seq: asNumber(row.committed_seq), projected_seq: asNumber(row.projected_seq), indexed_seq: asNumber(row.indexed_seq), generation: asNumber(row.generation), watermark: { committed_seq: asNumber(row.committed_seq), projected_seq: asNumber(row.projected_seq), indexed_seq: asNumber(row.indexed_seq) }, snapshot_id: row.snapshot_id, records: selected };
-    }
-    const result = await this.pinSnapshot(engagementId, { ...options, ttlMs: undefined });
-    return result;
-  }
-
-  private async watermarks(client: PostgresQueryable, current?: number): Promise<{ projected_seq: number; indexed_seq: number }> {
-    const rows = await client.query<{ projected_seq: unknown; indexed_seq: unknown }>(`
-      SELECT COALESCE((SELECT min(commit_seq)-1 FROM taric.outbox WHERE status <> 'applied'), COALESCE($1, (SELECT max(commit_seq) FROM taric.events), 0)) AS projected_seq,
-        COALESCE((SELECT (value #>> '{}')::bigint FROM taric.metadata WHERE key='indexed_seq'), 0) AS indexed_seq`, [current ?? null]);
-    return { projected_seq: asNumber(rows.rows[0]?.projected_seq), indexed_seq: asNumber(rows.rows[0]?.indexed_seq) };
-  }
-
   async updateIndexedWatermark(sequence: number): Promise<void> {
-    await this.migrate();
     if (!Number.isSafeInteger(sequence) || sequence < 0) throw new ContractValidationError("validation_error", "indexed watermark must be a non-negative integer");
-    const updated = await this.query(`UPDATE taric.metadata SET value=to_jsonb($1::bigint) WHERE key='indexed_seq' AND (value #>> '{}')::bigint <= $1 AND $1 <= COALESCE((SELECT min(commit_seq)-1 FROM taric.outbox WHERE status <> 'applied'), (SELECT COALESCE(max(commit_seq),0) FROM taric.events))`, [sequence]);
-    if ((updated.rowCount ?? updated.rows.length) === 0) throw new ContractValidationError("stale_version", "indexed watermark cannot move backwards or exceed the projected sequence");
-  }
-
-  async claimWorkRun(input: { run_id?: string; work_item_id: string; engagement_id: string; host_id: string; agent_id: string; ttl_ms?: number }): Promise<PostgresLease> {
-    await this.migrate();
-    const ttl = input.ttl_ms ?? 60_000;
-    if (!Number.isSafeInteger(ttl) || ttl < 1) throw new ContractValidationError("validation_error", "lease ttl must be a positive integer");
-    return this.withTransaction(async (client) => {
-      const runId = input.run_id ?? uuidv7();
-      await client.query(`UPDATE taric.work_leases SET status='lost',updated_at=now(),body=jsonb_set(body,'{status}','"lost"'::jsonb) WHERE work_item_id=$1 AND lease_expires_at <= now() AND status NOT IN ('completed','failed','cancelled','lost')`, [input.work_item_id]);
-      const existing = (await client.query<Record<string, unknown>>(`SELECT * FROM taric.work_leases WHERE run_id=$1 FOR UPDATE`, [runId])).rows[0];
-      const active = await client.query<{ run_id: string }>(`SELECT run_id FROM taric.work_leases WHERE work_item_id=$1 AND lease_expires_at > now() AND status NOT IN ('completed','failed','cancelled','lost') AND run_id <> $2 FOR UPDATE`, [input.work_item_id, runId]);
-      if (active.rows[0]) throw new ContractValidationError("conflict", "WorkItem already has an active leased WorkRun");
-      const expires = await client.query<{ active: boolean }>(`SELECT lease_expires_at > now() AS active FROM taric.work_leases WHERE run_id=$1`, [runId]);
-      if (existing && expires.rows[0]?.active && !["lost", "completed", "failed", "cancelled"].includes(String(existing.status))) throw new ContractValidationError("conflict", "work run lease is still active");
-      const generation = asNumber(existing?.generation) + 1 || 1;
-      const attemptRef = uuidv7();
-      if (existing) await client.query(`UPDATE taric.attempts SET status='lost',updated_at=now() WHERE run_id=$1 AND generation=$2 AND status NOT IN ('completed','failed','cancelled','lost')`, [runId, asNumber(existing.generation)]);
-      const leaseTimes = await client.query<{ now: string | Date; expires_at: string | Date }>(`SELECT now() AS now, now() + ($1::bigint * interval '1 millisecond') AS expires_at`, [ttl]);
-      const now = new Date(leaseTimes.rows[0]?.now ?? Date.now());
-      const expiry = isoTimestamp(leaseTimes.rows[0]?.expires_at ?? now.getTime() + ttl);
-      const readSeq = asNumber((await client.query<{ seq: unknown }>(`SELECT COALESCE(max(commit_seq),0) AS seq FROM taric.events`)).rows[0]?.seq);
-      const body = { run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, owner: { host_id: input.host_id, agent_id: input.agent_id }, generation, attempt_ref: attemptRef, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: readSeq };
-      await client.query(`INSERT INTO taric.work_leases(run_id,work_item_id,engagement_id,status,owner_host,owner_agent,generation,attempt_ref,lease_expires_at,heartbeat_at,read_seq,body,created_at,updated_at) VALUES($1,$2,$3,'claimed',$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$9,$9)
-        ON CONFLICT(run_id) DO UPDATE SET work_item_id=excluded.work_item_id,engagement_id=excluded.engagement_id,status='claimed',owner_host=excluded.owner_host,owner_agent=excluded.owner_agent,generation=excluded.generation,attempt_ref=excluded.attempt_ref,lease_expires_at=excluded.lease_expires_at,heartbeat_at=excluded.heartbeat_at,read_seq=excluded.read_seq,body=excluded.body,updated_at=excluded.updated_at`, [runId, input.work_item_id, input.engagement_id, input.host_id, input.agent_id, generation, attemptRef, expiry, now.toISOString(), readSeq, JSON.stringify(body)]);
-      await client.query(`INSERT INTO taric.attempts(attempt_id,run_id,generation,owner_host,owner_agent,status,lease_expires_at,heartbeat_at,body,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'claimed',$6,$7,$8::jsonb,$7,$7)`, [attemptRef, runId, generation, input.host_id, input.agent_id, expiry, now.toISOString(), JSON.stringify(body)]);
-      await this.appendEvent(client, "work_run.claim", runId, { engagement_id: input.engagement_id, work_item_id: input.work_item_id, host_id: input.host_id, worker_id: input.agent_id, attempt_id: attemptRef, generation });
-      return { run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", owner: { host_id: input.host_id, agent_id: input.agent_id }, generation, attempt_ref: attemptRef, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: readSeq };
+    await this.sql.transaction("write", async () => {
+      const current = Number((await this.sql.get<{ value: string }>("SELECT value FROM metadata WHERE key='indexed_seq'"))?.value ?? 0);
+      const projected = (await super.snapshot("", { includeCandidates: true })).projected_seq;
+      if (sequence < current || sequence > projected) throw new ContractValidationError("stale_version", "indexed watermark cannot regress or exceed projected authority");
+      await this.sql.run("UPDATE metadata SET value=? WHERE key='indexed_seq'", String(sequence));
     });
   }
-
-  async renewWorkRun(runId: string, generation: number, hostId: string, ttlMs = 60_000): Promise<PostgresLease> {
-    await this.migrate();
-    if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) throw new ContractValidationError("validation_error", "lease ttl must be a positive integer");
-    return this.withTransaction(async (client) => {
-      const result = await client.query<Record<string, unknown>>(`UPDATE taric.work_leases SET lease_expires_at=now() + ($1::bigint * interval '1 millisecond'),heartbeat_at=now(),updated_at=now(),body=jsonb_set(jsonb_set(body,'{lease_expires_at}',to_jsonb((now() + ($1::bigint * interval '1 millisecond'))::text)),'{heartbeat_at}',to_jsonb(now()::text)) WHERE run_id=$2 AND generation=$3 AND owner_host=$4 AND lease_expires_at > now() AND status NOT IN ('completed','failed','cancelled','lost') RETURNING *`, [ttlMs, runId, generation, hostId]);
-      const row = result.rows[0];
-      if (!row) throw new ContractValidationError("stale_version", "work run lease is expired or fenced");
-      await client.query(`UPDATE taric.attempts SET lease_expires_at=$1,heartbeat_at=$2,updated_at=now() WHERE run_id=$3 AND generation=$4 AND owner_host=$5`, [row.lease_expires_at, row.heartbeat_at, runId, generation, hostId]);
-      await this.appendEvent(client, "work_run.renew", runId, { engagement_id: row.engagement_id, host_id: hostId, attempt_id: row.attempt_ref, generation, lease_expires_at: isoTimestamp(row.lease_expires_at) });
-      return this.leaseFromRow(row);
-    });
-  }
-
-  async reclaimWorkRun(runId: string, hostId: string, agentId: string, ttlMs = 60_000): Promise<PostgresLease> {
-    await this.migrate();
-    const row = (await this.query<Record<string, unknown>>(`SELECT * FROM taric.work_leases WHERE run_id=$1`, [runId])).rows[0];
-    if (!row) throw new ContractValidationError("conflict", "work run not found");
-    const expired = await this.query<{ expired: boolean }>(`SELECT $1::timestamptz <= now() AS expired`, [row.lease_expires_at]);
-    if (!expired.rows[0]?.expired) throw new ContractValidationError("conflict", "work run lease is still active");
-    return this.claimWorkRun({ run_id: runId, work_item_id: String(row.work_item_id), engagement_id: String(row.engagement_id), host_id: hostId, agent_id: agentId, ttl_ms: ttlMs });
-  }
-
-  async events(): Promise<Array<{ commit_seq: number; event_id: string; event_type: string; subject_id?: string; payload: Record<string, unknown>; prev_hash: string | null; hash: string; created_at: string }>> {
-    await this.migrate();
-    const result = await this.query<{ commit_seq: unknown; event_id: string; event_type: string; subject_id: string | null; payload: unknown; prev_hash: string | null; hash: string; created_at: string | Date }>(`SELECT commit_seq,event_id,event_type,subject_id,payload,prev_hash,hash,created_at FROM taric.events ORDER BY commit_seq`);
-    return result.rows.map((row) => ({ commit_seq: asNumber(row.commit_seq), event_id: row.event_id, event_type: row.event_type, subject_id: row.subject_id ?? undefined, payload: (parseJson(row.payload) ?? {}) as Record<string, unknown>, prev_hash: row.prev_hash, hash: row.hash, created_at: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(String(row.created_at)).toISOString() }));
-  }
-
-  async verifyAudit(): Promise<{ valid: boolean; errors: string[] }> {
-    const rows = await this.events();
-    const errors: string[] = [];
-    let previous: string | null = null;
-    rows.forEach((event, index) => {
-      if (event.commit_seq !== index + 1) errors.push(`event ${event.event_id}: sequence gap`);
-      if (event.prev_hash !== previous) errors.push(`event ${event.event_id}: previous hash mismatch`);
-      const expected = digest({ event_id: event.event_id, event_type: event.event_type, subject_id: event.subject_id, payload: event.payload, prev_hash: event.prev_hash, created_at: event.created_at });
-      if (expected !== event.hash) errors.push(`event ${event.event_id}: hash mismatch`);
-      previous = event.hash;
-    });
-    return { valid: errors.length === 0, errors };
-  }
-
-  async doctor(): Promise<DoctorReport> {
-    await this.migrate();
-    const health = await this.health();
-    const pending = await this.query<{ count: unknown }>(`SELECT count(*) AS count FROM taric.outbox WHERE status <> 'applied'`);
-    const markerRows = await this.query<{ status: string; count: unknown }>(`SELECT status,count(*) AS count FROM taric.operation_markers GROUP BY status`);
-    const audit = await this.verifyAudit();
-    const count = asNumber(pending.rows[0]?.count);
-    const operation_markers = { pending: 0, applied: 0, indexed: 0, failed: 0, recovered: 0 } as Record<"pending" | "applied" | "indexed" | "failed" | "recovered", number>;
-    for (const row of markerRows.rows) if (row.status in operation_markers) operation_markers[row.status as keyof typeof operation_markers] = asNumber(row.count);
-    const errors = [...audit.errors];
-    if (count > 0) errors.push(`${count} operation(s) remain pending in the outbox`);
-    return {
-      valid: errors.length === 0,
-      schema_version: health.schema_version,
-      committed_seq: health.committed_seq,
-      projected_seq: health.projected_seq,
-      pending_outbox: count,
-      operation_markers,
-      authority: { valid: audit.valid, errors: audit.errors },
-      derived: { valid: count === 0, errors: count === 0 ? [] : [`${count} operation(s) remain pending in the outbox`], repair_actions: count === 0 ? [] : ["consume the PostgreSQL outbox and rerun doctor"] },
-      audit,
-      errors,
-    };
-  }
-
-  async exportSnapshot(engagementId: string, asOf?: number): Promise<{ format: "taric-postgresql-json"; schema_version: string; core_version: string; engagement_id: string; source_sequence: number; read_seq: number; committed_seq: number; projected_seq: number; backup_timestamp: string; provenance: { backend: "postgresql"; schema: string }; records: CanonicalRecord[]; hash: string }> {
-    const snapshot = await this.snapshot(engagementId, { asOf, includeCandidates: true });
-    const payload = { format: "taric-postgresql-json" as const, schema_version: POSTGRES_SCHEMA_VERSION, core_version: SCHEMA_VERSION, engagement_id: engagementId, source_sequence: snapshot.read_seq, read_seq: snapshot.read_seq, committed_seq: snapshot.committed_seq, projected_seq: snapshot.projected_seq, backup_timestamp: new Date().toISOString(), provenance: { backend: "postgresql" as const, schema: this.#options.schema }, records: snapshot.records };
-    return { ...payload, hash: digest(payload) };
-  }
-
-  async importSnapshot(snapshotInput: unknown): Promise<{ engagement_id: string; recovered_sequence: number; imported_records: number; integrity_verified: true; display_sequence: number }> {
-    let snapshot: Record<string, unknown>;
-    try { snapshot = typeof snapshotInput === "string" ? JSON.parse(snapshotInput) as Record<string, unknown> : snapshotInput as Record<string, unknown>; }
-    catch { throw new ContractValidationError("validation_error", "PostgreSQL backup must be valid JSON"); }
-    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new ContractValidationError("validation_error", "PostgreSQL backup must be an object");
-    const { hash: suppliedHash, records, ...payload } = snapshot;
-    if (payload.format !== "taric-postgresql-json" || payload.schema_version !== POSTGRES_SCHEMA_VERSION || payload.core_version !== SCHEMA_VERSION || typeof payload.engagement_id !== "string" || !Number.isSafeInteger(payload.source_sequence) || !Array.isArray(records) || typeof suppliedHash !== "string") {
-      throw new ContractValidationError("unsupported_schema_version", "PostgreSQL backup metadata is incomplete or incompatible");
-    }
-    if (digest({ ...payload, records }) !== suppliedHash) throw new ContractValidationError("validation_error", "PostgreSQL backup integrity hash mismatch");
-    if (typeof payload.backup_timestamp !== "string" || Number.isNaN(Date.parse(payload.backup_timestamp))) throw new ContractValidationError("validation_error", "PostgreSQL backup timestamp is invalid");
-    const engagementId = payload.engagement_id;
-    const candidates = records as CanonicalRecord[];
-    if (!candidates.length || !candidates.some((record) => record.id === engagementId && String(record.kind) === "engagement")) throw new ContractValidationError("validation_error", "PostgreSQL backup must contain its Engagement record");
-    const ids = new Set<string>();
-    const aliases = new Set<string>();
-    let maxAlias = 0;
-    const owners = new Map<string, string>();
-    const kinds = new Map<string, string>();
-    const statuses = new Map<string, string>();
-    for (const record of candidates) {
-      if (!record || typeof record.id !== "string" || record.engagement_id !== engagementId || typeof record.display_id !== "string" || !/^TAR-[0-9]{6,}$/.test(record.display_id)) throw new ContractValidationError("validation_error", "PostgreSQL backup record ownership or display identity is invalid");
-      if (ids.has(record.id) || aliases.has(record.display_id)) throw new ContractValidationError("conflict", "PostgreSQL backup contains duplicate record or display identity");
-      ids.add(record.id); aliases.add(record.display_id); owners.set(record.id, engagementId); kinds.set(record.id, String(record.kind ?? "record")); statuses.set(record.id, String(record.status ?? "active"));
-      maxAlias = Math.max(maxAlias, Number(record.display_id.slice(4)));
-      validateCanonicalRecord(record, record.trust_level);
-    }
-    for (const record of candidates) validateAuthorityReferences(record, { engagement: owners, kind: kinds, status: statuses }, engagementId);
-    await this.migrate();
-    return this.withTransaction(async (client) => {
-      const existing = await client.query(`SELECT 1 FROM taric.records WHERE engagement_id=$1 LIMIT 1`, [engagementId]);
-      if (existing.rows[0]) throw new ContractValidationError("conflict", "PostgreSQL backup destination Engagement already contains records");
-      for (const record of candidates) {
-        const now = typeof record.updated_at === "string" ? record.updated_at : new Date().toISOString();
-        const version = Number.isSafeInteger(record.version) && Number(record.version) > 0 ? Number(record.version) : 1;
-        const trust = record.trust_level === "L0" || record.trust_level === "L1" || record.trust_level === "L2" ? record.trust_level : "L1";
-        const eventPayload = { engagement_id: engagementId, version, trust_level: trust, source_sequence: payload.source_sequence, backup_hash: suppliedHash };
-        const commitSeq = await this.appendEvent(client, "snapshot.import.record", record.id, eventPayload);
-        await client.query(`INSERT INTO taric.records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9)`, [record.id, engagementId, String(record.kind ?? "record"), trust, version, record.display_id, JSON.stringify(record), record.created_at ?? now, now]);
-        await client.query(`INSERT INTO taric.record_versions(id,commit_seq,engagement_id,trust_level,body) VALUES($1,$2,$3,$4,$5::jsonb)`, [record.id, commitSeq, engagementId, trust, JSON.stringify(record)]);
-      }
-      if (maxAlias > 0) await client.query(`SELECT setval('${this.#schema}.display_sequence', GREATEST(last_value, $1::bigint), true) FROM ${this.#schema}.display_sequence`, [maxAlias]);
-      const recoveredSequence = await this.appendEvent(client, "snapshot.import", engagementId, { engagement_id: engagementId, source_sequence: payload.source_sequence, imported_count: candidates.length, backup_hash: suppliedHash });
-      return { engagement_id: engagementId, recovered_sequence: recoveredSequence, imported_records: candidates.length, integrity_verified: true as const, display_sequence: maxAlias + 1 };
-    });
-  }
-
-  async backup(engagementId: string, asOf?: number): ReturnType<PostgresAuthorityStore["exportSnapshot"]> { return this.exportSnapshot(engagementId, asOf); }
-  async restore(snapshot: unknown): ReturnType<PostgresAuthorityStore["importSnapshot"]> { return this.importSnapshot(snapshot); }
-
-  /** Stable operator-facing diagnostics; no connection details are returned. */
-  async diagnostics(): Promise<PostgresBackendManifest & { available: true; committed_seq: number; projected_seq: number; indexed_seq: number; backup_format: string; restore_mode: "atomic_verified_target" }> {
-    const health = await this.health();
-    return { ...this.manifest(), ...health, backup_format: "taric-postgresql-json", restore_mode: "atomic_verified_target" };
-  }
-
   async assertLease(runId: string, generation: number, hostId: string): Promise<PostgresLease> {
-    await this.migrate();
-    const result = await this.query<Record<string, unknown>>(`SELECT * FROM taric.work_leases WHERE run_id=$1 AND generation=$2 AND owner_host=$3 AND lease_expires_at > now() AND status NOT IN ('completed','failed','cancelled','lost')`, [runId, generation, hostId]);
-    const row = result.rows[0];
-    if (!row) throw new ContractValidationError("stale_version", "write is fenced by an expired lease or generation");
-    return this.leaseFromRow(row);
+    return this.readTransaction(async () => {
+      const run = await this.sql.get<{ owner_host: string; generation: number; status: string; lease_expires_at: string; body: string }>("SELECT owner_host,generation,status,lease_expires_at,body FROM work_runs WHERE run_id=?", runId);
+      if (!run || run.owner_host !== hostId || run.generation !== generation || run.lease_expires_at <= await this.sql.now() || ["completed", "failed", "cancelled", "lost"].includes(run.status)) throw new ContractValidationError("stale_version", "write is fenced by an expired lease or generation");
+      const body = JSON.parse(run.body) as PostgresLease;
+      const attempt = await this.sql.get<{ generation: number; owner_host: string; status: string; lease_expires_at: string }>("SELECT generation,owner_host,status,lease_expires_at FROM attempts WHERE attempt_id=? AND run_id=?", body.attempt_ref, runId);
+      if (!attempt || attempt.generation !== generation || attempt.owner_host !== hostId || attempt.lease_expires_at <= await this.sql.now() || ["completed", "failed", "cancelled", "lost"].includes(attempt.status)) throw new ContractValidationError("stale_version", "active Attempt is expired or fenced");
+      return body;
+    });
   }
-
-  private leaseFromRow(row: Record<string, unknown>): PostgresLease {
-    const body = (parseJson(row.body) ?? {}) as Record<string, unknown>;
-    const owner = (body.owner && typeof body.owner === "object" ? body.owner : { host_id: row.owner_host, agent_id: row.owner_agent }) as Record<string, unknown>;
-    return { run_id: String(row.run_id), work_item_id: String(row.work_item_id), engagement_id: String(row.engagement_id), status: String(row.status), owner: { host_id: String(owner.host_id), agent_id: String(owner.agent_id) }, generation: asNumber(row.generation), attempt_ref: String(row.attempt_ref), lease_expires_at: isoTimestamp(row.lease_expires_at), heartbeat_at: isoTimestamp(row.heartbeat_at), read_seq: asNumber(row.read_seq) };
+  async backup(engagementId: string, asOf?: number): ReturnType<AuthorityStore["exportSnapshot"]> { return this.exportSnapshot(engagementId, asOf); }
+  async restore(snapshot: unknown): ReturnType<AuthorityStore["importSnapshot"]> { return this.importSnapshot(snapshot); }
+  async diagnostics(): Promise<PostgresBackendManifest & { available: true; committed_seq: number; projected_seq: number; indexed_seq: number; backup_format: string; restore_mode: "atomic_verified_target" }> {
+    const health = await this.health(); return { ...this.manifest(), ...health, backup_format: "taric-native-json", restore_mode: "atomic_verified_target" };
   }
 }
-
-export function createPostgresAuthorityStore(client: PostgresQueryable, options?: PostgresAuthorityOptions): PostgresAuthorityStore {
-  return new PostgresAuthorityStore(client, options);
-}
-
+export function createPostgresAuthorityStore(client: PostgresQueryable, options?: PostgresAuthorityOptions): PostgresAuthorityStore { return new PostgresAuthorityStore(client, options); }

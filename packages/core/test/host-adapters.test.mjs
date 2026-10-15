@@ -44,7 +44,7 @@ function richPiExtensionApi() {
 
 test("Pi extension registers real lifecycle callbacks through the authenticated Core client", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const engagement_id = uuidv7();
   const hostPrincipal = createPrincipal("host", "pi-host", engagement_id);
   const pi = createPiExtension(service, hostPrincipal);
@@ -69,12 +69,12 @@ test("Pi extension registers real lifecycle callbacks through the authenticated 
   const reload = await pi(extension);
   assert.equal(reload.callbacks.length, 0);
   assert.equal(reload.reload_idempotent, true);
-  store.close();
+  (await store.close());
 });
 
 test("Pi lifecycle callbacks reject cross-engagement and forged host attribution", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const engagement_id = uuidv7();
   const other_engagement = uuidv7();
   const pi = createPiAdapter(service, createPrincipal("host", "pi-host", engagement_id));
@@ -88,20 +88,20 @@ test("Pi lifecycle callbacks reject cross-engagement and forged host attribution
   const cross = await extension.handlers.get("context")({ context: { engagement_id: other_engagement, host_id: "pi" } });
   assert.equal(cross.ok, false);
   assert.equal(cross.error.code, "authorization_error");
-  store.close();
+  (await store.close());
 });
 
 test("Pi 1.1 hooks use explicit host bindings for proposal, checkpoint, and action result paths", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
-  store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2");
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
   const host = createPrincipal("host", "pi-host", engagement_id);
-  const run = store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" });
+  const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" }));
   const action_id = uuidv7();
-  store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "recommended", target: "/admin", method: "bash", host_id: host.id });
-  store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "authorized", host_decision_ref: "decision:1", host_id: host.id });
+  (await store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "recommended", target: "/admin", method: "bash", host_id: host.id }));
+  (await store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "authorized", host_decision_ref: "decision:1", host_id: host.id }));
   const pi = createPiAdapter(service, host);
   const extension = richPiExtensionApi();
   const loaded = await pi.register(extension, {
@@ -147,25 +147,25 @@ test("Pi 1.1 hooks use explicit host bindings for proposal, checkpoint, and acti
 
   const proposal = await extension.tools.get("taric_proposal").execute("call-1", {
     subject_type: "claim",
-    base_version: 0,
-    content: { id: uuidv7(), engagement_id, kind: "claim", proposition: "host callback" },
+    expected_version: 0,
+    content: { schema_version: "1.0.0", engagement_id, kind: "claim", proposition: "host callback", status: "proposed", evidence_refs: [], limitations: [] },
   });
   assert.equal(proposal.details.ok, true);
   const checkpoint = (await extension.emit("agent_before_settle", { type: "agent_before_settle", outcome: "completed" })).at(-1);
   assert.equal(checkpoint.ok, true);
-  assert.equal(store.getWorkRun(run.run_id).checkpoint_id !== undefined, true);
+  assert.equal((await store.getWorkRun(run.run_id)).checkpoint_id !== undefined, true);
   const result = (await extension.emit("tool_result", { type: "tool_result", toolName: "bash", toolCallId: "tool-1", isError: false })).at(-1);
   assert.equal(result.ok, true);
-  assert.equal(store.getActionIntent(action_id).status, "executed");
-  store.close();
+  assert.equal((await store.getActionIntent(action_id)).status, "executed");
+  (await store.close());
 });
 
 test("resume packet reports conservative premise checks and stale checkpoint attempt", async () => {
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
-  store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2");
-  const first = store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi-a", agent_id: "agent-a", ttl_ms: 50 });
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
+  const first = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi-a", agent_id: "agent-a", ttl_ms: 50 }));
   const checkpoint = {
     work_item_ref: work_item_id,
     work_run_ref: first.run_id,
@@ -192,40 +192,40 @@ test("resume packet reports conservative premise checks and stale checkpoint att
     tool_result_refs: [],
     context_manifest: { context_snapshot_id: uuidv7(), read_seq: first.read_seq, builder_version: "test" },
   };
-  store.commitCheckpoint(first.run_id, first.generation, "pi-a", checkpoint);
+  (await store.commitCheckpoint(first.run_id, first.generation, "pi-a", checkpoint));
   await new Promise((resolve) => setTimeout(resolve, 70));
-  const second = store.reclaimWorkRun(first.run_id, "pi-b", "agent-b");
-  const packet = store.resumePacket(second.run_id, "pi-b");
+  const second = (await store.reclaimWorkRun(first.run_id, "pi-b", "agent-b"));
+  const packet = (await store.resumePacket(second.run_id, "pi-b"));
   assert.equal(packet.checkpoint_read_seq, first.read_seq);
   assert.equal(packet.premise_checks.attempt, false);
   assert.equal(packet.blocked, true);
   assert.equal(packet.replan_required, true);
   assert.equal(packet.resume_advice, "replan_required");
-  store.close();
+  (await store.close());
 });
 
 test("Pi extension requires a host principal bound to an engagement", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const extension = fakePiExtensionApi();
   const pi = createPiAdapter(service, createPrincipal("model", "model-a", uuidv7()));
-  await assert.rejects(() => pi.register(extension), /authorization_error/);
+  await assert.rejects(async () => (await pi.register(extension)), /authorization_error/);
   assert.equal(extension.handlers.size, 0);
-  store.close();
+  (await store.close());
 });
 
 test("DeepSeek adapter has no Pi lifecycle surface", async () => {
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const dsh = createDeepSeekHarnessAdapter(service, createPrincipal("host", "dsh", uuidv7()), "1.0");
   const extension = fakePiExtensionApi();
-  await assert.rejects(() => dsh.register(extension), /unsupported_capability/);
+  await assert.rejects(async () => (await dsh.register(extension)), /unsupported_capability/);
   assert.equal(extension.handlers.size, 0);
-  store.close();
+  (await store.close());
 });
 
 test("DeepSeek Cordis adapter binds authenticated callbacks and memoizes duplicate events", async () => {
-  const store = new AuthorityStore(); const service = createCoreService(store); const engagement_id = uuidv7();
+  const store = new AuthorityStore(); const service = (await createCoreService(store)); const engagement_id = uuidv7();
   const adapter = createDeepSeekHarnessAdapter(service, createPrincipal("host", "dsh-host", engagement_id));
   const listeners = new Map(); const ctx = { on(event, handler) { listeners.set(event, handler); return () => listeners.delete(event); } };
   const loaded = await adapter.register(ctx, { engagement_id });
@@ -236,5 +236,5 @@ test("DeepSeek Cordis adapter binds authenticated callbacks and memoizes duplica
   const duplicate = listeners.get("session/event")({ id: "session-1" }, sessionEvent);
   assert.equal(first, duplicate);
   assert.deepEqual(await first, { observed: true, type: "turn/start" });
-  adapter.unload(); assert.equal(listeners.size, 0); store.close();
+  adapter.unload(); assert.equal(listeners.size, 0); (await store.close());
 });

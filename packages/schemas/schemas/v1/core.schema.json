@@ -380,13 +380,13 @@
       ],
       "properties": {
         "id": {
-          "$ref": "#/$defs/uuid"
+          "$ref": "#/$defs/uuidV7"
         },
         "schema_version": {
           "const": "1.0.0"
         },
         "engagement_id": {
-          "$ref": "#/$defs/uuid"
+          "$ref": "#/$defs/uuidV7"
         },
         "created_at": {
           "$ref": "#/$defs/timestamp"
@@ -420,6 +420,21 @@
         },
         "policy_digest": {
           "$ref": "#/$defs/sha256"
+        },
+        "policy_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trust_phase": {
+          "enum": ["proposal", "machine_approved", "independently_verified"]
+        },
+        "risk_class": {
+          "enum": ["informational", "low", "medium", "high", "critical", "finding", "action"]
+        },
+        "review_refs": {
+          "$ref": "#/$defs/uuidList"
+        },
+        "review_after": {
+          "$ref": "#/$defs/timestamp"
         },
         "review_ref": {
           "$ref": "#/$defs/uuid"
@@ -971,7 +986,6 @@
             "title",
             "claim_refs",
             "evidence_refs",
-            "review_ref",
             "status"
           ],
           "properties": {
@@ -987,7 +1001,6 @@
             },
             "evidence_refs": {
               "type": "array",
-              "minItems": 1,
               "items": {
                 "$ref": "#/$defs/uuid"
               }
@@ -1025,6 +1038,10 @@
               "$ref": "#/$defs/uuid"
             }
           }
+        },
+        {
+          "if": { "required": ["status"], "properties": { "status": { "const": "verified" } } },
+          "then": { "required": ["review_ref", "policy_digest"], "properties": { "review_ref": { "$ref": "#/$defs/uuidV7" }, "policy_digest": { "$ref": "#/$defs/sha256" }, "evidence_refs": { "type": "array", "minItems": 1 } } }
         }
       ],
       "type": "object",
@@ -1181,6 +1198,74 @@
       "type": "object",
       "unevaluatedProperties": false
     },
+    "proposalProvenance": {
+      "type": "object",
+      "required": ["host_id", "producer_id", "source_kind"],
+      "properties": {
+        "host_id": { "$ref": "#/$defs/nonEmptyString" },
+        "producer_id": { "$ref": "#/$defs/nonEmptyString" },
+        "source_kind": { "enum": ["model", "worker", "host", "tool", "import"] },
+        "source_refs": { "$ref": "#/$defs/uuidList" },
+        "worker_id": { "$ref": "#/$defs/nonEmptyString" },
+        "attempt_ref": { "$ref": "#/$defs/uuidV7" },
+        "dispatch_id": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "proposalCandidate": {
+      "type": "object",
+      "required": ["schema_version", "engagement_id", "kind"],
+      "properties": {
+        "schema_version": { "const": "1.0.0" },
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "kind": { "enum": ["scope", "resource", "resource_revision", "observation", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "finding", "coverage", "coverage_cell", "negative_observation", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "checkpoint", "action_intent"] },
+        "provenance": { "$ref": "#/$defs/proposalProvenance" },
+        "id": false,
+        "version": false,
+        "trust_level": false,
+        "trust_phase": false,
+        "display_id": false,
+        "commit_seq": false,
+        "policy_digest": false,
+        "policy_version": false,
+        "review_ref": false,
+        "review_refs": false,
+        "admission_status": false,
+        "policy_result": false,
+        "accept": false
+      }
+    },
+    "proposalEnvelope": {
+      "type": "object",
+      "required": ["engagement_id", "subject_type", "expected_version", "content"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "subject_type": { "$ref": "#/$defs/nonEmptyString" },
+        "expected_version": { "type": "integer", "minimum": 0 },
+        "proposal_id": { "$ref": "#/$defs/uuidV7" },
+        "client_request_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+        "target_id": { "$ref": "#/$defs/uuidV7" },
+        "subject_ref": { "$ref": "#/$defs/uuidV7" },
+        "content": { "$ref": "#/$defs/proposalCandidate" }
+      },
+      "additionalProperties": false
+    },
+    "promotionL2": {
+      "type": "object",
+      "required": ["engagement_id", "proposal_id", "target_id", "expected_version", "input_hash", "evidence_snapshot_hash", "policy_digest", "review_refs"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "proposal_id": { "$ref": "#/$defs/uuidV7" },
+        "target_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_version": { "type": "integer", "minimum": 1 },
+        "input_hash": { "$ref": "#/$defs/sha256" },
+        "evidence_snapshot_hash": { "$ref": "#/$defs/sha256" },
+        "policy_digest": { "$ref": "#/$defs/sha256" },
+        "review_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/uuidV7" } },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
     "proposal": {
       "allOf": [
         {
@@ -1195,7 +1280,7 @@
             "subject_type",
             "content_hash",
             "status",
-            "base_version"
+            "expected_version"
           ],
           "properties": {
             "subject_type": {
@@ -1223,10 +1308,17 @@
                 "needs_evidence"
               ]
             },
-            "base_version": {
+            "expected_version": {
               "type": "integer",
               "minimum": 0
             },
+            "proposal_id": { "$ref": "#/$defs/uuidV7" },
+            "client_request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "target_id": { "$ref": "#/$defs/uuidV7" },
+            "subject_ref": { "$ref": "#/$defs/uuidV7" },
+            "canonical_id": { "$ref": "#/$defs/uuidV7" },
+            "canonical_version": { "type": "integer", "minimum": 1 },
+            "content": { "$ref": "#/$defs/proposalCandidate" },
             "evidence_refs": {
               "$ref": "#/$defs/uuidList"
             }
@@ -2172,7 +2264,9 @@
                 "unsupported_schema_version",
                 "unavailable_host",
                 "internal_error",
-                "idempotency_conflict"
+                "idempotency_conflict",
+                "invalid_cursor",
+                "minimum_budget_required"
               ]
             },
             "message": {

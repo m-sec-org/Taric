@@ -3,6 +3,7 @@ import { coreSchema, SCHEMA_VERSION } from "@taric/schemas";
 import type { DeploymentDiagnostics, DeploymentGuardInput } from "./deployment-guard.js";
 import { checkDeploymentGuard } from "./deployment-guard.js";
 import { policyDigest } from "./policy.js";
+import { runtimeConformancePassed, type AuthorityRuntimeConformance } from "./storage-contract.js";
 
 export const SHARED_AUTHORITY_RELEASE_REPORT_VERSION = "shared-authority-release/1" as const;
 
@@ -19,6 +20,9 @@ export interface BackupRecoveryEvidence {
   schema_version?: string;
   source_sequence?: number;
   recovered_sequence?: number;
+  /** A logical import creates a new target audit sequence. The import audit
+   * marker verifies which source snapshot sequence was recovered. */
+  restored_source_sequence?: number;
   backup_timestamp?: string;
   integrity?: string;
   engagement_id?: string;
@@ -36,6 +40,7 @@ export interface SharedAuthorityReleaseInput extends DeploymentGuardInput {
   policyDigest?: string;
   backup?: BackupRecoveryEvidence;
   conformance?: { passed: boolean; suite_version?: string; evidence?: readonly string[] };
+  runtime_conformance?: AuthorityRuntimeConformance;
   gates?: readonly SharedAuthorityGate[];
   required_gate_ids?: readonly string[];
   requiredGateIds?: readonly string[];
@@ -62,6 +67,10 @@ export interface SharedAuthorityReleaseEvidence {
   conformance: { passed: boolean; suite_version: string | null; evidence: readonly string[] };
   gates: readonly SharedAuthorityReleaseGate[];
   failures: readonly string[];
+  implementation_state: "available";
+  runtime_state: "enabled" | "disabled";
+  evidence_state: "verified" | "pending" | "failed";
+  runtime_conformance: AuthorityRuntimeConformance | null;
 }
 
 function requiredIds(input: SharedAuthorityReleaseInput): readonly string[] {
@@ -98,7 +107,7 @@ function validBackupMetadata(backup: BackupRecoveryEvidence | null): boolean {
   if (!backup.schema_version || !backup.engagement_id || !backup.integrity) return false;
   if (!Number.isSafeInteger(backup.source_sequence) || Number(backup.source_sequence) < 0) return false;
   if (!Number.isSafeInteger(backup.recovered_sequence) || Number(backup.recovered_sequence) < 0) return false;
-  if (backup.recovered_sequence !== backup.source_sequence) return false;
+  if (backup.recovered_sequence !== backup.source_sequence && backup.restored_source_sequence !== backup.source_sequence) return false;
   if (!backup.backup_timestamp || !Number.isFinite(Date.parse(backup.backup_timestamp))) return false;
   if (backup.provenance_verified !== true || backup.revisions_verified !== true) return false;
   return (backup.unresolved_errors?.length ?? 0) === 0;
@@ -133,6 +142,8 @@ export function buildSharedAuthorityReleaseEvidence(input: SharedAuthorityReleas
   const failures: string[] = [];
   if (guard.supported === false) failures.push(...guard.reasons);
   if (guard.diagnostics.profile === "multi_host_authority") {
+    const runtime = input.runtime_conformance;
+    if (!runtimeConformancePassed(runtime)) failures.push("full Core runtime conformance has not passed; PostgreSQL primitives do not enable the runtime");
     for (const gate of gates) if (gate.required && !gate.passed) failures.push(gate.reason ?? `required gate ${gate.id} failed`);
     if (!conformance.passed || !conformance.suite_version || conformance.evidence.length === 0) failures.push("shared storage conformance did not pass with versioned evidence");
     if (!validBackupMetadata(backup)) failures.push("verified backup/restore metadata, provenance, revisions, and recovered sequence are required");
@@ -155,6 +166,10 @@ export function buildSharedAuthorityReleaseEvidence(input: SharedAuthorityReleas
     conformance,
     gates,
     failures: [...new Set(failures)],
+    implementation_state: "available",
+    runtime_state: enabled ? "enabled" : "disabled",
+    evidence_state: enabled ? "verified" : guard.diagnostics.profile === "single_host_sqlite" ? "pending" : "failed",
+    runtime_conformance: input.runtime_conformance ?? null,
   };
 }
 

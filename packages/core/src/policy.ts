@@ -92,7 +92,7 @@ export interface AdmissionInput {
 export interface GateResult { gate: HardGateName; passed: boolean; reasons: string[] }
 
 export interface AdmissionDecision {
-  /** L1 admission: the subject may become a machine-approved candidate. */
+  /** L2 policy hard gates passed; L1 structural admission is separate. */
   admitted: boolean;
   /** L2 promotion: every hard gate including independence is satisfied. */
   promotable: boolean;

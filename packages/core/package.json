@@ -13,10 +13,12 @@
   "dependencies": {
     "@taric/schemas": "0.1.0",
     "ajv": "^8.20.0",
-    "ajv-formats": "^3.0.1"
+    "ajv-formats": "^3.0.1",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.3"
   }
 }

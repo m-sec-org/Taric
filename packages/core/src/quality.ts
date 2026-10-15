@@ -1,5 +1,45 @@
+import { createHash } from "node:crypto";
+
 /** Version of the deterministic, stratified quality report contract. */
 export const QUALITY_EVALUATION_VERSION = "quality-evaluation/1" as const;
+
+/** Metadata of the labeled dataset, separate from caller-scored metric fields. */
+export interface QualityEvidenceProvenance {
+  kind: "human_annotated" | "synthetic_fixture";
+  dataset_version: string;
+  strata_version: string;
+  sample_digest: string;
+  annotators: readonly { id: string; role: "annotator" | "adjudicator" }[];
+  review_process: string;
+  time_range: { from: string; to: string };
+  human_baseline: { source_ref: string; protocol: string; blinded: boolean };
+}
+
+function canonicalEvidence(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalEvidence);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalEvidence(item)]));
+  return value;
+}
+
+/** Digest includes gold truth, human baseline, and system results, with stable
+ * key/sample ordering so a report can reconstruct the exact labeled input. */
+export function qualitySampleDigest(samples: readonly QualitySample[]): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonicalEvidence([...samples].sort((a, b) => a.id.localeCompare(b.id))))).digest("hex")}`;
+}
+
+export function qualityProvenanceFailures(samples: readonly QualitySample[], provenance?: QualityEvidenceProvenance): string[] {
+  if (!provenance) return ["human annotation and baseline provenance is missing"];
+  const failures: string[] = [];
+  if (provenance.kind !== "human_annotated") failures.push("synthetic fixtures do not establish human quality evidence");
+  if (!provenance.dataset_version?.trim() || !provenance.strata_version?.trim()) failures.push("dataset and strata versions are required");
+  if (provenance.sample_digest !== qualitySampleDigest(samples)) failures.push("labeled sample digest does not match the report input");
+  if (!Array.isArray(provenance.annotators) || provenance.annotators.length < 2 || new Set(provenance.annotators.map((item) => item.id)).size !== provenance.annotators.length || provenance.annotators.some((item) => !item.id?.trim() || !["annotator", "adjudicator"].includes(item.role))) failures.push("independent annotator/adjudicator identities are required");
+  if (!provenance.review_process?.trim()) failures.push("annotation review process is required");
+  const from = Date.parse(provenance.time_range?.from); const to = Date.parse(provenance.time_range?.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) failures.push("annotation time range is invalid");
+  if (!provenance.human_baseline?.source_ref?.trim() || !provenance.human_baseline.protocol?.trim() || provenance.human_baseline.blinded !== true) failures.push("a blinded human baseline source and protocol are required");
+  return failures;
+}
 
 export type QualitySurface = "web" | "host";
 

@@ -2,8 +2,14 @@
 export interface ManifestCapability {
   id: string;
   state: "supported" | "unsupported";
+  implementation_state: "available" | "unavailable";
+  runtime_state: "enabled" | "disabled";
+  evidence_state: "verified" | "pending" | "failed";
+  evidence: readonly string[];
+  follow_up_state: "none" | "pending";
   detail: string;
   follow_up?: string;
+  follow_up_detail?: string;
 }
 
 export interface CompatibilityManifest {
@@ -85,23 +91,23 @@ export const TARIC_COMPATIBILITY_MANIFEST: CompatibilityManifest = {
       extension_api: "ExtensionAPI.on",
       detail: "Pi 1.1.0 lifecycle hooks and bound proposal/checkpoint/action/result/error paths are supported by the pinned host contract.",
     },
-    "deepseek-harness": { id: "deepseek_native_adapter", state: "supported", version: "0.2.0-rc.2", commit: "639ed01", contract: "@deepseek-ai/cordis@4.0.4", detail: "Locked DeepSeek Harness/Cordis lifecycle bridge with Core-scoped callbacks." },
-    hermes: { id: "hermes_native_adapter", state: "supported", version: "0.19.0", commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a", contract: "general-plugin-hooks-v1", detail: "Hermes general plugin with Core RPC for context and session/tool observation; no provider replacement." },
+    "deepseek-harness": { id: "deepseek_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", version: "0.2.0-rc.2", commit: "639ed01", contract: "@deepseek-ai/cordis@4.0.4", detail: "Locked DeepSeek Harness/Cordis lifecycle bridge with Core-scoped callbacks." },
+    hermes: { id: "hermes_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/hermes-plugin/tests/test_plugin.py"], follow_up_state: "none", version: "0.19.0", commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a", contract: "general-plugin-hooks-v1", detail: "Hermes general plugin with Core RPC for context and session/tool observation; no provider replacement." },
   },
   capabilities: [
-    { id: "cli.operator", state: "supported", detail: "JSON 输入输出、stderr 诊断与非零退出码。" },
-    { id: "mcp.stdio_model_tools", state: "supported", detail: "initialize/tools/list/tools/call；stdout 仅协议 JSON。" },
-    { id: "pi_native_adapter", state: "supported", detail: "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。" },
-    { id: "pi.session_lifecycle", state: "supported", detail: "session_start 已接入受认证 Core client。" },
-    { id: "pi.context_injection", state: "supported", detail: "context 与 before_agent_start 返回 Taric Context Pack。" },
-    { id: "pi.proposal_checkpoint_action_result_hooks", state: "supported", detail: "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client." },
-    { id: "artifact.task_session_content", state: "supported", detail: "Authenticated host/operator Core operations bind task sessions and store opaque bytes; explicit content reads require a separately granted content_read capability." },
-    { id: "deepseek_native_adapter", state: "supported", detail: "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks." },
-    { id: "hermes_native_adapter", state: "supported", detail: "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported." },
-    { id: "storage.postgresql", state: "unsupported", detail: "首发只支持 SQLite WAL。", follow_up: "add-shared-authority-backend" },
-    { id: "git.remote_push", state: "supported", detail: "仅在 Engagement 明确授权且真实扫描 callback 通过后推送；失败可重试。" },
-    { id: "secrets.external_scanner", state: "supported", detail: "由宿主提供真实 scanner callback，并记录 tool version/result hash。" },
-    { id: "quality.full_statistical_evaluation", state: "unsupported", detail: "precision/recall/95% CI 未交付。", follow_up: "validate-memory-quality" },
-    { id: "graph.relation_impact", state: "supported", detail: "类型化关系、三方 patch、冲突证据和 bounded impact continuation 已交付。" },
+    { id: "cli.operator", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/cli/test/bin.test.mjs"], follow_up_state: "none", detail: "JSON 输入输出、stderr 诊断与非零退出码。" },
+    { id: "mcp.stdio_model_tools", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/mcp/test/stdio.test.mjs"], follow_up_state: "none", detail: "initialize/tools/list/tools/call；stdout 仅协议 JSON。" },
+    { id: "pi_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。" },
+    { id: "pi.session_lifecycle", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "session_start 已接入受认证 Core client。" },
+    { id: "pi.context_injection", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "context 与 before_agent_start 返回 Taric Context Pack。" },
+    { id: "pi.proposal_checkpoint_action_result_hooks", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client." },
+    { id: "artifact.task_session_content", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/artifact-content.test.mjs", "packages/core/test/artifact-durability.test.mjs"], follow_up_state: "none", detail: "Authenticated host/operator operations store opaque bytes; explicit content reads require content_read. Publication markers support process-crash recovery; power-loss durability is not claimed." },
+    { id: "deepseek_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks." },
+    { id: "hermes_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/hermes-plugin/tests/test_plugin.py"], follow_up_state: "none", detail: "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported." },
+    { id: "storage.postgresql", state: "supported", implementation_state: "available", runtime_state: "disabled", evidence_state: "verified", evidence: ["packages/core/test/runtime-conformance.test.mjs", "packages/core/test/postgres-live.test.mjs", "packages/core/test/postgres-runtime-readiness.test.mjs", "packages/core/test/async-unit-of-work.test.mjs", "packages/core/test/artifact-async.test.mjs"], follow_up_state: "none", detail: "SQLite and PostgreSQL share the asynchronous Core governance unit of work. Multi-host runtime activation requires matching isolated live conformance evidence and current schema/lease health; the single-host default keeps it disabled." },
+    { id: "git.remote_push", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/evolution-memory.test.mjs"], follow_up_state: "none", detail: "仅在 Engagement 明确授权且真实扫描 callback 通过后推送；失败可重试。" },
+    { id: "secrets.external_scanner", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/projection.test.mjs"], follow_up_state: "none", detail: "由宿主提供真实 scanner callback，并记录 tool version/result hash。" },
+    { id: "quality.full_statistical_evaluation", state: "unsupported", implementation_state: "available", runtime_state: "disabled", evidence_state: "pending", evidence: ["packages/core/test/quality.test.mjs"], follow_up_state: "pending", detail: "Stratified precision/recall, calibration and 95% CI algorithms are available; representative human-annotated release evidence is pending.", follow_up: "harden-taric-authority-runtime", follow_up_detail: "Collect independently annotated versioned samples and human baseline provenance; synthetic fixtures do not establish production quality." },
+    { id: "graph.relation_impact", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/evolution-memory.test.mjs"], follow_up_state: "none", detail: "类型化关系、三方 patch、冲突证据和 bounded impact continuation 已交付。" },
   ],
 };

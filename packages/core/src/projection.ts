@@ -236,7 +236,7 @@ async function readPins(outputDir: string): Promise<string[]> {
   } catch { return []; }
 }
 export async function publishProjection(store: AuthorityStore, options: ProjectionOptions): Promise<ProjectionResult> {
-  const snapshot = store.snapshot(options.engagementId, { includeCandidates: false });
+  const snapshot = await store.snapshot(options.engagementId, { includeCandidates: false });
   // A publication is immutable even if the authority has not advanced. This
   // keeps readers pinned to an old directory safe during republishing.
   const generation = `generation-${snapshot.read_seq}-${randomBytes(8).toString("hex")}`;

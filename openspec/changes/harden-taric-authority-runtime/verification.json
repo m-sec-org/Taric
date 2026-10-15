@@ -1,0 +1,2999 @@
+{
+  "version": "harden-authority-verification/1",
+  "base_commit": "23c6783ebd34703cc258a6981e8a83953f6f30e6",
+  "source_digest": "sha256:1fb1e402891590670d8e8df148e47c7dd0eb12708d38e77ced96aba9c185012a",
+  "schema_digest": "sha256:6b9b69d08049409faf9b92dd32ed5105ad1f611db50c9b076ba79d90594244ce",
+  "policy_digest": "sha256:264736f0b5c561c870f9aa9a94a539123ffe0f80901d98c0944131d0b2a27e13",
+  "fixture_digest": "sha256:8807586ec9f7a77aa11d0746dda14765228d5b0071145fdedcde76dd135f2c11",
+  "configuration": {
+    "node": "v22.21.1",
+    "platform": "darwin",
+    "checkout": "current source exported into an empty temporary directory",
+    "spec_count": 14,
+    "operation_count": 50,
+    "schema_definition_count": 64,
+    "live_postgresql": true
+  },
+  "technical_passed": true,
+  "runtime_verified": true,
+  "implementation_complete": true,
+  "release_state": "blocked",
+  "checks": [
+    {
+      "id": "dependencies",
+      "passed": true,
+      "elapsed_ms": 3134.812357,
+      "command": "npm ci --ignore-scripts",
+      "output_digest": "sha256:237e1bf400bfe284fc3ffdf1a440477981271d1232904024dad66fff2bc0da3e"
+    },
+    {
+      "id": "clean-build",
+      "passed": true,
+      "elapsed_ms": 20311.923574,
+      "command": "npm run build",
+      "output_digest": "sha256:5a3f0fadc2b145069bd2794c4718c950e69e849522dc66a7aedf94f928f7ae8b"
+    },
+    {
+      "id": "typecheck",
+      "passed": true,
+      "elapsed_ms": 19418.391859999996,
+      "command": "npm run typecheck",
+      "output_digest": "sha256:648a58b1abc8f28db25cd481d6ac1504d91f1a2dd836e244fb8b6ee0b6410197"
+    },
+    {
+      "id": "tests:schemas",
+      "passed": true,
+      "elapsed_ms": 829.4161680000034,
+      "command": "/opt/local/bin/node --test --test-concurrency=2 --test-reporter=tap",
+      "output_digest": "sha256:39f28c2869071ff0a95dcd76cb3df1f5bcd1b1934fadf0e7918fa67e451edc74"
+    },
+    {
+      "id": "tests:core",
+      "passed": true,
+      "elapsed_ms": 80307.14739,
+      "command": "/opt/local/bin/node --test --test-concurrency=2 --test-reporter=tap",
+      "output_digest": "sha256:75ecb215711091362b12e6cd540e2be5694e01d6765a44f477b430e8f411c6fc"
+    },
+    {
+      "id": "tests:cli",
+      "passed": true,
+      "elapsed_ms": 11795.016965000003,
+      "command": "/opt/local/bin/node --test --test-concurrency=2 --test-reporter=tap",
+      "output_digest": "sha256:b21d74be960899d7b7dce811ff470000c450bd7f11da9075da2f5cfdf521f69b"
+    },
+    {
+      "id": "tests:mcp",
+      "passed": true,
+      "elapsed_ms": 4762.726250000007,
+      "command": "/opt/local/bin/node --test --test-concurrency=2 --test-reporter=tap",
+      "output_digest": "sha256:62036473e717f53fc23d793d632d587003a95a7b1523d3f9ec9ab6ffe7bac3b2"
+    },
+    {
+      "id": "tests:hermes",
+      "passed": true,
+      "elapsed_ms": 615.1262479999859,
+      "command": "python3 -m unittest discover -s tests",
+      "output_digest": "sha256:0f7e4b97443e54aca647179972594d13bb587afcbf151fab8228148587ea844a"
+    },
+    {
+      "id": "documentation-links",
+      "passed": true,
+      "elapsed_ms": 273.81079100002535,
+      "command": "/opt/local/bin/node scripts/check-doc-links.mjs",
+      "output_digest": "sha256:a51d5106e951ff51c9db0712b5f636483ce1595756d03d27f7cbb58391d1b8b0"
+    },
+    {
+      "id": "postgresql-runtime",
+      "passed": true,
+      "elapsed_ms": 17213.104291000025,
+      "command": "/opt/local/bin/node scripts/verify-postgres-runtime.mjs --output /var/folders/lt/32z29b790x1gnscj2881bg7w0000gn/T/taric-clean-verification-GRtbk1/postgres-runtime-verification.json",
+      "output_digest": "sha256:5bd90a7d3c92b26657b3a91b8d55c3cbd5248af1b2045d630f0e2cf23735418a"
+    }
+  ],
+  "test_counts": [
+    {
+      "package": "schemas",
+      "tests": 9,
+      "pass": 9,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "package": "core",
+      "tests": 266,
+      "pass": 266,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "package": "cli",
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "package": "mcp",
+      "tests": 12,
+      "pass": 12,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "package": "hermes",
+      "tests": 5,
+      "pass": 5,
+      "fail": 0,
+      "skipped": 0
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cli.operator",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/cli/test/bin.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "JSON 输入输出、stderr 诊断与非零退出码。"
+    },
+    {
+      "id": "mcp.stdio_model_tools",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/mcp/test/stdio.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "initialize/tools/list/tools/call；stdout 仅协议 JSON。"
+    },
+    {
+      "id": "pi_native_adapter",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/host-adapters.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。"
+    },
+    {
+      "id": "pi.session_lifecycle",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/host-adapters.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "session_start 已接入受认证 Core client。"
+    },
+    {
+      "id": "pi.context_injection",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/host-adapters.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "context 与 before_agent_start 返回 Taric Context Pack。"
+    },
+    {
+      "id": "pi.proposal_checkpoint_action_result_hooks",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/host-adapters.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client."
+    },
+    {
+      "id": "artifact.task_session_content",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/artifact-content.test.mjs",
+        "packages/core/test/artifact-durability.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "Authenticated host/operator operations store opaque bytes; explicit content reads require content_read. Publication markers support process-crash recovery; power-loss durability is not claimed."
+    },
+    {
+      "id": "deepseek_native_adapter",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/host-adapters.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks."
+    },
+    {
+      "id": "hermes_native_adapter",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/hermes-plugin/tests/test_plugin.py"
+      ],
+      "follow_up_state": "none",
+      "detail": "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported."
+    },
+    {
+      "id": "storage.postgresql",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "disabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/runtime-conformance.test.mjs",
+        "packages/core/test/postgres-live.test.mjs",
+        "packages/core/test/postgres-runtime-readiness.test.mjs",
+        "packages/core/test/async-unit-of-work.test.mjs",
+        "packages/core/test/artifact-async.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "SQLite and PostgreSQL share the asynchronous Core governance unit of work. Multi-host runtime activation requires matching isolated live conformance evidence and current schema/lease health; the single-host default keeps it disabled."
+    },
+    {
+      "id": "git.remote_push",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/evolution-memory.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "仅在 Engagement 明确授权且真实扫描 callback 通过后推送；失败可重试。"
+    },
+    {
+      "id": "secrets.external_scanner",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/projection.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "由宿主提供真实 scanner callback，并记录 tool version/result hash。"
+    },
+    {
+      "id": "quality.full_statistical_evaluation",
+      "state": "unsupported",
+      "implementation_state": "available",
+      "runtime_state": "disabled",
+      "evidence_state": "pending",
+      "evidence": [
+        "packages/core/test/quality.test.mjs"
+      ],
+      "follow_up_state": "pending",
+      "detail": "Stratified precision/recall, calibration and 95% CI algorithms are available; representative human-annotated release evidence is pending.",
+      "follow_up": "harden-taric-authority-runtime",
+      "follow_up_detail": "Collect independently annotated versioned samples and human baseline provenance; synthetic fixtures do not establish production quality."
+    },
+    {
+      "id": "graph.relation_impact",
+      "state": "supported",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "evidence": [
+        "packages/core/test/evolution-memory.test.mjs"
+      ],
+      "follow_up_state": "none",
+      "detail": "类型化关系、三方 patch、冲突证据和 bounded impact continuation 已交付。"
+    }
+  ],
+  "quality": {
+    "version": "release-report/1",
+    "digests": {
+      "commit": "sha256:1fb1e402891590670d8e8df148e47c7dd0eb12708d38e77ced96aba9c185012a",
+      "schema": "sha256:6b9b69d08049409faf9b92dd32ed5105ad1f611db50c9b076ba79d90594244ce",
+      "policy": "sha256:264736f0b5c561c870f9aa9a94a539123ffe0f80901d98c0944131d0b2a27e13",
+      "fixture": "sha256:8807586ec9f7a77aa11d0746dda14765228d5b0071145fdedcde76dd135f2c11"
+    },
+    "configuration": {
+      "minimumSampleCount": 30,
+      "calibrationBinCount": 10,
+      "requiredStrata": [
+        {
+          "surface": "host",
+          "riskClass": "critical",
+          "evidenceLevel": "conflict"
+        },
+        {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "corroborated"
+        },
+        {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "direct"
+        },
+        {
+          "surface": "web",
+          "riskClass": "critical",
+          "evidenceLevel": "untrusted"
+        },
+        {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "direct"
+        },
+        {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "forged"
+        },
+        {
+          "surface": "web",
+          "riskClass": "medium",
+          "evidenceLevel": "direct"
+        }
+      ],
+      "requiredGateIds": [
+        "clean-build",
+        "dependencies",
+        "documentation-links",
+        "postgresql-runtime",
+        "tests:cli",
+        "tests:core",
+        "tests:hermes",
+        "tests:mcp",
+        "tests:schemas",
+        "typecheck"
+      ]
+    },
+    "sampleCount": 0,
+    "quality": {
+      "version": "quality-evaluation/1",
+      "minimumSampleCount": 30,
+      "passed": false,
+      "strata": [
+        {
+          "surface": "host",
+          "riskClass": "critical",
+          "evidenceLevel": "conflict",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "corroborated",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "direct",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "web",
+          "riskClass": "critical",
+          "evidenceLevel": "untrusted",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "direct",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "forged",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        },
+        {
+          "surface": "web",
+          "riskClass": "medium",
+          "evidenceLevel": "direct",
+          "sampleCount": 0,
+          "minimumSampleCount": 30,
+          "status": "insufficient",
+          "passed": false,
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "humanBaseline": {
+            "finding": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            },
+            "retrieval": {
+              "precision": null,
+              "precision95CI": null,
+              "recall": null,
+              "recall95CI": null,
+              "truePositive": 0,
+              "falsePositive": 0,
+              "falseNegative": 0
+            }
+          },
+          "unsupportedClaim": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "coverageMiss": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "guard": {
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "erroneousPropagation": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "writeLatency": {
+            "sampleCount": 0,
+            "meanMs": null,
+            "p50Ms": null,
+            "p95Ms": null,
+            "maxMs": null
+          },
+          "recoverySuccess": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null
+          },
+          "calibration": {
+            "expectedCalibrationError": null,
+            "expectedCalibrationError95CI": null,
+            "binCount": 10
+          },
+          "reviewAgreement": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": null,
+            "rate95CI": null,
+            "cohenKappa": null
+          }
+        }
+      ]
+    },
+    "strata": [
+      {
+        "surface": "host",
+        "riskClass": "critical",
+        "evidenceLevel": "conflict",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "host",
+        "riskClass": "high",
+        "evidenceLevel": "corroborated",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "host",
+        "riskClass": "high",
+        "evidenceLevel": "direct",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "web",
+        "riskClass": "critical",
+        "evidenceLevel": "untrusted",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "web",
+        "riskClass": "high",
+        "evidenceLevel": "direct",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "web",
+        "riskClass": "high",
+        "evidenceLevel": "forged",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      },
+      {
+        "surface": "web",
+        "riskClass": "medium",
+        "evidenceLevel": "direct",
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "status": "insufficient",
+        "passed": false,
+        "finding": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "retrieval": {
+          "precision": null,
+          "precision95CI": null,
+          "recall": null,
+          "recall95CI": null,
+          "truePositive": 0,
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "humanBaseline": {
+          "finding": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          },
+          "retrieval": {
+            "precision": null,
+            "precision95CI": null,
+            "recall": null,
+            "recall95CI": null,
+            "truePositive": 0,
+            "falsePositive": 0,
+            "falseNegative": 0
+          }
+        },
+        "unsupportedClaim": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "coverageMiss": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "guard": {
+          "falsePositive": 0,
+          "falseNegative": 0
+        },
+        "erroneousPropagation": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "writeLatency": {
+          "sampleCount": 0,
+          "meanMs": null,
+          "p50Ms": null,
+          "p95Ms": null,
+          "maxMs": null
+        },
+        "recoverySuccess": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null
+        },
+        "calibration": {
+          "expectedCalibrationError": null,
+          "expectedCalibrationError95CI": null,
+          "binCount": 10
+        },
+        "reviewAgreement": {
+          "numerator": 0,
+          "denominator": 0,
+          "rate": null,
+          "rate95CI": null,
+          "cohenKappa": null
+        }
+      }
+    ],
+    "gates": [
+      {
+        "id": "clean-build",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:5a3f0fadc2b145069bd2794c4718c950e69e849522dc66a7aedf94f928f7ae8b"
+        ]
+      },
+      {
+        "id": "dependencies",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:237e1bf400bfe284fc3ffdf1a440477981271d1232904024dad66fff2bc0da3e"
+        ]
+      },
+      {
+        "id": "documentation-links",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:a51d5106e951ff51c9db0712b5f636483ce1595756d03d27f7cbb58391d1b8b0"
+        ]
+      },
+      {
+        "id": "postgresql-runtime",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:5bd90a7d3c92b26657b3a91b8d55c3cbd5248af1b2045d630f0e2cf23735418a"
+        ]
+      },
+      {
+        "id": "tests:cli",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:b21d74be960899d7b7dce811ff470000c450bd7f11da9075da2f5cfdf521f69b"
+        ]
+      },
+      {
+        "id": "tests:core",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:75ecb215711091362b12e6cd540e2be5694e01d6765a44f477b430e8f411c6fc"
+        ]
+      },
+      {
+        "id": "tests:hermes",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:0f7e4b97443e54aca647179972594d13bb587afcbf151fab8228148587ea844a"
+        ]
+      },
+      {
+        "id": "tests:mcp",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:62036473e717f53fc23d793d632d587003a95a7b1523d3f9ec9ab6ffe7bac3b2"
+        ]
+      },
+      {
+        "id": "tests:schemas",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:39f28c2869071ff0a95dcd76cb3df1f5bcd1b1934fadf0e7918fa67e451edc74"
+        ]
+      },
+      {
+        "id": "typecheck",
+        "required": true,
+        "passed": true,
+        "reason": null,
+        "expectedEvidence": [],
+        "actualEvidence": [],
+        "evidence": [
+          "sha256:648a58b1abc8f28db25cd481d6ac1504d91f1a2dd836e244fb8b6ee0b6410197"
+        ]
+      }
+    ],
+    "failures": [
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "host",
+          "riskClass": "critical",
+          "evidenceLevel": "conflict"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "corroborated"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "host",
+          "riskClass": "high",
+          "evidenceLevel": "direct"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "web",
+          "riskClass": "critical",
+          "evidenceLevel": "untrusted"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "direct"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "web",
+          "riskClass": "high",
+          "evidenceLevel": "forged"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "insufficient-stratum",
+        "stratum": {
+          "surface": "web",
+          "riskClass": "medium",
+          "evidenceLevel": "direct"
+        },
+        "sampleCount": 0,
+        "minimumSampleCount": 30,
+        "reason": "stratum has 0 samples; 30 required"
+      },
+      {
+        "kind": "quality-provenance",
+        "reason": "human annotation and baseline provenance is missing"
+      }
+    ],
+    "passed": false,
+    "quality_provenance": null,
+    "evidence_state": "pending",
+    "capabilities": [
+      {
+        "id": "cli.operator",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/cli/test/bin.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "JSON 输入输出、stderr 诊断与非零退出码。"
+      },
+      {
+        "id": "mcp.stdio_model_tools",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/mcp/test/stdio.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "initialize/tools/list/tools/call；stdout 仅协议 JSON。"
+      },
+      {
+        "id": "pi_native_adapter",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/host-adapters.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。"
+      },
+      {
+        "id": "pi.session_lifecycle",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/host-adapters.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "session_start 已接入受认证 Core client。"
+      },
+      {
+        "id": "pi.context_injection",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/host-adapters.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "context 与 before_agent_start 返回 Taric Context Pack。"
+      },
+      {
+        "id": "pi.proposal_checkpoint_action_result_hooks",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/host-adapters.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client."
+      },
+      {
+        "id": "artifact.task_session_content",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/artifact-content.test.mjs",
+          "packages/core/test/artifact-durability.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "Authenticated host/operator operations store opaque bytes; explicit content reads require content_read. Publication markers support process-crash recovery; power-loss durability is not claimed."
+      },
+      {
+        "id": "deepseek_native_adapter",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/host-adapters.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks."
+      },
+      {
+        "id": "hermes_native_adapter",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/hermes-plugin/tests/test_plugin.py"
+        ],
+        "follow_up_state": "none",
+        "detail": "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported."
+      },
+      {
+        "id": "storage.postgresql",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "disabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/runtime-conformance.test.mjs",
+          "packages/core/test/postgres-live.test.mjs",
+          "packages/core/test/postgres-runtime-readiness.test.mjs",
+          "packages/core/test/async-unit-of-work.test.mjs",
+          "packages/core/test/artifact-async.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "SQLite and PostgreSQL share the asynchronous Core governance unit of work. Multi-host runtime activation requires matching isolated live conformance evidence and current schema/lease health; the single-host default keeps it disabled."
+      },
+      {
+        "id": "git.remote_push",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/evolution-memory.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "仅在 Engagement 明确授权且真实扫描 callback 通过后推送；失败可重试。"
+      },
+      {
+        "id": "secrets.external_scanner",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/projection.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "由宿主提供真实 scanner callback，并记录 tool version/result hash。"
+      },
+      {
+        "id": "quality.full_statistical_evaluation",
+        "state": "unsupported",
+        "implementation_state": "available",
+        "runtime_state": "disabled",
+        "evidence_state": "pending",
+        "evidence": [
+          "packages/core/test/quality.test.mjs"
+        ],
+        "follow_up_state": "pending",
+        "detail": "Stratified precision/recall, calibration and 95% CI algorithms are available; representative human-annotated release evidence is pending.",
+        "follow_up": "harden-taric-authority-runtime",
+        "follow_up_detail": "Collect independently annotated versioned samples and human baseline provenance; synthetic fixtures do not establish production quality."
+      },
+      {
+        "id": "graph.relation_impact",
+        "state": "supported",
+        "implementation_state": "available",
+        "runtime_state": "enabled",
+        "evidence_state": "verified",
+        "evidence": [
+          "packages/core/test/evolution-memory.test.mjs"
+        ],
+        "follow_up_state": "none",
+        "detail": "类型化关系、三方 patch、冲突证据和 bounded impact continuation 已交付。"
+      }
+    ]
+  },
+  "shared_authority": {
+    "version": "shared-authority-release/1",
+    "profile": "multi_host_authority",
+    "backend": "postgresql",
+    "status": "enabled",
+    "enabled": true,
+    "diagnostics": {
+      "profile": "multi_host_authority",
+      "backend": "postgresql",
+      "enabled": true,
+      "host_count": 1,
+      "lease_mode": "server_fenced",
+      "authority_service": {
+        "configured": true,
+        "available": true,
+        "shared": true,
+        "count": 1
+      }
+    },
+    "schema_version": "1.0.0",
+    "schema_digest": "sha256:6b9b69d08049409faf9b92dd32ed5105ad1f611db50c9b076ba79d90594244ce",
+    "policy_digest": "sha256:264736f0b5c561c870f9aa9a94a539123ffe0f80901d98c0944131d0b2a27e13",
+    "backup": {
+      "verified": true,
+      "schema_version": "1.0.0",
+      "source_sequence": 107,
+      "recovered_sequence": 4,
+      "restored_source_sequence": 107,
+      "backup_timestamp": "2026-10-15T02:38:02.272Z",
+      "integrity": "sha256:88b44c6ae2572f2b1c4224f9d9d22f30c8b2141dcbcb4a06b6af822900ab25bd",
+      "engagement_id": "01a13d6c-7ac1-75b3-984b-ae7c0cb142f7",
+      "provenance_verified": true,
+      "revisions_verified": true,
+      "unresolved_errors": []
+    },
+    "recovered_sequence": 4,
+    "conformance": {
+      "passed": true,
+      "suite_version": "authority-runtime-conformance/1",
+      "evidence": [
+        "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+        "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS",
+        "authenticated principal controls review identity and author cannot review own proposal",
+        "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall",
+        "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact",
+        "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+        "committed executable checkpoint survives resume with fixed visible state",
+        "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+        "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry",
+        "immutable proposal/evidence/review hashes and request-bound review retries are verified",
+        "integrity and schema version failures leave an independent restore destination unmodified",
+        "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+        "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+        "later inserts and updates remain absent from pinned pages, snapshots and getAt",
+        "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+        "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes",
+        "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+        "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+        "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+        "request-bound proposal idempotency preserves one pending envelope",
+        "server expiry fences renew and reclaim creates one new generation and Attempt",
+        "stale model proposal is explicitly quarantined and cannot create a canonical record",
+        "unknown action stays pending until explicit current-owner reconciliation",
+        "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version"
+      ]
+    },
+    "gates": [
+      {
+        "id": "backup-restore",
+        "passed": true,
+        "required": true,
+        "reason": null,
+        "evidence": [
+          "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS",
+          "integrity and schema version failures leave an independent restore destination unmodified"
+        ]
+      },
+      {
+        "id": "failure-recovery",
+        "passed": true,
+        "required": true,
+        "reason": null,
+        "evidence": [
+          "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes",
+          "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed"
+        ]
+      },
+      {
+        "id": "lease-fencing",
+        "passed": true,
+        "required": true,
+        "reason": null,
+        "evidence": [
+          "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+          "stale model proposal is explicitly quarantined and cannot create a canonical record"
+        ]
+      },
+      {
+        "id": "reader-pin",
+        "passed": true,
+        "required": true,
+        "reason": null,
+        "evidence": [
+          "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+          "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+        ]
+      },
+      {
+        "id": "storage-conformance",
+        "passed": true,
+        "required": true,
+        "reason": null,
+        "evidence": [
+          "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+          "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+        ]
+      }
+    ],
+    "failures": [],
+    "implementation_state": "available",
+    "runtime_state": "enabled",
+    "evidence_state": "verified",
+    "runtime_conformance": {
+      "version": "authority-runtime-conformance/1",
+      "passed": true,
+      "missing_methods": [],
+      "scenarios": [
+        {
+          "id": "proposal",
+          "passed": true,
+          "evidence": [
+            "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+            "request-bound proposal idempotency preserves one pending envelope"
+          ]
+        },
+        {
+          "id": "review",
+          "passed": true,
+          "evidence": [
+            "authenticated principal controls review identity and author cannot review own proposal",
+            "immutable proposal/evidence/review hashes and request-bound review retries are verified"
+          ]
+        },
+        {
+          "id": "admission_l1",
+          "passed": true,
+          "evidence": [
+            "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+            "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall"
+          ]
+        },
+        {
+          "id": "admission_l2",
+          "passed": true,
+          "evidence": [
+            "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version",
+            "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact"
+          ]
+        },
+        {
+          "id": "checkpoint",
+          "passed": true,
+          "evidence": [
+            "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+            "committed executable checkpoint survives resume with fixed visible state"
+          ]
+        },
+        {
+          "id": "action",
+          "passed": true,
+          "evidence": [
+            "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+            "unknown action stays pending until explicit current-owner reconciliation"
+          ]
+        },
+        {
+          "id": "artifact",
+          "passed": true,
+          "evidence": [
+            "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+            "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes"
+          ]
+        },
+        {
+          "id": "lease",
+          "passed": true,
+          "evidence": [
+            "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+            "server expiry fences renew and reclaim creates one new generation and Attempt"
+          ]
+        },
+        {
+          "id": "fencing",
+          "passed": true,
+          "evidence": [
+            "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+            "stale model proposal is explicitly quarantined and cannot create a canonical record"
+          ]
+        },
+        {
+          "id": "audit_outbox",
+          "passed": true,
+          "evidence": [
+            "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+            "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+          ]
+        },
+        {
+          "id": "pinned_read",
+          "passed": true,
+          "evidence": [
+            "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+            "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+          ]
+        },
+        {
+          "id": "backup_restore",
+          "passed": true,
+          "evidence": [
+            "integrity and schema version failures leave an independent restore destination unmodified",
+            "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS"
+          ]
+        }
+      ],
+      "failures": []
+    }
+  },
+  "postgres_runtime": {
+    "version": "taric-runtime-activation/1",
+    "backend": "postgresql",
+    "implementation_digest": "sha256:87ddc284ae7528b13ba6475d1070c6effbdc2f5a1f7fd030b46232c57587e8c0",
+    "schema_version": "1.0.0",
+    "schema_digest": "sha256:6b9b69d08049409faf9b92dd32ed5105ad1f611db50c9b076ba79d90594244ce",
+    "policy_digest": "sha256:264736f0b5c561c870f9aa9a94a539123ffe0f80901d98c0944131d0b2a27e13",
+    "generated_at": "2026-10-15T02:38:06.136Z",
+    "runtime_conformance": {
+      "version": "authority-runtime-conformance/1",
+      "passed": true,
+      "missing_methods": [],
+      "scenarios": [
+        {
+          "id": "proposal",
+          "passed": true,
+          "evidence": [
+            "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+            "request-bound proposal idempotency preserves one pending envelope"
+          ]
+        },
+        {
+          "id": "review",
+          "passed": true,
+          "evidence": [
+            "authenticated principal controls review identity and author cannot review own proposal",
+            "immutable proposal/evidence/review hashes and request-bound review retries are verified"
+          ]
+        },
+        {
+          "id": "admission_l1",
+          "passed": true,
+          "evidence": [
+            "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+            "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall"
+          ]
+        },
+        {
+          "id": "admission_l2",
+          "passed": true,
+          "evidence": [
+            "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version",
+            "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact"
+          ]
+        },
+        {
+          "id": "checkpoint",
+          "passed": true,
+          "evidence": [
+            "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+            "committed executable checkpoint survives resume with fixed visible state"
+          ]
+        },
+        {
+          "id": "action",
+          "passed": true,
+          "evidence": [
+            "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+            "unknown action stays pending until explicit current-owner reconciliation"
+          ]
+        },
+        {
+          "id": "artifact",
+          "passed": true,
+          "evidence": [
+            "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+            "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes"
+          ]
+        },
+        {
+          "id": "lease",
+          "passed": true,
+          "evidence": [
+            "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+            "server expiry fences renew and reclaim creates one new generation and Attempt"
+          ]
+        },
+        {
+          "id": "fencing",
+          "passed": true,
+          "evidence": [
+            "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+            "stale model proposal is explicitly quarantined and cannot create a canonical record"
+          ]
+        },
+        {
+          "id": "audit_outbox",
+          "passed": true,
+          "evidence": [
+            "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+            "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+          ]
+        },
+        {
+          "id": "pinned_read",
+          "passed": true,
+          "evidence": [
+            "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+            "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+          ]
+        },
+        {
+          "id": "backup_restore",
+          "passed": true,
+          "evidence": [
+            "integrity and schema version failures leave an independent restore destination unmodified",
+            "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS"
+          ]
+        }
+      ],
+      "failures": []
+    },
+    "postgres_version": "PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+    "readiness": {
+      "version": "postgres-runtime-readiness/1",
+      "backend": "postgresql",
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "code": "ready",
+      "health": {
+        "available": true,
+        "schema_valid": true,
+        "fencing": true,
+        "read_seq": 103,
+        "watermarks": {
+          "committed_seq": 103,
+          "projected_seq": 87,
+          "indexed_seq": 0
+        }
+      },
+      "domains": [
+        {
+          "id": "proposal",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "review",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "admission_l1",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "admission_l2",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "checkpoint",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "action",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "artifact",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "lease",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "fencing",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "audit_outbox",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "pinned_read",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        },
+        {
+          "id": "backup_restore",
+          "missing_methods": [],
+          "missing_tables": [],
+          "missing_columns": [],
+          "persistence_shape": "available",
+          "runtime_evidence": "passed"
+        }
+      ],
+      "conformance": {
+        "version": "authority-runtime-conformance/1",
+        "passed": true,
+        "missing_methods": [],
+        "scenarios": [
+          {
+            "id": "proposal",
+            "passed": true,
+            "evidence": [
+              "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+              "request-bound proposal idempotency preserves one pending envelope"
+            ]
+          },
+          {
+            "id": "review",
+            "passed": true,
+            "evidence": [
+              "authenticated principal controls review identity and author cannot review own proposal",
+              "immutable proposal/evidence/review hashes and request-bound review retries are verified"
+            ]
+          },
+          {
+            "id": "admission_l1",
+            "passed": true,
+            "evidence": [
+              "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+              "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall"
+            ]
+          },
+          {
+            "id": "admission_l2",
+            "passed": true,
+            "evidence": [
+              "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version",
+              "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact"
+            ]
+          },
+          {
+            "id": "checkpoint",
+            "passed": true,
+            "evidence": [
+              "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+              "committed executable checkpoint survives resume with fixed visible state"
+            ]
+          },
+          {
+            "id": "action",
+            "passed": true,
+            "evidence": [
+              "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+              "unknown action stays pending until explicit current-owner reconciliation"
+            ]
+          },
+          {
+            "id": "artifact",
+            "passed": true,
+            "evidence": [
+              "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+              "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes"
+            ]
+          },
+          {
+            "id": "lease",
+            "passed": true,
+            "evidence": [
+              "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+              "server expiry fences renew and reclaim creates one new generation and Attempt"
+            ]
+          },
+          {
+            "id": "fencing",
+            "passed": true,
+            "evidence": [
+              "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+              "stale model proposal is explicitly quarantined and cannot create a canonical record"
+            ]
+          },
+          {
+            "id": "audit_outbox",
+            "passed": true,
+            "evidence": [
+              "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+              "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+            ]
+          },
+          {
+            "id": "pinned_read",
+            "passed": true,
+            "evidence": [
+              "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+              "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+            ]
+          },
+          {
+            "id": "backup_restore",
+            "passed": true,
+            "evidence": [
+              "integrity and schema version failures leave an independent restore destination unmodified",
+              "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS"
+            ]
+          }
+        ],
+        "failures": []
+      }
+    },
+    "shared_authority": {
+      "version": "shared-authority-release/1",
+      "profile": "multi_host_authority",
+      "backend": "postgresql",
+      "status": "enabled",
+      "enabled": true,
+      "diagnostics": {
+        "profile": "multi_host_authority",
+        "backend": "postgresql",
+        "enabled": true,
+        "host_count": 1,
+        "lease_mode": "server_fenced",
+        "authority_service": {
+          "configured": true,
+          "available": true,
+          "shared": true,
+          "count": 1
+        }
+      },
+      "schema_version": "1.0.0",
+      "schema_digest": "sha256:6b9b69d08049409faf9b92dd32ed5105ad1f611db50c9b076ba79d90594244ce",
+      "policy_digest": "sha256:264736f0b5c561c870f9aa9a94a539123ffe0f80901d98c0944131d0b2a27e13",
+      "backup": {
+        "verified": true,
+        "schema_version": "1.0.0",
+        "source_sequence": 107,
+        "recovered_sequence": 4,
+        "restored_source_sequence": 107,
+        "backup_timestamp": "2026-10-15T02:38:02.272Z",
+        "integrity": "sha256:88b44c6ae2572f2b1c4224f9d9d22f30c8b2141dcbcb4a06b6af822900ab25bd",
+        "engagement_id": "01a13d6c-7ac1-75b3-984b-ae7c0cb142f7",
+        "provenance_verified": true,
+        "revisions_verified": true,
+        "unresolved_errors": []
+      },
+      "recovered_sequence": 4,
+      "conformance": {
+        "passed": true,
+        "suite_version": "authority-runtime-conformance/1",
+        "evidence": [
+          "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+          "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS",
+          "authenticated principal controls review identity and author cannot review own proposal",
+          "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall",
+          "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact",
+          "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+          "committed executable checkpoint survives resume with fixed visible state",
+          "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+          "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry",
+          "immutable proposal/evidence/review hashes and request-bound review retries are verified",
+          "integrity and schema version failures leave an independent restore destination unmodified",
+          "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+          "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+          "later inserts and updates remain absent from pinned pages, snapshots and getAt",
+          "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+          "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes",
+          "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+          "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+          "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+          "request-bound proposal idempotency preserves one pending envelope",
+          "server expiry fences renew and reclaim creates one new generation and Attempt",
+          "stale model proposal is explicitly quarantined and cannot create a canonical record",
+          "unknown action stays pending until explicit current-owner reconciliation",
+          "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version"
+        ]
+      },
+      "gates": [
+        {
+          "id": "backup-restore",
+          "passed": true,
+          "required": true,
+          "reason": null,
+          "evidence": [
+            "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS",
+            "integrity and schema version failures leave an independent restore destination unmodified"
+          ]
+        },
+        {
+          "id": "failure-recovery",
+          "passed": true,
+          "required": true,
+          "reason": null,
+          "evidence": [
+            "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes",
+            "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed"
+          ]
+        },
+        {
+          "id": "lease-fencing",
+          "passed": true,
+          "required": true,
+          "reason": null,
+          "evidence": [
+            "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+            "stale model proposal is explicitly quarantined and cannot create a canonical record"
+          ]
+        },
+        {
+          "id": "reader-pin",
+          "passed": true,
+          "required": true,
+          "reason": null,
+          "evidence": [
+            "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+            "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+          ]
+        },
+        {
+          "id": "storage-conformance",
+          "passed": true,
+          "required": true,
+          "reason": null,
+          "evidence": [
+            "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+            "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+          ]
+        }
+      ],
+      "failures": [],
+      "implementation_state": "available",
+      "runtime_state": "enabled",
+      "evidence_state": "verified",
+      "runtime_conformance": {
+        "version": "authority-runtime-conformance/1",
+        "passed": true,
+        "missing_methods": [],
+        "scenarios": [
+          {
+            "id": "proposal",
+            "passed": true,
+            "evidence": [
+              "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+              "request-bound proposal idempotency preserves one pending envelope"
+            ]
+          },
+          {
+            "id": "review",
+            "passed": true,
+            "evidence": [
+              "authenticated principal controls review identity and author cannot review own proposal",
+              "immutable proposal/evidence/review hashes and request-bound review retries are verified"
+            ]
+          },
+          {
+            "id": "admission_l1",
+            "passed": true,
+            "evidence": [
+              "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+              "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall"
+            ]
+          },
+          {
+            "id": "admission_l2",
+            "passed": true,
+            "evidence": [
+              "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version",
+              "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact"
+            ]
+          },
+          {
+            "id": "checkpoint",
+            "passed": true,
+            "evidence": [
+              "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+              "committed executable checkpoint survives resume with fixed visible state"
+            ]
+          },
+          {
+            "id": "action",
+            "passed": true,
+            "evidence": [
+              "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+              "unknown action stays pending until explicit current-owner reconciliation"
+            ]
+          },
+          {
+            "id": "artifact",
+            "passed": true,
+            "evidence": [
+              "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+              "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes"
+            ]
+          },
+          {
+            "id": "lease",
+            "passed": true,
+            "evidence": [
+              "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+              "server expiry fences renew and reclaim creates one new generation and Attempt"
+            ]
+          },
+          {
+            "id": "fencing",
+            "passed": true,
+            "evidence": [
+              "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+              "stale model proposal is explicitly quarantined and cannot create a canonical record"
+            ]
+          },
+          {
+            "id": "audit_outbox",
+            "passed": true,
+            "evidence": [
+              "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+              "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+            ]
+          },
+          {
+            "id": "pinned_read",
+            "passed": true,
+            "evidence": [
+              "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+              "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+            ]
+          },
+          {
+            "id": "backup_restore",
+            "passed": true,
+            "evidence": [
+              "integrity and schema version failures leave an independent restore destination unmodified",
+              "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS"
+            ]
+          }
+        ],
+        "failures": []
+      }
+    },
+    "database_backup": {
+      "verified": true,
+      "kind": "logical_database_dump",
+      "scope": "authority_schema",
+      "format": "pg_dump_custom",
+      "restore": "pg_restore_single_transaction",
+      "archive_bytes": 87333,
+      "archive_digest": "sha256:a14b85f3368ae64ce1881b8a94f728bf67dc23d321107a4a5802e7417a84a608",
+      "source_sequence": 107,
+      "recovered_sequence": 107,
+      "audit_verified": true,
+      "authority_verified": true,
+      "tables": [
+        {
+          "table": "action_intents",
+          "rows": 1,
+          "digest": "sha256:f29528f94bed245d81602a88b4a168c9cdee1dc020700273c0124fd2de02e589"
+        },
+        {
+          "table": "artifact_catalog",
+          "rows": 2,
+          "digest": "sha256:c1f4dce479317eedb42902389bf68c47b42b3454feec85be4d3f3c5948dae44a"
+        },
+        {
+          "table": "artifact_catalog_watermarks",
+          "rows": 2,
+          "digest": "sha256:5727f4f8a4080361b66b6d398c7b36ab0fe5e9501f8f1c794198585d7cae120a"
+        },
+        {
+          "table": "artifact_chunks",
+          "rows": 2,
+          "digest": "sha256:be632193106a682131a8470d226a2f26b98bb4517c9b479e686d2b1158168253"
+        },
+        {
+          "table": "artifact_idempotency",
+          "rows": 1,
+          "digest": "sha256:1cd0ec5967a749adfebed31984c7443ee2f2c1b4fbed77de0a8dd2aaf24d92a4"
+        },
+        {
+          "table": "artifact_publications",
+          "rows": 2,
+          "digest": "sha256:720e16ebd0d0bce8756e2c96f9a6bc47913877e692b6ec53a29f111358867ac2"
+        },
+        {
+          "table": "artifact_sessions",
+          "rows": 3,
+          "digest": "sha256:926ada4382fcb615f19b9c7179079904e3db29e9a978a39c1ec8151cc443e9b1"
+        },
+        {
+          "table": "artifact_uploads",
+          "rows": 1,
+          "digest": "sha256:082277eff2db614e24e63bf1cb5db59547c2f0b35319f636defe2af1931109c1"
+        },
+        {
+          "table": "attempts",
+          "rows": 6,
+          "digest": "sha256:7a3f9e3d41060f614002df4fcf3de2b5db5f8ea9778fca5244256af0b9833f26"
+        },
+        {
+          "table": "checkpoints",
+          "rows": 1,
+          "digest": "sha256:e934f0f5099a5100de98af2752d251d36d15417bfac4a9d15051d8f01b380c18"
+        },
+        {
+          "table": "events",
+          "rows": 107,
+          "digest": "sha256:f3ead229e4af3ca7978b1971bb9535f71f648fb7e793026ad3400e02a11c95a3"
+        },
+        {
+          "table": "execution_catalog",
+          "rows": 0,
+          "digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "table": "idempotency",
+          "rows": 11,
+          "digest": "sha256:e7bd83348f7f55d71fd85e28ff6dd1741761e3bfdf5efcfe5d103eee41923ef6"
+        },
+        {
+          "table": "metadata",
+          "rows": 5,
+          "digest": "sha256:ce5a528589adf7b4507dc509763b31447bcd1a034d40e4dd700f2e10fe8a9bf8"
+        },
+        {
+          "table": "object_refs",
+          "rows": 78,
+          "digest": "sha256:3940f3d60526416cc126a2d6762fac55c32304a84ad85591da5916c7c37bfe4a"
+        },
+        {
+          "table": "operation_markers",
+          "rows": 107,
+          "digest": "sha256:ab5bab8b7b4a94a6f770ccb10ffd96b8c0c1228641a8940e7ed8cf4d6d2bb5e5"
+        },
+        {
+          "table": "outbox",
+          "rows": 107,
+          "digest": "sha256:3787a95a1d2613278a9129b8fabd327ca962cfa550ebf62cd8ea7aadd1c38d66"
+        },
+        {
+          "table": "proposal_versions",
+          "rows": 11,
+          "digest": "sha256:84ad26b34ef1971e43da3cda589c6c744b514652e20c74266799a816590b3ced"
+        },
+        {
+          "table": "proposals",
+          "rows": 6,
+          "digest": "sha256:6b5abc193d890fa7fff3775f4a50aa82a3282f9da0fe47d8d04c053c0ad835b9"
+        },
+        {
+          "table": "reader_pins",
+          "rows": 0,
+          "digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        },
+        {
+          "table": "record_versions",
+          "rows": 68,
+          "digest": "sha256:b0434440a81a0acc6a46f4f132f26a34a50627f6209b4cb710047b14441ce90c"
+        },
+        {
+          "table": "records",
+          "rows": 63,
+          "digest": "sha256:52ef7f1f6941b2c22f5dbb561918574621395017c6865f82b91130707044d5d7"
+        },
+        {
+          "table": "reviews",
+          "rows": 4,
+          "digest": "sha256:250661b0e762ff8ec2e96fff2f5d51c1a1e1bbacfb7547394f860a54ed0bd78b"
+        },
+        {
+          "table": "work_runs",
+          "rows": 4,
+          "digest": "sha256:8b6819fe2ee4292ceec80484a07c128ce20276b867f532fe96db18cedb557e8b"
+        }
+      ],
+      "lease_policy": "isolated restored target remains offline; source writers must be fenced and leases reissued before switching traffic",
+      "payload_bytes_included": false
+    }
+  },
+  "blockers": [
+    "Representative human annotation and baseline evidence is pending; synthetic fixture cannot establish quality"
+  ]
+}

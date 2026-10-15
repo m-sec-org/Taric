@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSharedAuthorityReleaseEvidence } from "../dist/shared-authority-release.js";
+import { AUTHORITY_RUNTIME_SCENARIOS, AUTHORITY_RUNTIME_CONFORMANCE_VERSION } from "../dist/storage-contract.js";
 
 const required_gate_ids = ["storage-conformance", "lease-fencing", "reader-pin", "failure-recovery", "backup-restore"];
 const validBackup = {
@@ -16,6 +17,7 @@ const validBackup = {
   unresolved_errors: [],
 };
 const gates = required_gate_ids.map((id) => ({ id, passed: true, evidence: [`test:${id}`] }));
+const runtime_conformance = { version: AUTHORITY_RUNTIME_CONFORMANCE_VERSION, passed: true, missing_methods: [], failures: [], scenarios: AUTHORITY_RUNTIME_SCENARIOS.map((id) => ({ id, passed: true, evidence: [`test:runtime:${id}`] })) };
 
 test("single-host evidence explicitly reports Phase 5 disabled", () => {
   const report = buildSharedAuthorityReleaseEvidence({ schema_version: "taric-schema/1", policy_digest: `sha256:${"b".repeat(64)}` });
@@ -58,6 +60,7 @@ test("multi-host release is enabled only with passing gates and complete verifie
     required_gate_ids,
     gates,
     backup: validBackup,
+    runtime_conformance,
     conformance: { passed: true, suite_version: "storage-conformance/1", evidence: ["ci:run-42"] },
   });
   assert.equal(report.status, "enabled");

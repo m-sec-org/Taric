@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildReleaseReport, RELEASE_REPORT_VERSION } from "../dist/release-report.js";
+import { qualitySampleDigest } from "../dist/quality.js";
 
 const digests = {
   commit: `sha256:${"a".repeat(64)}`,
@@ -25,6 +26,7 @@ function sample(id, overrides = {}) {
     ...overrides
   };
 }
+const provenance = (samples) => ({ kind: "human_annotated", dataset_version: "test-dataset/1", strata_version: "web-host-risk-evidence/1", sample_digest: qualitySampleDigest(samples), annotators: [{ id: "annotator-a", role: "annotator" }, { id: "adjudicator-b", role: "adjudicator" }], review_process: "independent blind labeling followed by adjudication", time_range: { from: "2026-10-01T00:00:00Z", to: "2026-10-12T00:00:00Z" }, human_baseline: { source_ref: "test:baseline/1", protocol: "blinded same-query comparison", blinded: true } });
 
 test("release report preserves digests, configuration, stratified metrics, and deterministic ordering", () => {
   const rows = [
@@ -33,6 +35,7 @@ test("release report preserves digests, configuration, stratified metrics, and d
   ];
   const input = {
     samples: rows,
+    quality_provenance: provenance(rows),
     digests,
     config: {
       minimumSampleCount: 2,
@@ -110,6 +113,7 @@ test("required gate failures and insufficient strata fail closed with evidence",
 test("an optional failed gate does not block a sufficiently sampled quality report", () => {
   const report = buildReleaseReport({
     samples: [sample("a"), sample("b")],
+    quality_provenance: provenance([sample("a"), sample("b")]),
     digests,
     config: { minimumSampleCount: 2, requiredGateIds: ["required-pass"] },
     gates: [
@@ -121,6 +125,26 @@ test("an optional failed gate does not block a sufficiently sampled quality repo
   assert.equal(report.passed, true);
   assert.equal(report.gates.find((gate) => gate.id === "advisory-only").passed, false);
   assert.deepEqual(report.failures, []);
+});
+
+test("quality release evidence fails closed without real annotation provenance or a pinned sample", () => {
+  const samples = [sample("a"), sample("b")];
+  const input = { samples, digests, config: { minimumSampleCount: 2, requiredGateIds: ["required-pass"] }, gates: [{ id: "required-pass", passed: true }] };
+  const missing = buildReleaseReport(input);
+  assert.equal(missing.passed, false); assert.equal(missing.evidence_state, "pending");
+  assert.ok(missing.failures.some((failure) => failure.kind === "quality-provenance"));
+  const synthetic = buildReleaseReport({ ...input, quality_provenance: { ...provenance(samples), kind: "synthetic_fixture" } });
+  assert.equal(synthetic.passed, false); assert.match(synthetic.failures.at(-1).reason, /synthetic fixtures/);
+  const changed = buildReleaseReport({ ...input, samples: [sample("a", { findingTruth: false }), sample("b")], quality_provenance: provenance(samples) });
+  assert.equal(changed.passed, false); assert.ok(changed.failures.some((failure) => /digest/.test(failure.reason)));
+  const insufficient = buildReleaseReport({ ...input, config: { ...input.config, minimumSampleCount: 30 }, quality_provenance: provenance(samples) });
+  assert.equal(insufficient.passed, false); assert.ok(insufficient.failures.some((failure) => failure.kind === "insufficient-stratum"));
+});
+
+test("capability state consistency is a required release gate", () => {
+  const samples = [sample("a"), sample("b")];
+  const report = buildReleaseReport({ samples, digests, quality_provenance: provenance(samples), config: { minimumSampleCount: 2, requiredGateIds: ["required"] }, gates: [{ id: "required", passed: true }], capabilities: [{ id: "primitive-only", state: "supported", implementation_state: "available", runtime_state: "disabled", evidence_state: "pending", evidence: ["test:primitive"], follow_up_state: "pending", detail: "partial" }] });
+  assert.equal(report.passed, false); assert.equal(report.failures.filter((failure) => failure.kind === "capability-evidence").length, 2);
 });
 
 test("digests, gates, and configuration are validated", () => {

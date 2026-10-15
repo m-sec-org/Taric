@@ -61,40 +61,41 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
   const writerBefore = createPrincipal("writer", "writer-before", engagementId);
   const writerCapabilitiesBefore = [...writerBefore.capabilities];
   const store = new AuthorityStore();
-  const service = createCoreService(store);
+  const service = (await createCoreService(store));
   const model = createPrincipal("model", "model-a", engagementId);
   const reviewer = createPrincipal("reviewer", "reviewer-a", engagementId);
   const host = createPrincipal("host", "host-a", engagementId);
   try {
     const payloads = fixture.poisoning_payloads;
     const proposalId = uuidv7();
-    const proposal = service.dispatch("proposal.submit", model, {
+    const proposal = (await service.dispatch("proposal.submit", model, {
       engagement_id: engagementId,
       subject_type: "claim",
-      base_version: 0,
-      content: { id: proposalId, engagement_id: engagementId, kind: "claim", proposition: "safe candidate" },
-    });
+      expected_version: 0,
+      proposal_id: proposalId,
+      content: { schema_version: "1.0.0", engagement_id: engagementId, kind: "claim", proposition: "safe candidate", status: "proposed", evidence_refs: [], limitations: [] },
+    }));
     assert.equal(proposal.ok, true);
 
-    const poisonedProposal = service.dispatch("proposal.submit", model, {
+    const poisonedProposal = (await service.dispatch("proposal.submit", model, {
       engagement_id: engagementId,
       subject_type: "claim",
-      base_version: 0,
-      content: { id: uuidv7(), engagement_id: engagementId, kind: "claim", proposition: "__TARIC_HTTP_POISON__", ...payloads.proposal },
-    });
+      expected_version: 0,
+      content: { schema_version: "1.0.0", engagement_id: engagementId, kind: "claim", proposition: "__TARIC_HTTP_POISON__", status: "proposed", evidence_refs: [], limitations: [], ...payloads.proposal },
+    }));
     assert.equal(poisonedProposal.ok, false);
     assert.equal(poisonedProposal.error.code, "validation_error");
 
-    const poisonedReviewer = service.dispatch("review.submit", reviewer, {
+    const poisonedReviewer = (await service.dispatch("review.submit", reviewer, {
       engagement_id: engagementId,
       proposal_id: proposal.data.id,
       ...payloads.reviewer,
       input_hash: proposal.data.content_hash,
-    });
+    }));
     assert.equal(poisonedReviewer.ok, false);
     assert.equal(poisonedReviewer.error.code, "authorization_error");
 
-    const modelHostBypass = service.dispatch("action.host-decision", model, {
+    const modelHostBypass = (await service.dispatch("action.host-decision", model, {
       engagement_id: engagementId,
       work_run_id: uuidv7(),
       action_id: uuidv7(),
@@ -103,19 +104,19 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
       status: "authorized",
       host_decision_ref: payloads.http.headers["x-taric-trust"],
       ...payloads.tool.arguments,
-    });
+    }));
     assert.equal(modelHostBypass.ok, false);
     assert.equal(modelHostBypass.error.code, "authorization_error");
 
-    const modelWriterBypass = service.dispatch("resource.patch", model, {
+    const modelWriterBypass = (await service.dispatch("resource.patch", model, {
       engagement_id: engagementId,
       capability: payloads.proposal.writer_capability,
       ...payloads.tool.arguments,
-    });
+    }));
     assert.equal(modelWriterBypass.ok, false);
     assert.equal(modelWriterBypass.error.code, "authorization_error");
 
-    const crossEngagementHost = service.dispatch("action.host-decision", host, {
+    const crossEngagementHost = (await service.dispatch("action.host-decision", host, {
       engagement_id: uuidv7(),
       work_run_id: uuidv7(),
       action_id: uuidv7(),
@@ -123,12 +124,12 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
       mode: "host_hitl",
       status: "authorized",
       host_decision_ref: payloads.http.headers["x-taric-role"],
-    });
+    }));
     assert.equal(crossEngagementHost.ok, false);
     assert.equal(crossEngagementHost.error.code, "authorization_error");
 
     const forgedHost = { ...host, id: "forged-host", role: "host", capabilities: ["read", "propose", "action"], ...payloads.http.headers };
-    const forgedAuthorization = service.dispatch("action.host-decision", forgedHost, {
+    const forgedAuthorization = (await service.dispatch("action.host-decision", forgedHost, {
       engagement_id: engagementId,
       work_run_id: uuidv7(),
       action_id: uuidv7(),
@@ -136,13 +137,13 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
       mode: "authorized_autonomous",
       status: "authorized",
       host_decision_ref: "__TARIC_TOOL_POISON__",
-    });
+    }));
     assert.equal(forgedAuthorization.ok, false);
     assert.equal(forgedAuthorization.error.code, "authorization_error");
 
     const projectionDir = await mkdtemp(join(tmpdir(), "taric-poison-projection-"));
     try {
-      store.commit({
+      (await store.commit({
         id: uuidv7(),
         engagement_id: engagementId,
         kind: "finding",
@@ -156,7 +157,7 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
         policy_digest: "sha256:attacker",
         writer_capability: "admit",
         projection_fields: ["secret_ref", "artifact_body"],
-      }, "L2");
+      }, "L2"));
       await publishProjection(store, { engagementId, outputDir: projectionDir, localGit: false });
       const body = await readFile(join(projectionDir, "current", "STATE.md"), "utf8");
       assert.match(body, /safe projected finding/);
@@ -172,6 +173,6 @@ test("HTTP, tool, Markdown, proposal, and reviewer poisoning cannot alter policy
     assert.deepEqual(TARIC_COMPATIBILITY_MANIFEST.capabilities, manifestCapabilitiesBefore);
     assert.deepEqual(TARIC_COMPATIBILITY_MANIFEST.security_invariants, invariantsBefore);
     assert.deepEqual([...createPrincipal("writer", "writer-after", engagementId).capabilities], writerCapabilitiesBefore);
-    store.close();
+    (await store.close());
   }
 });

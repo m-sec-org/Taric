@@ -34,6 +34,8 @@ export const apiErrorCodes = [
   "unavailable_host",
   "internal_error",
   "idempotency_conflict",
+  "invalid_cursor",
+  "minimum_budget_required",
 ] as const;
 export type ApiErrorCode = (typeof apiErrorCodes)[number];
 
@@ -62,7 +64,7 @@ export interface UnsupportedContract {
   reason: string;
 }
 
-const COMMON_READ_ERRORS: ApiErrorCode[] = ["validation_error", "authorization_error", "internal_error"];
+const COMMON_READ_ERRORS: ApiErrorCode[] = ["validation_error", "authorization_error", "invalid_cursor", "minimum_budget_required", "internal_error"];
 const COMMON_WRITE_ERRORS: ApiErrorCode[] = [
   "validation_error",
   "authorization_error",
@@ -75,7 +77,7 @@ const COMMON_WRITE_ERRORS: ApiErrorCode[] = [
 
 /** 本期受支持的 Phase 1 操作目录。顺序即文档中的稳定顺序。 */
 export const operationContracts: OperationContract[] = [
-  { operation: "engagement.init", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "engagement.init", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: false },
   { operation: "engagement.status", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "capability.status", roles: ["model", "host", "reviewer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "adapter.status", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
@@ -87,12 +89,13 @@ export const operationContracts: OperationContract[] = [
   { operation: "query", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "resource.query", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "evidence.query", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
-  { operation: "proposal.submit", roles: ["model", "host", "operator"], request: "proposal", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "proposal.submit", roles: ["model", "host", "operator"], request: "proposalEnvelope", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "proposal.list", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "capture.observation", roles: ["host", "operator"], request: "observation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "review.submit", roles: ["reviewer"], request: "review", response: "apiSuccess", errors: [...COMMON_WRITE_ERRORS, "conflict"], idempotent: false, mutates_authority: true, engagement_scoped: true },
-  { operation: "admission.evaluate", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
-  { operation: "admission.commit", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "admission.evaluate", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "admission.commit", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "admission.promote_l2", roles: ["writer", "operator"], request: "promotionL2", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true, capability: "writer" },
   { operation: "control.observe", roles: ["host", "operator"], request: "controlObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "access.observe", roles: ["host", "operator"], request: "accessDecisionObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "control.list", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
@@ -131,7 +134,6 @@ export const unsupportedContracts: UnsupportedContract[] = [
   { capability: "migration", follow_up: "evolve-engagement-memory", reason: "升级迁移属于后续变更" },
   { capability: "backup.restore", follow_up: "evolve-engagement-memory", reason: "备份/恢复属于后续变更" },
   { capability: "remote.push", follow_up: "evolve-engagement-memory", reason: "远端 push 与外部 secrets scan 属于后续变更" },
-  { capability: "storage.postgresql", follow_up: "add-shared-authority-backend", reason: "PostgreSQL authority 属于后续变更" },
   { capability: "full_quality_evaluation", follow_up: "validate-memory-quality", reason: "precision/recall 与 95% CI 属于后续变更" },
 ];
 

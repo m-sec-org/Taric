@@ -1,0 +1,55 @@
+{
+  "version": "artifact-benchmark/1",
+  "measured_at": "2026-10-15T02:00:56.877Z",
+  "source_digest": "sha256:2ce2d37654fc2d2c700e4731532f4bf2c79a20c0a52fe25b1b9dca6cbeb41b08",
+  "node": "v22.21.1",
+  "platform": "darwin",
+  "profile": {
+    "version": "artifact-deployment/1",
+    "id": "local_process_crash",
+    "decoded_chunk_bytes": 67108864,
+    "base64_transport_chars": 89478488,
+    "json_metadata_max_bytes": 16384,
+    "transport_envelope_max_bytes": 89494872,
+    "publication": "staging_copy_atomic_rename_catalog_transaction",
+    "recovery": "verified_publication_markers",
+    "fsync": "none",
+    "power_loss_durable": false
+  },
+  "results": [
+    {
+      "kind": "text",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 134217728,
+      "transport_envelope_bytes": 178957456,
+      "concurrent_uploads": 2,
+      "execution": "interleaved_uploads_serial_synchronous_phases",
+      "elapsed_ms": 28596.32514,
+      "throughput_bytes_per_second": 4693530.631747461,
+      "p95_latency_ms": 28595.704663,
+      "rss_start_bytes": 69816320,
+      "peak_rss_bytes": 839503872,
+      "publication_failures": 0,
+      "source_sequence": 6,
+      "durability": "local_process_crash"
+    },
+    {
+      "kind": "binary",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 134217728,
+      "transport_envelope_bytes": 178957456,
+      "concurrent_uploads": 2,
+      "execution": "interleaved_uploads_serial_synchronous_phases",
+      "elapsed_ms": 27879.928303,
+      "throughput_bytes_per_second": 4814134.6183289,
+      "p95_latency_ms": 27879.489784999998,
+      "rss_start_bytes": 69607424,
+      "peak_rss_bytes": 966529024,
+      "publication_failures": 0,
+      "source_sequence": 6,
+      "durability": "local_process_crash"
+    }
+  ]
+}
