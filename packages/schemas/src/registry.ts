@@ -99,6 +99,7 @@ export const operationContracts: OperationContract[] = [
   { operation: "control.observe", roles: ["host", "operator"], request: "controlObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "access.observe", roles: ["host", "operator"], request: "accessDecisionObservation", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "control.list", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "host.state", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "work.claim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.renew", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.reclaim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
@@ -126,11 +127,11 @@ export const operationContracts: OperationContract[] = [
   { operation: "resource.patch", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "resource.relation", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "resource.impact", roles: ["host", "writer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
-  { operation: "snapshot.import", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
 ];
 
 /** 本期不交付、必须返回 unsupported_capability 的能力。 */
 export const unsupportedContracts: UnsupportedContract[] = [
+  { capability: "snapshot.import", follow_up: "evolve-engagement-memory", reason: "公开快照导入不是宿主迁移 API；仅隔离后端 backup/restore/conformance 保留" },
   { capability: "migration", follow_up: "evolve-engagement-memory", reason: "升级迁移属于后续变更" },
   { capability: "backup.restore", follow_up: "evolve-engagement-memory", reason: "备份/恢复属于后续变更" },
   { capability: "remote.push", follow_up: "evolve-engagement-memory", reason: "远端 push 与外部 secrets scan 属于后续变更" },

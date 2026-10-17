@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -73,6 +74,7 @@ export interface ContextPack {
   policy_version: string;
   items: CanonicalRecord[];
   omitted_count: number;
+  omitted_count_complete: boolean;
   omitted_as_unexamined: boolean;
   omitted_ranges: Array<{ after_id?: string; before_id?: string; count: number }>;
   mandatory_ids: string[];
@@ -88,6 +90,7 @@ export interface ContextPack {
   token_estimator_version?: string;
   permission_scope?: string;
   resume_delta?: ContextResumeSummary;
+  read_stats?: { scanned_rows: number; returned_rows: number; scan_budget: number; continuation: boolean };
 }
 export interface ContextResumeSummary {
   from_read_seq: number;
@@ -104,8 +107,10 @@ export interface ContextResumeSummary {
 }
 export class ContextBudgetError extends Error {
   readonly code = "minimum_budget_required";
-  constructor(readonly requested_budget: number, readonly minimum_budget: number) {
-    super(`context budget is too small; minimum required: ${minimum_budget} characters`);
+  constructor(readonly requested_budget: number, readonly minimum_budget: number, unit: "characters" | "authority rows" = "characters") {
+    super(unit === "characters"
+      ? `context budget is too small; minimum required: ${minimum_budget} characters`
+      : `context scan budget is too small; minimum required: ${minimum_budget} authority rows`);
     this.name = "ContextBudgetError";
   }
 }
@@ -129,19 +134,28 @@ export interface ContextOptions {
   pendingActions?: Array<Record<string, unknown>>;
   /** Core passes the configured content root so cursors work after restart. */
   cursorKeyRoot?: string;
+  /** Optional stage timings for bounded diagnostics; values contain no record data. */
+  diagnostics?: (stage: "snapshot" | "snapshot_hydration" | "snapshot_filter" | "snapshot_sort" | "record_projection" | "ordering" | "cursor_encoding" | "page_projection", elapsedMs: number) => void;
+  /** Maximum authority rows fetched for one Context keyset page. */
+  scanBudget?: number;
 }
 interface CursorState {
-  v: 1; engagement_id: string; principal_id: string; read_seq: number; budget: number; offset: number; issued_at: number; expires_at: number;
+  v: 2; engagement_id: string; principal_id: string; read_seq: number; budget: number; issued_at: number; expires_at: number;
   include_candidates: boolean; policy_version: string; snapshot_id: string; ordering: string;
   filters: Record<string, unknown>;
-  work_item_id: string | null; worker_role: string | null; delivered: string[]; records?: CanonicalRecord[];
+  work_item_id: string | null; worker_role: string | null; records?: CanonicalRecord[];
   reviewer_mode: boolean;
   latest_checkpoint_id: string | null;
   delta_ids: string[];
   resume_delta?: ContextResumeSummary;
   /** Time predicates and recalled dependency inclusion are fixed at first page. */
   read_time: string;
-  supplemental_ids: string[];
+  after_id: string;
+  after_priority: number;
+  after_time: string;
+  scan_budget: number;
+  page_has_more: boolean;
+  read_stats?: { scanned_rows: number; returned_rows: number; scan_budget: number; continuation: boolean };
 }
 const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const sensitiveField = /(?:token|secret|credential|private_path|artifact_body|draft_body|raw_artifact|hidden_reasoning|chain_of_thought|host_ref|location|summary|cookie|header|url)/i;
@@ -175,13 +189,13 @@ function priority(record: CanonicalRecord, workItemId: string | null, deltaIds: 
   const kind = String(record.kind ?? "");
   const coverageGap = kind === "coverage" && ["not_tested", "queued", "in_progress", "tested_no_observation", "inconclusive", "blocked", "blocked_by_control"].includes(String(record.status));
   if (["engagement", "scope", "rule_of_engagement"].includes(kind)) return 0;
-  const isTargetWorkItem = Boolean(workItemId) && (record.id === workItemId || record.work_item_ref === workItemId);
-  if (kind === "work_item" || kind === "workitem") return isTargetWorkItem ? 1 : 4;
+  const isTargetWorkItem = Boolean(workItemId) && record.id === workItemId;
+  if (isTargetWorkItem) return 1;
+  if (kind === "work_item" || kind === "workitem") return 4;
   if (kind === "checkpoint") return 2;
   if (deltaIds.has(record.id) || coverageGap || ["conflict", "impact_event", "coverage_gap", "delta"].includes(kind)
     || record.status === "stale" || record.stale_reason !== undefined
     || record.coverage_status === "gap" || record.coverage_gap === true) return 3;
-  if (isTargetWorkItem) return 2;
   if (["observation", "evidence", "coverage", "control_observation", "access_decision_observation", "finding", "claim", "resource"].includes(kind)) return 4;
   return 5;
 }
@@ -234,88 +248,90 @@ function compactProjection(record: CanonicalRecord): CanonicalRecord {
     truncated: true
   } as CanonicalRecord;
 }
-function encodeCursor(state: CursorState, keyRoot: string, authority: string): string {
+function encodeCursor(state: CursorState, keyRoot: string, authority: string, diagnostics?: ContextOptions["diagnostics"]): string {
+  const started = performance.now();
   const iv = randomBytes(12);
   const { records: _records, ...slim } = state;
   const cipher = createCipheriv("aes-256-gcm", loadAuthorityCursorKey(keyRoot, authority, true), iv);
   const encrypted = Buffer.concat([cipher.update(JSON.stringify(slim), "utf8"), cipher.final()]);
-  return `v1.${iv.toString("base64url")}.${encrypted.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}`;
+  const value = `v2.${iv.toString("base64url")}.${encrypted.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}`;
+  diagnostics?.("cursor_encoding", performance.now() - started);
+  return value;
 }
 function decodeCursor(value: string, keyRoot: string, authority: string): CursorState {
   const [version, ivPart, encryptedPart, tagPart, extra] = value.split(".");
-  if (version !== "v1" || !ivPart || !encryptedPart || !tagPart || extra) throw new InvalidCursorError();
-  let parsed: CursorState;
+  if (version !== "v2" || !ivPart || !encryptedPart || !tagPart || extra) throw new InvalidCursorError();
+  let parsed: Partial<CursorState>;
   try {
     const decipher = createDecipheriv("aes-256-gcm", loadAuthorityCursorKey(keyRoot, authority, false), Buffer.from(ivPart, "base64url"));
     decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
-    parsed = JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedPart, "base64url")), decipher.final()]).toString("utf8")) as CursorState;
+    parsed = JSON.parse(Buffer.concat([decipher.update(Buffer.from(encryptedPart, "base64url")), decipher.final()]).toString("utf8")) as Partial<CursorState>;
   } catch {
     throw new InvalidCursorError();
   }
-  if (parsed.v !== 1 || !Array.isArray(parsed.delivered) || !Array.isArray(parsed.supplemental_ids) || !Array.isArray(parsed.delta_ids) || !Number.isSafeInteger(parsed.read_seq) || parsed.read_seq < 0 || !Number.isSafeInteger(parsed.offset) || parsed.offset < 0 || !Number.isSafeInteger(parsed.issued_at) || !Number.isSafeInteger(parsed.expires_at) || parsed.expires_at < parsed.issued_at || !Number.isFinite(Date.parse(parsed.read_time)) || parsed.records !== undefined) throw new InvalidCursorError();
-  if (Date.now() > parsed.expires_at) throw new InvalidCursorError("context continuation cursor expired");
-  return parsed;
+  if (parsed.v !== 2 || !Array.isArray(parsed.delta_ids) || parsed.delta_ids.length > 500
+    || !Number.isSafeInteger(parsed.read_seq) || parsed.read_seq! < 0
+    || !Number.isSafeInteger(parsed.budget) || parsed.budget! < 1
+    || !Number.isSafeInteger(parsed.issued_at) || !Number.isSafeInteger(parsed.expires_at)
+    || parsed.expires_at! < parsed.issued_at! || !Number.isFinite(Date.parse(parsed.read_time ?? ""))
+    || parsed.records !== undefined || typeof parsed.after_id !== "string"
+    || !Number.isSafeInteger(parsed.after_priority) || typeof parsed.after_time !== "string"
+    || !Number.isSafeInteger(parsed.scan_budget) || parsed.scan_budget! < 2
+    || typeof parsed.page_has_more !== "boolean" || !parsed.filters || typeof parsed.filters !== "object" || Array.isArray(parsed.filters)) throw new InvalidCursorError();
+  const state = parsed as CursorState;
+  if (Date.now() > state.expires_at) throw new InvalidCursorError("context continuation cursor expired");
+  return state;
 }
-function packPage(state: CursorState, offset: number, budget: number, keyRoot: string, authority: string): ContextPack {
+function packPage(state: CursorState, budget: number, keyRoot: string, authority: string, diagnostics?: ContextOptions["diagnostics"]): ContextPack {
+  const started = performance.now();
   if (!Array.isArray(state.records)) throw new InvalidCursorError();
-  const delivered = new Set(state.delivered);
-  const pending = state.records.slice(offset);
+  const pending = state.records;
   const deltaIds = new Set(state.delta_ids);
   const recordPriority = (record: CanonicalRecord) => priority(record, state.work_item_id, deltaIds);
-  const isMandatory = (record: CanonicalRecord) => recordPriority(record) <= 1 || record.id === state.latest_checkpoint_id;
-  const undelivered = pending.filter((record) => !delivered.has(record.id));
-  const mandatory = undelivered.filter(isMandatory);
+  const mandatory = pending.filter((record) => recordPriority(record) <= 1 || record.id === state.latest_checkpoint_id);
   const mandatoryFullCost = mandatory.reduce((total, record) => total + estimate(record), 0);
-  // 强制约束先按完整记录预留；预算不足时退化为压缩投影，保证 scope/ROE、目标 WorkItem 与 checkpoint 约束不被背景材料挤掉。
-  const mandatoryItems = mandatory.map((record) => {
-    if (mandatoryFullCost <= budget) return record;
+  const mandatoryItems = new Map(mandatory.map((record) => {
+    if (mandatoryFullCost <= budget) return [record.id, record] as const;
     const compact = mandatoryProjection(record);
-    return estimate(compact) <= budget ? compact : compactProjection(record);
-  });
-  let used = mandatoryItems.reduce((total, record) => total + estimate(record), 0);
-  if (used > budget) throw new ContextBudgetError(budget, used);
-  const items = [...mandatoryItems];
-  const mandatoryIds = new Set(mandatory.map((record) => record.id));
-  const background = undelivered.filter((record) => !mandatoryIds.has(record.id));
-  const emitted = new Set(mandatoryItems.map((record) => record.id));
+    return [record.id, estimate(compact) <= budget ? compact : compactProjection(record)] as const;
+  }));
+  const mandatoryCost = [...mandatoryItems.values()].reduce((total, record) => total + estimate(record), 0);
+  if (mandatoryCost > budget) throw new ContextBudgetError(budget, mandatoryCost);
+  let used = 0;
+  const items: CanonicalRecord[] = [];
+  const emitted = new Set<string>();
   let truncated = 0;
-  for (const item of background) {
-    const size = estimate(item);
-    if (used + size <= budget) { items.push(item); used += size; emitted.add(item.id); continue; }
-    const short = truncatedProjection(item);
-    if (used + estimate(short) <= budget) { items.push(short); used += estimate(short); truncated++; emitted.add(item.id); }
-    else if (items.length === 0 || used === 0) {
-      // A single compact identity is still useful when the caller asks for a
-      // budget smaller than any valid source record. It makes continuation
-      // finite while preserving the explicit truncation marker.
-      const compact = compactProjection(item);
-      if (estimate(compact) > budget) throw new ContextBudgetError(budget, estimate(compact));
-      items.push(compact); used += estimate(compact); truncated++; emitted.add(item.id);
-    } else {
-      // Leave this record for the next page; it was not examined or emitted.
-      break;
-    }
-    if (used >= budget) {
-      // 预算已用尽，后续记录留给下一页，游标停在第一条未消费记录。
-      break;
-    }
-  }
-  // 强制约束若因单条超预算被完整截断，仍以压缩投影形式保留可判读摘要。
-  for (let index = 0; index < items.length; index++) {
-    const item = items[index]!;
-    if (estimate(item) > budget) { const short = truncatedProjection(item); if (estimate(short) <= budget) items[index] = short; }
-  }
-  used = items.reduce((total, item) => total + estimate(item), 0);
-  // 游标按权威顺序推进：仅本页真正输出的记录前进，未装入项留待下一页。
-  let nextOffset = offset;
   for (const record of pending) {
-    if (!emitted.has(record.id) && !delivered.has(record.id)) break;
-    nextOffset++;
+    const required = mandatoryItems.get(record.id);
+    if (required) {
+      items.push(required); used += estimate(required); emitted.add(record.id);
+      continue;
+    }
+    const size = estimate(record);
+    if (used + size <= budget) { items.push(record); used += size; emitted.add(record.id); continue; }
+    const short = truncatedProjection(record);
+    if (used + estimate(short) <= budget) { items.push(short); used += estimate(short); truncated++; emitted.add(record.id); }
+    else if (items.length === 0) {
+      const compact = compactProjection(record);
+      if (estimate(compact) > budget) throw new ContextBudgetError(budget, estimate(compact));
+      items.push(compact); used += estimate(compact); truncated++; emitted.add(record.id);
+    }
+    break;
   }
-  const omittedCount = state.records.length - nextOffset;
-  const nextDelivered = [...delivered, ...items.map((item) => item.id)];
-  const exhausted = nextOffset >= state.records.length;
-  const cursor = exhausted ? undefined : encodeCursor({ ...state, offset: nextOffset, budget, delivered: nextDelivered }, keyRoot, authority);
+  let nextOffset = 0;
+  for (const record of pending) { if (!emitted.has(record.id)) break; nextOffset++; }
+  const remainingInPage = pending.length - nextOffset;
+  const omittedCount = remainingInPage + (state.page_has_more ? 1 : 0);
+  const exhausted = remainingInPage === 0 && !state.page_has_more;
+  const lastEmitted = pending[nextOffset - 1];
+  const cursor = exhausted || !lastEmitted ? undefined : encodeCursor({
+    ...state,
+    records: undefined,
+    after_id: lastEmitted.id,
+    after_priority: recordPriority(lastEmitted),
+    after_time: lastEmitted.kind === "checkpoint" ? String(lastEmitted.updated_at ?? lastEmitted.created_at ?? "") : ""
+  }, keyRoot, authority, diagnostics);
+  used = items.reduce((total, item) => total + estimate(item), 0);
   const sourceRecords = items.map((item) => ({
     id: item.id,
     hash: digest(item),
@@ -336,11 +352,11 @@ function packPage(state: CursorState, offset: number, budget: number, keyRoot: s
     source_kind: typeof item.kind === "string" ? item.kind : undefined,
     priority: recordPriority(item)
   }));
-  return {
+  const result: ContextPack = {
     context_snapshot_id: state.snapshot_id, read_seq: state.read_seq, schema_version: "1.0.0", adapter_version: "adapter/1.0", budget, budget_unit: "characters", used,
-    builder_version: BUILDER_VERSION, policy_version: state.policy_version, items, omitted_count: omittedCount,
+    builder_version: BUILDER_VERSION, policy_version: state.policy_version, items, omitted_count: omittedCount, omitted_count_complete: !state.page_has_more,
     omitted_as_unexamined: omittedCount > 0,
-    omitted_ranges: omittedCount ? [{ after_id: state.records[nextOffset - 1]?.id, before_id: state.records[nextOffset]?.id, count: omittedCount }] : [],
+    omitted_ranges: omittedCount ? [{ after_id: lastEmitted?.id, before_id: pending[nextOffset]?.id, count: omittedCount }] : [],
     mandatory_ids: mandatory.map((item) => item.id), truncated_count: truncated,
     mandatory_constraints: mandatory.map((item) => ({ id: item.id, display_id: typeof item.display_id === "string" ? item.display_id : undefined, constraints: mandatoryProjection(item) })),
     cursor, sources: items.map((item) => item.id), manifest: sourceRecords, ordering: state.ordering,
@@ -348,8 +364,11 @@ function packPage(state: CursorState, offset: number, budget: number, keyRoot: s
     latest_checkpoint_id: state.latest_checkpoint_id ?? undefined,
     token_estimator_version: "characters/json-length/1",
     permission_scope: `${state.principal_id}@${state.engagement_id}`,
-    resume_delta: state.resume_delta
+    resume_delta: state.resume_delta,
+    read_stats: state.read_stats ? { ...state.read_stats, continuation: Boolean(cursor) } : undefined
   };
+  diagnostics?.("page_projection", performance.now() - started);
+  return result;
 }
 
 export async function buildContextPack(store: AuthorityStore, engagementId: string, budget: number, options: ContextOptions = {}): Promise<ContextPack> {
@@ -359,6 +378,8 @@ export async function buildContextPack(store: AuthorityStore, engagementId: stri
   const principalId = options.principalId ?? "local";
   const keyRoot = cursorRoot(store, options.cursorKeyRoot);
   const authority = store.authorityId;
+  const scanBudget = options.scanBudget ?? 256;
+  if (!Number.isSafeInteger(scanBudget) || scanBudget < 2 || scanBudget > 1000) throw new ContractValidationError("validation_error", "context scan budget must be between 2 and 1000");
   if (options.cursor) {
     const state = decodeCursor(options.cursor, keyRoot, authority);
     if (state.engagement_id !== engagementId || state.principal_id !== principalId || state.include_candidates !== Boolean(options.includeCandidates) || state.policy_version !== (options.policyVersion ?? "policy/1")) throw new InvalidCursorError("context continuation cursor binding mismatch");
@@ -367,46 +388,42 @@ export async function buildContextPack(store: AuthorityStore, engagementId: stri
     if (options.ordering !== undefined && options.ordering !== state.ordering) throw new InvalidCursorError("context continuation cursor binding mismatch");
     if (JSON.stringify(canonical(options.filters ?? {})) !== JSON.stringify(canonical(state.filters))) throw new InvalidCursorError("context continuation cursor binding mismatch");
     if (options.readSeq !== undefined && options.readSeq !== state.read_seq) throw new InvalidCursorError("context continuation cursor binding mismatch");
+    if (options.scanBudget !== undefined && scanBudget !== state.scan_budget) throw new InvalidCursorError("context continuation cursor scan budget mismatch");
     if (requestedBudget !== state.budget) throw new InvalidCursorError("context continuation cursor budget mismatch");
-    const snapshot = await store.snapshot(engagementId, { includeCandidates: state.include_candidates, asOf: state.read_seq, readTime: state.read_time });
-    const byId = new Map(snapshot.records.map((record) => [record.id, record]));
-    for (const id of state.supplemental_ids) {
-      const record = await pinnedRecord(store, id, state.read_seq);
-      if (record?.engagement_id === engagementId) byId.set(id, record);
-    }
-    state.records = orderContextRecords(contextRecords([...byId.values()], state), state.work_item_id, new Set(state.delta_ids));
-    if (state.offset > state.records.length) throw new InvalidCursorError();
-    return packPage(state, state.offset, requestedBudget, keyRoot, authority);
+    const snapshotStarted = performance.now();
+    const page = await store.contextRecordsPage({
+      engagement_id: engagementId, after_id: state.after_id, after_priority: state.after_priority, after_time: state.after_time,
+      page_size: state.scan_budget - 1, as_of: state.read_seq, read_time: state.read_time,
+      include_candidates: state.include_candidates, reviewer_mode: state.reviewer_mode,
+      work_item_id: state.work_item_id ?? undefined, delta_ids: state.delta_ids, filters: state.filters
+    });
+    options.diagnostics?.("snapshot", performance.now() - snapshotStarted);
+    if (page.read_seq !== state.read_seq || page.read_time !== state.read_time) throw new InvalidCursorError("context continuation read point mismatch");
+    const projectionStarted = performance.now();
+    const projected = contextRecords(page.records, state);
+    options.diagnostics?.("record_projection", performance.now() - projectionStarted);
+    state.records = projected;
+    options.diagnostics?.("ordering", 0);
+    state.page_has_more = page.has_more;
+    if (!state.latest_checkpoint_id) state.latest_checkpoint_id = state.records.find((record) => record.kind === "checkpoint")?.id ?? null;
+    state.read_stats = { scanned_rows: page.scanned_rows, returned_rows: page.returned_rows, scan_budget: state.scan_budget, continuation: page.has_more };
+    return packPage(state, requestedBudget, keyRoot, authority, options.diagnostics);
   }
   if (options.cursorTtlMs !== undefined && (!Number.isSafeInteger(options.cursorTtlMs) || options.cursorTtlMs < 1)) throw new ContractValidationError("validation_error", "cursor ttl must be a positive integer");
-  const snapshot = await store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq });
   const selection = { include_candidates: Boolean(options.includeCandidates), reviewer_mode: Boolean(options.reviewerMode), filters: options.filters ?? {} };
-  let records = orderContextRecords(contextRecords(snapshot.records, selection), options.workItemId ?? null, new Set());
-  if (snapshot.read_seq === snapshot.committed_seq) {
-    const existing = new Set(records.map((record) => record.id));
-    const staleIds = new Set((await store.events())
-      .filter((event) => event.commit_seq <= snapshot.read_seq && event.event_type === "record.stale" && event.subject_id)
-      .map((event) => event.subject_id!));
-    const staleRecords = contextRecords((await Promise.all([...staleIds].filter((id) => !existing.has(id)).map((id) => pinnedRecord(store, id, snapshot.read_seq))))
-      .filter((record): record is CanonicalRecord => Boolean(record && record.engagement_id === engagementId && record.status === "stale")), selection);
-    records = [...records, ...staleRecords];
-  }
-  const latestCheckpointId = records.find((record) => record.kind === "checkpoint")?.id ?? null;
   const resumeFromSeq = options.resumeFromSeq ?? (typeof options.checkpoint?.source_read_seq === "number" ? options.checkpoint.source_read_seq : undefined);
-  const resumeDelta = resumeFromSeq === undefined ? undefined : await resumeContextDelta(store, engagementId, resumeFromSeq, {
-    checkpoint: options.checkpoint,
-    principalId,
-    workItemId: options.workItemId,
-    workerRole: options.workerRole,
-    includeCandidates: options.includeCandidates,
-    readSeq: snapshot.read_seq,
-    readTime: snapshot.read_time,
-    pendingActions: options.pendingActions
-  });
-  if (resumeDelta && snapshot.read_seq === snapshot.committed_seq) {
-    const existing = new Set(records.map((record) => record.id));
-    const staleDeltaRecords = contextRecords(resumeDelta.updated.filter((record) => !existing.has(record.id)), selection);
-    records = [...records, ...staleDeltaRecords];
+  let readSeq = options.readSeq;
+  let readTime: string | undefined;
+  let resumeDelta: ResumeContextDelta | undefined;
+  if (resumeFromSeq !== undefined) {
+    const point = await store.contextRecordsPage({ engagement_id: engagementId, page_size: 1, as_of: readSeq });
+    readSeq = point.read_seq;
+    readTime = point.read_time;
+    resumeDelta = await resumeContextDelta(store, engagementId, resumeFromSeq, {
+      checkpoint: options.checkpoint, principalId, workItemId: options.workItemId, workerRole: options.workerRole,
+      includeCandidates: options.includeCandidates, readSeq, readTime, pendingActions: options.pendingActions,
+      scanBudget: Math.min(scanBudget - 1, 500)
+    });
   }
   const resumeSummary: ContextResumeSummary | undefined = resumeDelta ? {
     from_read_seq: resumeDelta.from_read_seq,
@@ -422,25 +439,35 @@ export async function buildContextPack(store: AuthorityStore, engagementId: stri
     reasons: resumeDelta.reasons
   } : undefined;
   const deltaIds = [...new Set([...(resumeDelta?.added.map((record) => record.id) ?? []), ...(resumeDelta?.updated.map((record) => record.id) ?? [])])];
-  const deltaIdSet = new Set(deltaIds);
-  orderContextRecords(records, options.workItemId ?? null, deltaIdSet);
+  const snapshotStarted = performance.now();
+  const page = await store.contextRecordsPage({
+    engagement_id: engagementId, page_size: scanBudget - 1, as_of: readSeq, read_time: readTime,
+    include_candidates: selection.include_candidates, reviewer_mode: selection.reviewer_mode,
+    work_item_id: options.workItemId, delta_ids: deltaIds, filters: selection.filters
+  });
+  options.diagnostics?.("snapshot", performance.now() - snapshotStarted);
+  const projectionStarted = performance.now();
+  const records = contextRecords(page.records, selection);
+  options.diagnostics?.("record_projection", performance.now() - projectionStarted);
+  options.diagnostics?.("ordering", 0);
+  const latestCheckpointId = records.find((record) => record.kind === "checkpoint")?.id ?? null;
   const issuedAt = Date.now();
   const ttl = options.cursorTtlMs ?? 60 * 60 * 1000;
   if (!Number.isSafeInteger(ttl) || ttl < 1 || !Number.isSafeInteger(issuedAt + ttl)) throw new ContractValidationError("validation_error", "cursor ttl must be a positive safe integer");
-  const snapshotIds = new Set(snapshot.records.map((record) => record.id));
   const state: CursorState = {
-    v: 1, engagement_id: engagementId, principal_id: principalId, read_seq: snapshot.read_seq,
-    budget: requestedBudget, offset: 0, include_candidates: Boolean(options.includeCandidates),
+    v: 2, engagement_id: engagementId, principal_id: principalId, read_seq: page.read_seq,
+    budget: requestedBudget, include_candidates: selection.include_candidates,
     policy_version: options.policyVersion ?? "policy/1", snapshot_id: `ctx_${randomBytes(16).toString("hex")}`,
     ordering: options.ordering ?? "scope,work_item,checkpoint,delta,direct,entity_evidence,background", work_item_id: options.workItemId ?? null,
     filters: structuredClone(options.filters ?? {}),
-    worker_role: options.workerRole ?? null, reviewer_mode: Boolean(options.reviewerMode), latest_checkpoint_id: latestCheckpointId, delivered: [], records,
+    worker_role: options.workerRole ?? null, reviewer_mode: selection.reviewer_mode, latest_checkpoint_id: latestCheckpointId, records,
     delta_ids: deltaIds, resume_delta: resumeSummary,
-    read_time: snapshot.read_time ?? new Date().toISOString(),
-    supplemental_ids: records.filter((record) => !snapshotIds.has(record.id)).map((record) => record.id),
+    read_time: page.read_time, after_id: "", after_priority: -1, after_time: "",
+    scan_budget: scanBudget, page_has_more: page.has_more,
+    read_stats: { scanned_rows: page.scanned_rows, returned_rows: page.returned_rows, scan_budget: scanBudget, continuation: page.has_more },
     issued_at: issuedAt, expires_at: issuedAt + ttl
   };
-  return packPage(state, 0, requestedBudget, keyRoot, authority);
+  return packPage(state, requestedBudget, keyRoot, authority, options.diagnostics);
 }
 
 export interface ResumeContextDelta {
@@ -471,42 +498,75 @@ export interface ResumeDeltaOptions {
   readSeq?: number;
   readTime?: string;
   pendingActions?: Array<Record<string, unknown>>;
+  scanBudget?: number;
 }
 
 /** Return only changes after a pinned checkpoint sequence. This is a read-only
  * helper; it never promotes late results or writes a new authority record. */
 export async function resumeContextDelta(store: AuthorityStore, engagementId: string, fromReadSeq: number, options: ResumeDeltaOptions = {}): Promise<ResumeContextDelta> {
   if (!Number.isSafeInteger(fromReadSeq) || fromReadSeq < 0) throw new ContractValidationError("validation_error", "from_read_seq must be a non-negative integer");
-  const current = await store.snapshot(engagementId, { includeCandidates: options.includeCandidates, asOf: options.readSeq, readTime: options.readTime });
+  const scanBudget = options.scanBudget ?? 500;
+  if (!Number.isSafeInteger(scanBudget) || scanBudget < 1 || scanBudget > 500) throw new ContractValidationError("validation_error", "resume scan budget must be between 1 and 500");
+  const current = await store.contextRecordsPage({ engagement_id: engagementId, page_size: 1, as_of: options.readSeq, read_time: options.readTime });
   if (fromReadSeq > current.read_seq) throw new ContractValidationError("conflict", "resume delta source sequence is unavailable");
-  const before = await store.snapshot(engagementId, { asOf: fromReadSeq, includeCandidates: options.includeCandidates });
-  const beforeById = new Map(before.records.map((record) => [record.id, record]));
-  const afterById = new Map(current.records.map((record) => [record.id, record]));
+  const beforePoint = await store.contextRecordsPage({ engagement_id: engagementId, page_size: 1, as_of: fromReadSeq });
+  const checkpointData = options.checkpoint;
+  const checkpointWorkItem = typeof checkpointData?.work_item_ref === "string" ? checkpointData.work_item_ref : options.workItemId;
+  const premiseRefs = ["observation_refs", "evidence_refs", "host_decision_refs", "action_refs", "tool_result_refs"]
+    .flatMap((field) => Array.isArray(checkpointData?.[field]) ? checkpointData[field] as unknown[] : [])
+    .filter((ref): ref is string => typeof ref === "string");
+  const referenceIds = [
+    ...(typeof checkpointData?.scope_ref === "string" ? [checkpointData.scope_ref] : []),
+    ...(checkpointWorkItem ? [checkpointWorkItem] : []),
+    ...premiseRefs
+  ];
+  const changedSubjects = await store.changedRecordSubjects({ engagement_id: engagementId, from_read_seq: fromReadSeq, to_read_seq: current.read_seq, limit: scanBudget });
+  if (changedSubjects.has_more) throw new ContextBudgetError(scanBudget, scanBudget + 1, "authority rows");
+  const ids = [...new Set([...changedSubjects.ids, ...referenceIds])];
+  if (ids.length > scanBudget) throw new ContextBudgetError(scanBudget, ids.length, "authority rows");
+  const selected = {
+    include_candidates: Boolean(options.includeCandidates), reviewer_mode: Boolean(options.workerRole === "reviewer"),
+    filters: {} as Record<string, unknown>
+  };
+  const beforeById = new Map<string, CanonicalRecord>();
+  const afterById = new Map<string, CanonicalRecord>();
+  for (const id of ids) {
+    const [beforeRecord, afterRecord] = await Promise.all([store.getAt(id, fromReadSeq), store.getAt(id, current.read_seq)]);
+    if (beforeRecord?.engagement_id === engagementId) beforeById.set(id, beforeRecord);
+    if (afterRecord?.engagement_id === engagementId) afterById.set(id, afterRecord);
+  }
+  const eligible = (record: CanonicalRecord | undefined, readTime: string): CanonicalRecord | undefined => {
+    if (!record || (record.trust_level !== "L2" && !(selected.include_candidates && record.trust_level === "L1"))) return undefined;
+    if (selected.reviewer_mode && record.kind === "review") return undefined;
+    const status = String(record.status ?? "active");
+    if (status !== "stale" && ["retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(status)) return undefined;
+    const readAt = Date.parse(readTime);
+    if (status !== "stale" && [record.expires_at, record.review_after].some((value) => typeof value === "string" && Date.parse(value) <= readAt)) return undefined;
+    return allowedRecord(record);
+  };
+  const eligibleEventIds = ids.filter((id) =>
+    Boolean(eligible(beforeById.get(id), beforePoint.read_time) || eligible(afterById.get(id), current.read_time)));
+  const eventRows = await store.eventsForSubjects({
+    engagement_id: engagementId, from_read_seq: fromReadSeq, to_read_seq: current.read_seq,
+    subject_ids: eligibleEventIds, include_candidates: selected.include_candidates, limit: scanBudget
+  });
+  if (eventRows.has_more) throw new ContextBudgetError(scanBudget, scanBudget + 1, "authority rows");
+  const events = eventRows.events.map((event) => ({
+    commit_seq: event.commit_seq, event_id: event.event_id, event_type: event.event_type,
+    subject_id: event.subject_id, hash: event.hash
+  }));
   const added: CanonicalRecord[] = [];
   const updated: CanonicalRecord[] = [];
-  for (const record of current.records) {
-    const prior = beforeById.get(record.id);
-    if (!prior) added.push(record);
-    else if (digest(prior) !== digest(record)) updated.push(record);
+  const removed: string[] = [];
+  for (const id of changedSubjects.ids) {
+    const prior = eligible(beforeById.get(id), beforePoint.read_time);
+    const next = eligible(afterById.get(id), current.read_time);
+    if (!prior && next) added.push(next);
+    else if (prior && !next) removed.push(id);
+    else if (prior && next && digest(prior) !== digest(next)) updated.push(next);
   }
-  const removed = [...beforeById.keys()].filter((id) => !afterById.has(id));
-  const ids = new Set([...beforeById.keys(), ...afterById.keys()]);
-  const checkpointWorkItem = typeof options.checkpoint?.work_item_ref === "string" ? options.checkpoint.work_item_ref : options.workItemId;
-  const relevantEvent = (event: Awaited<ReturnType<AuthorityStore["events"]>>[number]) =>
-    (event.subject_id !== undefined && ids.has(event.subject_id))
-    || event.payload.engagement_id === engagementId
-    || (checkpointWorkItem !== undefined && event.payload.work_item_id === checkpointWorkItem);
-  const events = (await store.events()).filter((event) => event.commit_seq > fromReadSeq && event.commit_seq <= current.read_seq && relevantEvent(event))
-    .map((event) => ({ commit_seq: event.commit_seq, event_id: event.event_id, event_type: event.event_type, subject_id: event.subject_id, hash: event.hash }));
   const changedRecordIds = new Set([...added, ...updated].map((record) => record.id));
-  for (const event of events) {
-    if (!event.subject_id || changedRecordIds.has(event.subject_id)) continue;
-    const record = await pinnedRecord(store, event.subject_id, current.read_seq);
-    if (record?.engagement_id === engagementId && record.trust_level !== "L0") {
-      updated.push(record);
-      changedRecordIds.add(record.id);
-    }
-  }
+  const changedSubjectIds = new Set(changedSubjects.ids);
   const changed = [...added, ...updated];
   const scopeKinds = ["scope", "rule_of_engagement", "engagement"];
   const scopeChanges = [
@@ -522,7 +582,7 @@ export async function resumeContextDelta(store: AuthorityStore, engagementId: st
     .filter((action) => ["recommended", "authorized", "unknown"].includes(String(action.status)))
     .map((action) => String(action.action_id ?? action.id ?? "")).filter(Boolean);
   const reasons: string[] = [];
-  const checkpoint = options.checkpoint;
+  const checkpoint = checkpointData;
   if (checkpoint) {
     if (typeof checkpoint.engagement_id === "string" && checkpoint.engagement_id !== engagementId) throw new ContractValidationError("authorization_error", "checkpoint engagement binding mismatch");
     const scopeRef = typeof checkpoint.scope_ref === "string" ? checkpoint.scope_ref : undefined;
@@ -534,14 +594,14 @@ export async function resumeContextDelta(store: AuthorityStore, engagementId: st
     const workItemRef = typeof checkpoint.work_item_ref === "string" ? checkpoint.work_item_ref : options.workItemId;
     if (workItemRef) {
       const currentWorkItem = afterById.get(workItemRef);
-      if (!currentWorkItem || changed.some((record) => record.id === workItemRef)) reasons.push("work_item_changed");
+      if (!currentWorkItem || changedSubjectIds.has(workItemRef)) reasons.push("work_item_changed");
       if (typeof checkpoint.work_item_version === "number" && currentWorkItem?.version !== checkpoint.work_item_version) reasons.push("work_item_version_changed");
       if (typeof checkpoint.target_version === "number" && currentWorkItem?.target_version !== checkpoint.target_version) reasons.push("target_version_changed");
     }
     const premiseRefs = ["observation_refs", "evidence_refs", "host_decision_refs", "action_refs", "tool_result_refs"]
       .flatMap((field) => Array.isArray(checkpoint[field]) ? checkpoint[field] as unknown[] : [])
       .filter((ref): ref is string => typeof ref === "string");
-    if (premiseRefs.some((ref) => changedRecordIds.has(ref) || removed.includes(ref))) reasons.push("checkpoint_premise_changed");
+    if (premiseRefs.some((ref) => changedRecordIds.has(ref) || changedSubjectIds.has(ref) || removed.includes(ref))) reasons.push("checkpoint_premise_changed");
     if (typeof checkpoint.generation === "number" && typeof checkpoint.attempt_ref !== "string") reasons.push("attempt_attribution_missing");
     if (typeof checkpoint.external_action_state === "string" && checkpoint.external_action_state === "unknown") reasons.push("external_action_unresolved");
   }

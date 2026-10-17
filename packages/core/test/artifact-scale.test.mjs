@@ -69,7 +69,7 @@ test("synthetic 100 GiB catalog stays metadata-paged and indexed across UTC part
     store = new AuthorityStore(dbPath);
     const service = (await createCoreService(store, contentRoot));
     const host = createPrincipal("host", "scale-host", engagement_id);
-    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(contentRoot, session_id) }));
+    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(contentRoot, session_id), mode: "host-session" }));
 
     let cursor;
     let seen = 0;
@@ -113,7 +113,7 @@ test("session output resumes within the 64 MiB response bound", async () => {
   const bytes = Buffer.from("bounded resumable output");
   const digest = sha256(bytes);
   try {
-    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(dir, "content", session_id) }));
+    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(dir, "content", session_id), mode: "host-session" }));
     const begun = (await service.dispatch("artifact.store.begin", host, { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: digest }));
     assert.equal(begun.ok, true);
     (await service.dispatch("artifact.store.append", host, { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest }));

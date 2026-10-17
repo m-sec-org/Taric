@@ -1,6 +1,8 @@
 # Taric 面向渗透测试智能体的集成方案
 
-> 版本：2026-10-15 · 依据当前工作区实现（含 `harden-taric-authority-runtime`；API Contract 1.0.0 / Schema v1）。配套阅读：[代码设计](taric-code-design.md)、[API 边界](taric-api.md)、[接入指南](agent-integration.md)、[多主机运行手册](multi-host-authority-runbook.md)、[PostgreSQL 运行时验证](postgres-runtime-readiness.md)。本文描述可集成的能力与宿主实施要求，实际启用状态以部署诊断和匹配当前构建的验证证据为准。
+更新日期：2026-10-18。能力提升已完成，[验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)与[综合报告](benchmarks/capability-verification-v2.json)记录技术实现及运行时验证通过，339 项测试零失败/跳过；人工标注/基线样本数仍为 0，质量发布状态为 `blocked`。以下内容区分当前合同、实测范围与宿主职责。
+
+> 版本：2026-10-18 · 依据当前工作区实现（API Contract 1.0.0 / Schema v1）。配套阅读：[代码设计](taric-code-design.md)、[API 边界](taric-api.md)、[接入指南](agent-integration.md)、[多主机运行手册](multi-host-authority-runbook.md)、[PostgreSQL 运行时验证](postgres-runtime-readiness.md)。本文描述可集成的能力与宿主实施要求，实际启用状态以部署诊断和匹配当前构建的验证证据为准。
 
 ## 目录
 
@@ -8,7 +10,7 @@
 2. [总体架构](#2-总体架构)
 3. [Taric 结构性风险防护（核心亮点）](#3-taric-结构性风险防护核心亮点)
 4. [身份与接入设计](#4-身份与接入设计)
-5. [状态黑板设计](#5-状态黑板设计)
+5. [采用闭环、成本与保证边界](#5-采用闭环成本与保证边界)
 6. [核心工作流](#6-核心工作流)
 7. [并发执行与冲突控制](#7-并发执行与冲突控制)
 8. [Artifact 原文存储集成](#8-artifact-原文存储集成)
@@ -39,7 +41,7 @@
 - **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理凭据生命周期。agent 调度、工具调用、动作授权、HITL 交互全部由宿主系统负责。
 - **零模型直写**：三类智能体（都是 LLM agent）对权威记忆只有"提案权"；权威写入、任务认领、工具执行、Artifact 落盘由宿主运行时以 host/operator 身份完成。观察者的纠偏同样是"提案 + 建议"，由宿主强制执行。
 
-多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存了十二类运行时场景通过的[PostgreSQL 验证报告](benchmarks/postgres-runtime-v1.json)，默认部署仍保持 PostgreSQL runtime disabled；只有显式配置、构建/schema/policy 匹配的验证报告和当前数据库/租约健康检查同时通过，才可启用。这份报告是指定环境的功能证据，真实宿主跨机协作与容量仍需按 §11 单独验收。
+多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存了十二类运行时场景通过的[PostgreSQL 验证报告](benchmarks/postgres-runtime-v2.json)，默认部署仍保持 PostgreSQL runtime disabled；只有显式配置、构建/schema/policy 匹配的验证报告和当前数据库/租约健康检查同时通过，才可启用。这份报告是指定环境的功能证据，真实宿主跨机协作与容量仍需按 §11 单独验收。
 
 ## 2. 总体架构
 
@@ -142,7 +144,7 @@ PostgreSQL 统一权威状态和提交顺序，各宿主可并行运行模型与
 | 分离 L1 准入与 L2 晋升 | `admission.evaluate` 只做结构、引用、归属、来源和版本检查；`admission.promote_l2` 在固定提案/证据输入上重算 evidence/freshness/independence/risk 等硬门，缺少晋升条件则拒绝 |
 | 证据钉版本 | 评审时按 id+version 钉住证据快照；已召回、跨 Engagement、丢失的证据拒收 |
 | L1 隔离 + L2 独立复核 | 机审候选默认不进普通召回；高危 Finding 需独立（可异构）reviewer；`accept=true`、自审、同模型同提示一致全部无效（投毒回归测试固化） |
-| 字段白名单 + 敏感剥离 | 模型上下文只含白名单字段；checkpoint 契约剥离 reasoning/chain_of_thought 等隐藏推理字段 |
+| 字段白名单 + 敏感剥离 | 模型上下文只含白名单字段；checkpoint proposal/commit 递归拒绝 reasoning/chain_of_thought 等隐藏推理字段 |
 
 效果：幻觉型误报的传播半径被封死在 L0/L1 隔离区。幻觉型 Finding 有三条确定性"死法"：无证据引用 → evidence 硬门拒；伪造引用 → 引用完整性校验拒；证据过期 → freshness 硬门拒。
 
@@ -166,7 +168,7 @@ PostgreSQL 统一权威状态和提交顺序，各宿主可并行运行模型与
 | `executor-1..N` | model | engagement | read, propose | MCP stdio（每实例一个进程） | 读任务上下文、提交观察提案/进度建议/动作建议 |
 | `observer` | model + reviewer（双通道） | engagement | read, propose / read, review | MCP stdio + 宿主 reviewer RPC | 读全局状态、检测异常、评审提案、提交纠偏提案与建议 |
 | `pentest-host` | host | engagement | read, propose, work, checkpoint, action, content；原文另授 content_read | 宿主内嵌 CoreService | 任务认领/续租/重认领、观察捕获、Artifact 存取、checkpoint 提交、动作决定/结果 |
-| `operator` | operator | engagement | read, propose, admit, audit, operator, content, content_read | CLI / 宿主运维面 | Engagement 初始化、admission、审计诊断、会话绑定、原文读取 |
+| `operator` | operator | engagement | read, propose, admit, writer, audit, operator, content；原文另授 content_read | CLI / 宿主运维面 | Engagement 初始化、admission、审计诊断、会话绑定、原文读取 |
 | `canonical-writer` | writer（或具备 writer 能力的 operator） | engagement | writer | 受信任宿主治理通道 | 显式调用 `admission.promote_l2`；与普通 host、reviewer 身份分离 |
 
 约束：
@@ -223,11 +225,72 @@ try {
 
 ### 4.4 异构宿主的协作接入
 
-自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。Pi 当前覆盖上下文及 proposal/checkpoint/action/result 生命周期；DeepSeek Harness 原生桥主要覆盖 session 事件；Hermes 覆盖上下文和观察钩子，尚无完整 proposal/checkpoint/action 集成。使用后两者时，完整的认领、续租、检查点、动作结果与恢复循环需由宿主补齐，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。
+自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。锁定的 Pi 1.1.0 合同覆盖 session/context/proposal/checkpoint/action/result/error 生命周期；DeepSeek Harness 原生桥主要覆盖已验证的 session 事件；Hermes 覆盖上下文和 session/tool 观察钩子，不替换 MemoryProvider。使用后两者时，未覆盖的认领、续租、检查点、动作结果与恢复流程需由可信宿主经 CLI/host RPC 或内嵌 Core 补齐；模型 MCP 六工具不能替代这些 host-only 操作，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。
 
-## 5. 状态黑板设计
+## 5. 采用闭环、成本与保证边界
 
-### 5.1 黑板分区与 Taric 实体映射
+下面五条路径是依赖闭合的采用选择。每条路径都列出初始化、真实宿主职责、认证角色、操作和信任结果；完成一次调用不代表后续路径已经启用。模型始终只能使用现有六个 MCP 工具，host/operator/reviewer/writer 凭据必须由宿主的受信任入口持有。
+
+| 路径 | 初始化与依赖 | 角色与 operation | 结果、信任边界与宿主职责 |
+|---|---|---|---|
+| **A：只读已有状态** | operator 建立 Engagement 与 Scope；宿主把 principal 绑定到 Engagement；Core/authority 健康。 | `model`/`host`：`context.query`、`resource.query`、`evidence.query`。 | 返回固定、范围受限的 Context/元数据。宿主负责模型调用、范围选择、翻页和处理 omitted/blocked；Taric 不创建事实，也不跨 Engagement 分享。 |
+| **B：受治理候选** | A，加 host capture 通道和版本化 admission policy。 | `model`：`proposal.submit`；`host`/`operator`：capture 与候选查询；`writer`/`operator`：`admission.evaluate`，host 须额外授予 `admit`。 | 得到 pending proposal 或 L1 candidate。宿主必须依据真实工具输出捕获并挂接证据；L1 不进入普通已验证召回，proposal 不是 Finding。 |
+| **C：已验证 Finding** | B，加固定 proposal/evidence/scope 版本和独立 reviewer 绑定。 | `reviewer`：`review.submit`；授权 `writer`/`operator`：`admission.promote_l2`。 | 只有独立审核和晋升硬门全部通过才产生 L2。宿主负责审核者分离、输入/策略 hash 和人工审批；Taric 不证明观察绝对真实，也不签发攻击授权。 |
+| **D：运行恢复** | A，加 WorkItem、WorkRun/Attempt、有效 lease、当前 generation。 | `host`：`work.claim`、`work.renew`、`work.reclaim`、`checkpoint.commit`、`work.resume`；模型只能提议 checkpoint。 | 提供有归属的 checkpoint 和租约恢复边界。宿主调度 worker、执行工具、对账 unknown 外部动作，并在 reclaim 后重新检查前提；Taric 不调度 agent、不锁目标系统。 |
+| **E：原文内容** | host/operator 在 `TARIC_CONTENT_ROOT` 下显式绑定 session；配置持久存储和 ACL。host-session 捕获不依赖 WorkRun；run-bound 捕获依赖 D。 | `host`/`operator`：`artifact.session.bind`、`artifact.store.begin/append/commit`；另授 `content_read` 后才可 `artifact.content.read`。 | Taric 保存哈希、manifest 和不透明字节（或 `host_ref`），只向模型给 bounded reference/metadata。宿主负责捕获、扫描、脱敏、保留、spool 备份和原文交付；模型工具永远不拿原文。 |
+
+可运行的 [隔离 Node 治理测试](../packages/core/test/trusted-node-governance.test.mjs)覆盖 operator 初始化、host 工具结果捕获、proposal/L1、独立 reviewer transport attestation 和 writer L2 晋升，并断言 `pending` → `machine_approved` L1 → `independently_verified` L2 及 MCP 六工具边界。测试中的审核 attestation 与 host 工具结果是 fixture，不代表真实人工审核或外部宿主认证；旧 input/evidence hash 会被拒绝。
+
+### 显式会话绑定与运行 fencing
+
+`artifact.session.bind` 必须显式选择 `host-session` 或 `run-bound`，仅 host/operator 可建立持久绑定。`host-session` 拒绝运行字段，仅承诺认证的 Engagement/session 隔离与内容完整性，不提供 WorkRun owner/lease 保证。`run-bound` 必须绑定当前 `work_run_id + attempt_id + generation + owner_host`，校验 transport owner、有效租约及当前 Attempt；请求省略或替换字段不能将该绑定降级。
+
+Artifact begin/append/commit 和重启 publication 恢复从持久绑定复验 fence；失效内容不能变为 available。proposal/capture/checkpoint/action 附件同时核查可信 transport session，缺失、部分或错 owner 的运行关联在状态变更前失败；迟到提案仍保留原 Attempt/session 归属并进入隔离。`taric proxy` 用 `TARIC_SESSION_ID` 固定 host principal 的会话，RPC body 无权替换；未配置会话的 proxy 可处理独立 host 操作，但不能附着到已有 task session 的运行。
+
+宿主仍负责真实任务与 proxy/worker 的路由映射。详见[API 会话合同](taric-api.md#task-session-artifact-content)及[transport fencing 测试](../packages/core/test/transport-session-fencing.test.mjs)。
+
+### 两类宿主成本记录模板
+
+以下是记录表，不是预估值。按宿主版本、Core 构建、fixture、机器和 transport 填写；未知值写 `未测量`，不得转换为人周、ROI、认证或等效安全比例。
+
+| 字段 | 已有确定性 bridge 的宿主 | 只有模型工具入口的宿主 |
+|---|---|---|
+| 集成边界 | 既有 bridge/client 与 Core transport | 新建受认证的非模型 service/Node proxy，加模型 MCP |
+| 宿主职责 | 字段映射；principal/Engagement 绑定；捕获真实工具结果；回传结构化状态 | 包含左列全部职责，加 proxy 启停/重连、socket/key/container、证据捕获，以及 reviewer/writer/operator 分离 |
+| 实际记录 | 工时、失败调试轮次、Core 调用数、审核等待、CPU/RSS/延迟、重试 | 左列全部，加 proxy hop、进程重启、序列化、队列和跨进程等待 |
+| 证据 | 命令、版本/commit、请求/结果样本、日志、hash、失败案例 | 左列全部，加宿主/proxy 版本、socket 权限、凭据轮换和真实工具输出来源 |
+| 结论 | 只描述实际跑过的路径和拓扑 | 只描述实际跑过的路径、proxy 合同和固定宿主版本；模拟或 callback-only 仍是未验证 |
+
+### 适用场景与事实保证边界
+
+Taric 适合需要跨会话的持久、范围隔离记忆，独立审核 Finding，租约感知恢复或不透明证据引用的宿主。不适合不需要治理记忆的短期一次性扫描、无法维护独立审核链的团队，或没有当前匹配 conformance 报告和健康 fencing 的共享 PostgreSQL 部署。agent 数量本身不能证明适用。
+
+Taric 的事实保证限于所述且实际测量的合同：principal/Engagement 认证、schema/reference/version/idempotency 校验；使用相应门槛时的 L0/L1/L2 隔离；显式 run-bound 操作的 CAS/lease/generation 拒绝；以及声明 profile 内的 Artifact hash/publication 校验。Taric 不保证宿主观察真实、资产发现完备、外部动作恰好一次或已获授权、凭据安全、原文已脱敏、数据库报告仍匹配新部署，也不建立质量统计、ROI、人周、认证或等效安全百分比。推演、历史报告、模拟、callback 和 synthetic benchmark 只证明对应练习，不能升级为真实宿主认证。
+
+### I-01～I-08 来源索引
+
+| 来源 | 本入口中的采用决定与证据锚点 |
+|---|---|
+| **I-01** | 本节 A～E 依赖闭环、角色/operation/宿主职责；提案 §6。 |
+| **I-02** | Node proxy 与非 Node 宿主边界；`packages/core/src/adapter-rpc.ts`、`openRuntimeService`、提案 §7。 |
+| **I-03** | 显式持久会话模式、transport session 与运行元组；`packages/core/src/artifact-content-store.ts` 的 `assertFence`、`packages/core/src/store.ts` 的 `validateArtifactFence`、提案 §8。 |
+| **I-04** | 实例能力与证据合成；`packages/core/src/compatibility.ts`、`packages/core/src/adapter.ts`、提案 §9。 |
+| **I-05** | 有界 Context/cursor 和读取成本；`packages/core/src/context.ts`、authority paging/cursor、提案 §10。 |
+| **I-06** | Artifact transport/profile 与维护测量；`packages/core/src/artifact-content-store.ts`、`packages/core/test/artifact-scale.test.mjs`、提案 §11。 |
+| **I-07** | 先有界 host 状态轮询、后按实测预算决定可选通知；提案 §12。通知永远不是正确性依赖。 |
+| **I-08** | 公开导入边界；`packages/schemas/src/registry.ts`、service dispatch、提案 §13。公开 `snapshot.import` 返回 `unsupported_capability` 且不改状态；内部 restore 仅 operator 使用。 |
+
+README、Pi descriptor/registration、`adapter.status`、`capability.status` 和公开导入声明的矛盾清单与修正规则见[接入指南 Support Consistency Rules](agent-integration.md#support-consistency-rules)。该表以实现位置、测试证据范围和任务编号为锚点：静态 compatibility manifest 只表示已测上限；实例能力须完成注册，Core 无法观察的外部注册/健康字段保持 `not_observed`；公开 `snapshot.import` 仍在 dispatch 前拒绝。这里的合同测试不替代真实宿主进程、当前 PostgreSQL readiness 或发布认证。
+
+### 已交付的代理与状态读取
+
+非 Node 宿主可使用本机 `taric proxy`，无需在 Bun 内加载 `node:sqlite`。真实 Node 22.21.1/Bun 1.3.13 的[重启实测](benchmarks/proxy-restart-v5.json)覆盖 26 次调用、两次 proxy/Core 重启、幂等、CAS 与迟到提案隔离；不构成 BreachWeave/CyberStrike 真实宿主认证。proxy 固定 host 身份，operator/reviewer/writer 必须走独立认证通道；socket、token、authority 和 spool 挂载由可信宿主管理。
+
+`host.state` 仅供 host/operator，返回 Engagement 范围内 L1、Conflict、Impact、unknown action、到期 lease/freshness 的有界聚合与完整性标记；即使没有新提交，也按本次 `read_time` 反映到期。宿主用退避轮询发现状态变化；[轮询实测](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，resources subscription 保持 disabled。示例及返回边界见[API](taric-api.md#host-state-polling)。
+
+### 5.1 黑板状态设计
+
+#### 5.1.1 黑板分区与 Taric 实体映射
 
 | 黑板分区 | Taric 实体 | 写入方（经谁） | 读取方 |
 |---|---|---|---|
@@ -241,7 +304,7 @@ try {
 | 恢复区 | `Checkpoint` | 执行者 `checkpoint.propose` → 宿主 `checkpoint.commit` | 执行者（resume）、observer |
 | 演进区 | `ResourceRevision` / `PatchSet` | 宿主 `resource.revise/patch/relation/impact`（依据提案） | 全部 |
 
-### 5.2 读写权限矩阵（R=读 W=提案写 H=宿主代写 ✕=不可见）
+#### 5.1.2 读写权限矩阵（R=读 W=提案写 H=宿主代写 ✕=不可见）
 
 | 分区 | Planner | Executor | Observer | 宿主运行时 | Operator |
 |---|---|---|---|---|---|
@@ -344,7 +407,7 @@ try {
 要点：
 
 - **观察写入走宿主**：`capture.observation` 是 host-only 操作。执行者智能体对"我观察到了什么"只有提案权；宿主依据工具输出执行捕获，避免 LLM 幻觉直写事实层。
-- **Artifact 上传必须带 run fence**：`work_run_id + attempt_id + generation` 三要素齐备，Taric 在 authority 事务中验证租约；被 reclaim 的旧代数上传被拒绝，迟到输出进隔离。
+- **Artifact 上传由持久会话模式决定 fence**：run-bound 上传必须带齐 `work_run_id + attempt_id + generation`，Taric 在 authority 事务中验证租约；被 reclaim 的旧代数上传被拒绝，迟到输出进隔离。host-session 上传可以不带运行字段，但不获得 WorkRun owner/lease 保证，详见 §5。
 - **阴性结果同等重要**：未复现、被 WAF 拦截（`access.observe` + `origin_outcome: "not_reached"`）都经宿主写入，为覆盖闭环与"噪音/静默任务互斥"提供依据。
 
 ### 6.4 观察与纠偏流程（Observer）
@@ -406,8 +469,8 @@ operator 使用 `audit.doctor` 诊断 authority 与当前宿主 spool；`audit.r
 | 原语 | 保证 | 兜底场景 |
 |---|---|---|
 | WorkRun 活跃租约唯一 | 同一 WorkItem 不会被两个执行者同时认领 | 调度器并发窗口漏判 |
-| generation fencing | reclaim 后旧持有者一切写入（checkpoint/observation/artifact/结果）按 `stale_version` 拒绝 | 执行者僵死后复活 |
-| CAS（base_version） | 同一实体版本竞争至多一方成功 | 两个执行者改同一 Resource/Claim |
+| generation fencing | reclaim 后旧代运行受保护写入按合同拒绝；迟到提案保留原 Attempt 隔离，host-session 不获得运行 fencing | 执行者僵死后复活 |
+| CAS（expected_version） | 同一实体版本竞争至多一方成功 | 两个执行者改同一 Resource/Claim |
 | PatchSet 冲突队列 | 事实字段/互斥关系冲突保留双候选，不 last-write-wins | 并发修订同一资源 |
 | 幂等键 | 工具重试/进程重启用同键返回原结果，不重复转移 | 宿主重试语义 |
 
@@ -416,7 +479,7 @@ operator 使用 `audit.doctor` 诊断 authority 与当前宿主 spool；`audit.r
 ### 7.2 共享实体的并发写策略
 
 - 观察类记录天然无冲突（append-only，各执行者各写各的 Observation/Evidence）。
-- 修订类操作（ResourceRevision、Relation、Claim 修订）统一走 PatchSet：声明 read_set/write_set 与 base_version；非重叠变更自动合并，重叠变更进 Conflict 队列由 planner 在下一轮规划中消解。
+- 修订类操作（ResourceRevision、Relation、Claim 修订）统一走 PatchSet：声明 read_set/write_set 与 expected_version/base generation；非重叠变更自动合并，重叠变更进 Conflict 队列由 planner 在下一轮规划中消解。
 - 观察者把**长时间存留的 Conflict** 视为协作异常信号，推动 planner 拆分任务边界或串行化。
 
 ### 7.3 跨宿主调度与全局资源约束
@@ -434,7 +497,7 @@ operator 使用 `audit.doctor` 诊断 authority 与当前宿主 spool；`audit.r
 ### 8.1 绑定与目录策略
 
 - 单机可在一个 Engagement 内绑定一个任务会话根；多主机按宿主/会话分配独立 session 与根（位于各自 `TARIC_CONTENT_ROOT` 内）。执行者的原文按 Taric 服务器派生路径落盘：`artifacts/<UTC日期>/<id前缀>/<artifact-id>/v<版本>/`，自动按天分片，长任务不产生巨型目录。
-- 每个写入声明当前 `work_run_id + attempt_id + generation`（run 作用域三要素）；Taric 在 authority 事务中验证租约与代数，跨 run/过期写入被拒绝。
+- run-bound 写入声明当前 `work_run_id + attempt_id + generation`（运行作用域三要素）；Taric 在 authority 事务中验证租约与代数，跨 run/过期写入被拒绝。host-session 捕获按显式 session/Engagement 隔离，不宣称 lease fencing。
 
 ### 8.2 典型工具输出 → Artifact 映射
 
@@ -464,7 +527,7 @@ PostgreSQL 保存 task-session binding、上传状态、目录/chunk 元数据�
 
 接管时，新宿主可以先检查共享的证据元数据、哈希和历史进度；需要原文字节的后续步骤必须确认访问路径。`work.reclaim` 沿用既有任务会话引用，不自动把它迁到 B 的内容根；需要在 B 新建本地会话时，应由宿主在重新规划/创建后续 WorkRun 时显式绑定，保留旧证据和执行归属，不修改旧引用来伪装已迁移。
 
-备份需要协调 PostgreSQL 与各宿主 spool，并记录恢复序列和文件完整性。`snapshot.export/import` 是经白名单处理的 Engagement 逻辑迁移，保留实体身份、display alias 和版本，目标建立新的审计基线；它不包含全部历史事件、活跃租约或 Artifact 原文字节。数据库灾备应使用已验证的数据库备份恢复流程，并校验匹配的 spool；恢复后重新签发租约与 generation，未知外部动作不自动重放。当前 Artifact profile 只声明进程崩溃恢复，未声明断电耐久性，详见[多主机运行手册](multi-host-authority-runbook.md)。
+备份需要协调 PostgreSQL 与各宿主 spool，并记录恢复序列和文件完整性。`snapshot.export` 可作为受控检查/导出；公开 `snapshot.import` 与一般 replay 返回 `unsupported_capability`，不创建迁移基线或改变目标 authority。数据库灾备应使用已验证的内部数据库备份恢复流程，并校验匹配的 spool；恢复后重新签发租约与 generation，未知外部动作不自动重放。当前 Artifact profile 只声明进程崩溃恢复，未声明断电耐久性，详见[多主机运行手册](multi-host-authority-runbook.md)。
 
 ## 9. 上下文供给策略
 
@@ -553,7 +616,7 @@ admission.promote_l2      → L2 需独立（高风险要求异构）reviewer；
 残余缺口与对应前提：
 
 1. **checkpoint 粒度 = 损失窗口**：宿主多久 commit 一次，崩溃后就重做多少 → **前提 6**：每个工具动作/每个步骤后提交（契约支持，成本由宿主选择）。
-2. **逻辑迁移与灾备分开**：`snapshot.export/import` 不覆盖完整历史和原文字节，通用 storage backup/restore API 仍属 deferred → **前提 7**：验证数据库备份/恢复与匹配 spool 的恢复，并例行运行 `audit.doctor`。
+2. **公开导入与灾备分开**：`snapshot.import` 和一般 replay 不属于宿主支持能力；内部 storage backup/restore 仍是 operator-only → **前提 7**：验证数据库备份/恢复与匹配 spool 的恢复，并例行运行 `audit.doctor`。
 3. **共享 authority 写入仍需容量规划**：Core 是异步接口，但 SQLite 仍单写者，PostgreSQL 当前按 authority schema 串行协调写事务 → **前提 8**：选择适当的本机接入/维护进程模型，测量真实数据库网络延迟、锁等待和写入 p95；不能从小 fixture 外推多机吞吐。
 4. **权威漂移时写入阻塞**（正确行为）：需要 operator 例行诊断，否则表现为"任务卡住"（并入前提 7）。
 
@@ -621,7 +684,7 @@ admission.promote_l2      → L2 需独立（高风险要求异构）reviewer；
 5. **证据访问与故障**：A 上传的元数据在 B 可见，但本地无原文时返回明确的不可用结果；验证经宿主路由访问原 spool 的授权与哈希。演练 PostgreSQL 断连、续租失败、发布中断和文件损坏，确认停派、不回退 SQLite、不把损坏内容标可用。
 6. **恢复与容量**：在隔离目标恢复数据库及匹配 spool，校验序列、审计和内容，重新签发租约。记录真实机器数量、网络延迟、并发 worker、事务锁等待、吞吐、mutation p95、Artifact 内存与延迟、接管时长及人工处理项。
 
-验收报告应区分“共享 Core 功能通过”“各宿主生命周期已接通”“目标部署容量已测得”。仓库现有 PostgreSQL 功能报告不能替代这三项真实集成结果。SQLite 迁移到 PostgreSQL 时先冻结全部旧写入，在临时目标导入逻辑快照并验证后切换；旧 SQLite 保持冻结，绝不合并两条独立写入历史。完整操作步骤见[迁移与恢复手册](multi-host-authority-runbook.md)。
+验收报告应区分“共享 Core 功能通过”“各宿主生命周期已接通”“目标部署容量已测得”。仓库现有 PostgreSQL 功能报告不能替代这三项真实集成结果。公开 `snapshot.import`/`migration` 不受支持，不能按“导出再公开导入”切换 SQLite 到 PostgreSQL。新部署可经正常 proposal/evidence 治理接入旧材料；必须保留 authority 历史时需单独设计并验证 operator 迁移流程。灾备使用隔离数据库恢复并协调 spool，见[运行手册](multi-host-authority-runbook.md)。
 
 ## 12. 边界与注意事项
 

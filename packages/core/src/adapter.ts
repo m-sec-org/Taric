@@ -7,19 +7,49 @@ export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
 export const adapterCapabilities = ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"] as const;
 export type AdapterCapability = (typeof adapterCapabilities)[number];
 
-export type AdapterHostId = "pi" | "deepseek-harness" | "hermes";
+/**
+ * Adapter identifiers are extension points, rather than an allow-list.  The
+ * native adapters still use the well-known values below, while integrations
+ * may register a namespaced identifier after format validation.
+ */
+export type AdapterHostId = string;
+
+export type AdapterEvidenceState = "verified" | "pending" | "failed" | "skipped" | "mock";
+export interface AdapterCertificationEvidence {
+  framework_package?: string;
+  distribution?: string;
+  version?: string;
+  commit?: string;
+  state: AdapterEvidenceState;
+  /** A human-readable or machine-stable reference; it is never an authority grant. */
+  ref?: string;
+}
 
 export interface AdapterDescriptor {
   host_id: AdapterHostId;
+  /** Framework package and host distribution are intentionally separate facts. */
+  framework_package?: string;
+  distribution?: string;
   /** 宿主版本与 commit 必须来自兼容清单，不接受未知版本作为 supported。 */
   version: string;
+  commit?: string;
+  /** Kept as a read-compatible alias for the original public descriptor. */
   host_commit?: string;
   contract_version: string;
   api_contract_version: string;
   capabilities: AdapterCapability[];
+  /** Untrusted host-framework claims, preserved for diagnostics only. */
+  declared_capabilities?: string[];
+  /** True when native hooks are unavailable until this instance is registered. */
+  runtime_binding_required?: boolean;
   supported: boolean;
   unsupported_capabilities?: string[];
   test_evidence?: string[];
+  certification_evidence?: AdapterCertificationEvidence[];
+  /** Static certification is supplied by Taric's manifest, never by a capability declaration. */
+  native_certified?: boolean;
+  /** Quality-release evidence is independent from technical capability evidence. */
+  quality_release_state?: "verified" | "pending" | "blocked";
   fallback?: string[];
 }
 
@@ -72,13 +102,30 @@ export interface AdapterCapabilityReport {
   contract_version: string;
   api_contract_version: string;
   host_id: AdapterHostId;
+  framework_package?: string;
+  distribution?: string;
   host_version: string;
+  commit?: string;
   host_commit?: string;
   supported: boolean;
   capabilities: AdapterCapability[];
   unsupported_capabilities: string[];
   service_connected: boolean;
   missing_capabilities: string[];
+  implementation_state: "available" | "unavailable";
+  runtime_state: "enabled" | "disabled";
+  authorization_state: "authorized" | "unauthorized" | "unknown";
+  evidence_state: AdapterEvidenceState;
+  quality_release_state: "verified" | "pending" | "blocked";
+  /** Per-capability composition, retained separately from the enabled list. */
+  capability_status: Record<AdapterCapability, {
+    implementation_state: "available" | "unavailable";
+    runtime_state: "enabled" | "disabled";
+    authorization_state: "authorized" | "unauthorized" | "unknown";
+    evidence_state: AdapterEvidenceState;
+    quality_release_state: "verified" | "pending" | "blocked";
+    reason?: string;
+  }>;
 }
 
 export interface AdapterClient {
@@ -91,12 +138,71 @@ export interface AdapterClient {
 }
 
 export function validateAdapter(descriptor: AdapterDescriptor): AdapterResult {
+  if (!isValidAdapterId(descriptor.host_id)) return { accepted: false, reason: "invalid adapter id" };
+  if (descriptor.framework_package !== undefined && !isValidAdapterId(descriptor.framework_package)) return { accepted: false, reason: "invalid framework package" };
+  if (descriptor.distribution !== undefined && !isValidAdapterId(descriptor.distribution)) return { accepted: false, reason: "invalid distribution" };
+  if (typeof descriptor.version !== "string" || descriptor.version.length === 0 || descriptor.version.length > 128) return { accepted: false, reason: "invalid adapter version" };
+  if (descriptor.commit !== undefined && !isValidCommit(descriptor.commit)) return { accepted: false, reason: "invalid adapter commit" };
+  if (descriptor.host_commit !== undefined && !isValidCommit(descriptor.host_commit)) return { accepted: false, reason: "invalid adapter commit" };
   if (descriptor.contract_version !== ADAPTER_CONTRACT_VERSION) return { accepted: false, reason: "unsupported contract version" };
   if (descriptor.api_contract_version !== API_CONTRACT_VERSION) return { accepted: false, reason: "unsupported API contract version" };
   const unknown = (descriptor.capabilities ?? []).filter((capability) => !(adapterCapabilities as readonly string[]).includes(capability));
   if (unknown.length) return { accepted: false, reason: `unsupported capabilities: ${unknown.join(",")}` };
+  // A custom identifier is metadata until Taric has a matching certification
+  // record. Self-declared `supported` or capability fields cannot create one.
+  if (!NATIVE_ADAPTER_IDS.has(descriptor.host_id) && descriptor.supported) return { accepted: false, reason: "unsupported_capability" };
   if (!descriptor.supported) return { accepted: false, reason: "unsupported_capability" };
   return { accepted: true };
+}
+
+const NATIVE_ADAPTER_IDS = new Set(["pi", "deepseek-harness", "hermes"]);
+
+export interface CustomAdapterIdentity {
+  adapter_id: string;
+  framework_package: string;
+  distribution: string;
+  version: string;
+  commit?: string;
+  /** Host claims are metadata only and never become Taric capabilities. */
+  declared_capabilities?: readonly string[];
+}
+
+/** Build an un-certified custom adapter identity for use with generic Core APIs. */
+export function createCustomAdapterDescriptor(identity: CustomAdapterIdentity): AdapterDescriptor {
+  if (!isValidAdapterId(identity.adapter_id)) throw new ContractValidationError("validation_error", "invalid adapter id");
+  const descriptor: AdapterDescriptor = {
+    host_id: identity.adapter_id,
+    framework_package: identity.framework_package,
+    distribution: identity.distribution,
+    version: identity.version,
+    ...(identity.commit ? { commit: identity.commit, host_commit: identity.commit } : {}),
+    contract_version: ADAPTER_CONTRACT_VERSION,
+    api_contract_version: API_CONTRACT_VERSION,
+    capabilities: [],
+    ...(identity.declared_capabilities ? { declared_capabilities: [...identity.declared_capabilities] } : {}),
+    supported: false,
+    native_certified: false,
+    certification_evidence: [],
+    quality_release_state: "pending",
+    unsupported_capabilities: ["native_adapter_not_certified"],
+    fallback: ["core.authenticated_protocol"],
+  };
+  if (!isValidAdapterId(identity.framework_package) || !isValidAdapterId(identity.distribution) ||
+      typeof identity.version !== "string" || identity.version.length === 0 || identity.version.length > 128 ||
+      (identity.commit !== undefined && !isValidCommit(identity.commit))) {
+    throw new ContractValidationError("validation_error", "invalid adapter identity");
+  }
+  return descriptor;
+}
+
+/** Validate an extension identifier without making it a native certification. */
+export function isValidAdapterId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 128 &&
+    /^[A-Za-z0-9@](?:[A-Za-z0-9._/@:~-]*[A-Za-z0-9])?$/.test(value) && !value.includes("..") && !value.includes("//");
+}
+
+function isValidCommit(value: string): boolean {
+  return value.length >= 4 && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value);
 }
 
 /**
@@ -107,7 +213,9 @@ export class TaricAdapterClient implements AdapterClient {
   readonly descriptor: AdapterDescriptor;
   readonly #service: CoreService;
   readonly #principal: Principal;
+  #serviceContacted = false;
   #loaded = false;
+  #runtimeInitialized = false;
   #registeredHooks: string[] = [];
   #availableCapabilities: AdapterCapability[] = [];
 
@@ -118,27 +226,94 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   async call<T = unknown>(operation: string, request: Record<string, unknown>): Promise<{ ok: true; data: T } | { ok: false; error: AdapterError }> {
-    // Unsupported hosts are diagnostic-only in this release. Do not let the
-    // generic client turn a descriptor into an accidental native adapter.
-    if (!this.descriptor.supported) {
-      return { ok: false, error: { code: "unsupported_capability", message: `${this.descriptor.host_id} adapter is unsupported`, follow_up: this.descriptor.unsupported_capabilities?.[0] } };
-    }
-    return await this.#service.dispatch(operation, this.#principal, request) as { ok: true; data: T } | { ok: false; error: AdapterError };
+    const response = await this.#service.dispatch(operation, this.#principal, request) as { ok: true; data: T } | { ok: false; error: AdapterError };
+    this.#serviceContacted = true;
+    return response;
   }
 
   status(): AdapterCapabilityReport {
+    const certificationVerified = this.hasCurrentCertificationEvidence();
+    const registeredCapabilities = this.#runtimeInitialized ? this.#availableCapabilities : [];
+    const available = this.descriptor.supported && certificationVerified && this.#principal.transport_verified === true ? [...registeredCapabilities] : [];
+    const evidence = this.currentEvidenceState();
+    const quality = this.descriptor.quality_release_state ?? "pending";
+    const implementation_state = this.descriptor.supported && certificationVerified ? "available" : "unavailable";
+    const runtime_state = available.length > 0 ? "enabled" : "disabled";
+    const authorization_state = this.#principal.transport_verified === true && Boolean(this.#principal.engagement_id) ? "authorized" : "unauthorized";
+    const capability_status = Object.fromEntries(adapterCapabilities.map((capability) => {
+      const enabled = available.includes(capability);
+      return [capability, {
+        implementation_state: this.descriptor.supported && this.descriptor.capabilities.includes(capability) ? "available" : "unavailable",
+        runtime_state: enabled && runtime_state === "enabled" ? "enabled" : "disabled",
+        authorization_state,
+        evidence_state: enabled ? evidence : (evidence === "verified" ? "pending" : evidence),
+        quality_release_state: quality,
+        ...(enabled ? {} : { reason: this.reasonForUnavailable(capability) }),
+      }];
+    })) as AdapterCapabilityReport["capability_status"];
     return {
       contract_version: this.descriptor.contract_version,
       api_contract_version: this.descriptor.api_contract_version,
       host_id: this.descriptor.host_id,
+      framework_package: this.descriptor.framework_package,
+      distribution: this.descriptor.distribution,
       host_version: this.descriptor.version,
+      commit: this.descriptor.commit ?? this.descriptor.host_commit,
       host_commit: this.descriptor.host_commit,
-      supported: this.descriptor.supported,
-      capabilities: this.descriptor.supported ? [...this.descriptor.capabilities] : [],
+      supported: this.descriptor.supported && certificationVerified,
+      capabilities: [...available],
       unsupported_capabilities: [...(this.descriptor.unsupported_capabilities ?? [])],
-      service_connected: true,
-      missing_capabilities: adapterCapabilities.filter((capability) => !(this.#availableCapabilities.length ? this.#availableCapabilities : this.descriptor.capabilities).includes(capability)),
+      service_connected: this.#serviceContacted,
+      missing_capabilities: adapterCapabilities.filter((capability) => !available.includes(capability)),
+      implementation_state,
+      runtime_state,
+      authorization_state,
+      evidence_state: evidence,
+      quality_release_state: quality,
+      capability_status,
     };
+  }
+
+  /** Record capabilities installed by this adapter instance after binding checks. */
+  setRuntimeCapabilities(capabilities: readonly AdapterCapability[]): void {
+    const allowed = new Set(adapterCapabilities);
+    if (capabilities.some((capability) => !allowed.has(capability))) throw new ContractValidationError("validation_error", "unknown adapter capability");
+    if (capabilities.some((capability) => !this.descriptor.capabilities.includes(capability))) throw new ContractValidationError("unsupported_capability", "runtime capability exceeds the certified adapter descriptor");
+    this.#runtimeInitialized = true;
+    this.#availableCapabilities = this.descriptor.supported && this.hasCurrentCertificationEvidence() && this.#principal.transport_verified === true
+      ? [...new Set(capabilities)]
+      : [];
+  }
+
+  private reasonForUnavailable(capability: AdapterCapability): string {
+    if (!this.descriptor.supported || !this.hasCurrentCertificationEvidence()) return "unknown release or missing matching certification evidence";
+    if (this.#principal.transport_verified !== true || !this.#principal.engagement_id) return "authenticated Engagement binding is unavailable";
+    if (!this.#runtimeInitialized) return "adapter instance has not registered runtime hooks or tools";
+    if (capability === "checkpoint" || capability === "host_result") return "requires callback and valid run binding";
+    if (capability === "action_mode") return "requires a bound host tool registration";
+    if (capability === "worker_attribution") return "requires host agent binding";
+    return "hook or tool is not bound for this adapter instance";
+  }
+
+  private currentEvidenceState(): AdapterEvidenceState {
+    const evidence = this.descriptor.certification_evidence ?? [];
+    if (evidence.length === 0) return this.descriptor.supported ? "pending" : "failed";
+    if (evidence.some((item) => item.state === "failed" || item.state === "skipped" || item.state === "mock")) return evidence.find((item) => item.state === "failed" || item.state === "skipped" || item.state === "mock")!.state;
+    return this.hasCurrentCertificationEvidence() ? "verified" : "pending";
+  }
+
+  private hasCurrentCertificationEvidence(): boolean {
+    if (!this.descriptor.supported || this.descriptor.native_certified !== true) return false;
+    const matching = this.descriptor.certification_evidence?.some((item) => item.state === "verified" &&
+      item.framework_package === this.descriptor.framework_package && item.distribution === this.descriptor.distribution &&
+      item.version === this.descriptor.version && item.commit === (this.descriptor.commit ?? this.descriptor.host_commit));
+    return matching === true;
+  }
+
+  private hasRunBinding(binding: PiRuntimeBinding): boolean {
+    return typeof binding.work_run_id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(binding.work_run_id) &&
+      Number.isSafeInteger(binding.generation) && (binding.generation ?? 0) > 0 &&
+      typeof binding.agent_id === "string" && binding.agent_id.trim().length > 0;
   }
 
   async register(extension: PiExtensionApi, binding: PiRuntimeBinding = {}): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }> {
@@ -146,8 +321,9 @@ export class TaricAdapterClient implements AdapterClient {
     if (this.#principal.role !== "host" || !this.#principal.id || this.#principal.transport_verified !== true || !this.#principal.engagement_id) throw new ContractValidationError("authorization_error", "authorization_error");
     // /reload 会重新调用工厂。这里保证同一实例重复注册不会产生第二次业务副作用。
     if (this.#loaded) return { loaded: true, callbacks: [], hooks: [], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
-    if (binding.generation !== undefined && (!Number.isInteger(binding.generation) || binding.generation < 1)) throw new ContractValidationError("validation_error", "validation_error");
+    if (binding.generation !== undefined && (!Number.isSafeInteger(binding.generation) || binding.generation < 1)) throw new ContractValidationError("validation_error", "validation_error");
     if ((binding.work_run_id === undefined) !== (binding.generation === undefined)) throw new ContractValidationError("validation_error", "validation_error");
+    if (binding.work_run_id !== undefined && !this.hasRunBinding(binding)) throw new ContractValidationError("validation_error", "validation_error");
 
     const hooks = ["session_start", "context", "before_agent_start", "agent_before_settle", "tool_result", "session_shutdown"];
     // `callbacks` is the stable Taric lifecycle vocabulary. `hooks` below is
@@ -159,7 +335,7 @@ export class TaricAdapterClient implements AdapterClient {
     extension.on("before_agent_start", async (raw) => this.handle("context", raw));
     extension.on("agent_before_settle", async (raw) => {
       const event = raw as { outcome?: unknown };
-      if (binding.checkpoint && binding.work_run_id && binding.generation !== undefined && event?.outcome !== "error") {
+      if (binding.checkpoint && this.hasRunBinding(binding) && event?.outcome !== "error") {
         const checkpoint = binding.checkpoint(raw);
         if (checkpoint) return this.call("checkpoint.commit", this.runRequest(binding, { checkpoint }));
       }
@@ -173,7 +349,7 @@ export class TaricAdapterClient implements AdapterClient {
       if (event?.isError === true) {
         return this.call("error.report", { engagement_id: this.#principal.engagement_id, error_ref: typeof event.toolCallId === "string" ? event.toolCallId : undefined, message: `Pi tool ${typeof event.toolName === "string" ? event.toolName : "unknown"} failed` });
       }
-      if (binding.resultForTool && binding.work_run_id && binding.generation !== undefined) {
+      if (binding.resultForTool && this.hasRunBinding(binding)) {
         const result = binding.resultForTool(raw);
         if (result) return this.call("action.host-result", this.runRequest(binding, { ...result }));
       }
@@ -181,18 +357,30 @@ export class TaricAdapterClient implements AdapterClient {
     });
     if (extension.registerTool) {
       extension.registerTool(this.proposalTool(binding));
-      if (binding.recommendationForTool) hooks.push("tool_call");
-      if (binding.recommendationForTool) extension.on("tool_call", async (raw) => {
+      if (binding.recommendationForTool && this.hasRunBinding(binding)) hooks.push("tool_call");
+      if (binding.recommendationForTool && this.hasRunBinding(binding)) extension.on("tool_call", async (raw) => {
         const recommendation = binding.recommendationForTool?.(raw);
         if (!recommendation) return undefined;
         return this.call("action.recommend", { ...recommendation, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
       });
-      extension.registerTool(this.actionRecommendationTool(binding));
-      hooks.push("registerTool:taric_proposal", "registerTool:taric_action_recommend");
+      hooks.push("registerTool:taric_proposal");
+      if (binding.recommendationForTool && this.hasRunBinding(binding)) {
+        extension.registerTool(this.actionRecommendationTool(binding));
+        hooks.push("registerTool:taric_action_recommend");
+      }
     }
     extension.on("session_shutdown", async () => undefined);
     this.#registeredHooks = hooks;
-    this.#availableCapabilities = ["session_lifecycle", "context_injection", ...(extension.registerTool ? ["proposal_submission", "action_mode"] as AdapterCapability[] : []), ...(binding.agent_id ? ["worker_attribution"] as AdapterCapability[] : []), ...(binding.checkpoint ? ["checkpoint"] as AdapterCapability[] : []), ...(binding.resultForTool ? ["host_result"] as AdapterCapability[] : [])];
+    const hasRunBinding = this.hasRunBinding(binding);
+    this.#availableCapabilities = [
+      "session_lifecycle", "context_injection",
+      ...(extension.registerTool ? ["proposal_submission"] as AdapterCapability[] : []),
+      ...(extension.registerTool && binding.recommendationForTool && hasRunBinding ? ["action_mode"] as AdapterCapability[] : []),
+      ...(binding.agent_id && hasRunBinding ? ["worker_attribution"] as AdapterCapability[] : []),
+      ...(binding.checkpoint && hasRunBinding ? ["checkpoint"] as AdapterCapability[] : []),
+      ...(binding.resultForTool && hasRunBinding ? ["host_result"] as AdapterCapability[] : []),
+    ];
+    this.#runtimeInitialized = true;
     this.#loaded = true;
     return { loaded: true, callbacks, hooks: [...hooks], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
   }
@@ -284,7 +472,7 @@ export class TaricAdapterClient implements AdapterClient {
   }
 }
 
-export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string, grant: readonly PrincipalCapability[] = [], reviewerAttestation?: ReviewerAttestation): Principal {
+export function createPrincipal(role: PrincipalRole, id: string, engagementId?: string, grant: readonly PrincipalCapability[] = [], reviewerAttestation?: ReviewerAttestation, transportSessionId?: string): Principal {
   const defaults: Record<PrincipalRole, Principal["capabilities"]> = {
     model: ["read", "propose"],
     host: ["read", "propose", "work", "checkpoint", "action", "content"],
@@ -292,6 +480,6 @@ export function createPrincipal(role: PrincipalRole, id: string, engagementId?: 
     writer: ["read", "propose", "admit", "writer"],
     operator: ["read", "propose", "admit", "writer", "audit", "operator", "content"],
   };
-  const principal = { id, role, engagement_id: engagementId, capabilities: [...new Set([...(defaults[role] ?? []), ...grant])], ...(reviewerAttestation ? { reviewer_attestation: { ...reviewerAttestation } } : {}), transport_verified: true } as Principal;
+  const principal = { id, role, engagement_id: engagementId, ...(transportSessionId !== undefined ? { transport_session_id: transportSessionId } : {}), capabilities: [...new Set([...(defaults[role] ?? []), ...grant])], ...(reviewerAttestation ? { reviewer_attestation: { ...reviewerAttestation } } : {}), transport_verified: true } as Principal;
   return registerTransportPrincipal(principal);
 }

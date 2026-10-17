@@ -29,6 +29,7 @@ test("support documentation and capability diagnostics match the runtime manifes
     const roots = [
       new URL(`../../../openspec/changes/${capability.follow_up}/`, import.meta.url),
       new URL(`../../../openspec/changes/archive/2026-10-12-${capability.follow_up}/`, import.meta.url),
+      new URL(`../../../openspec/changes/archive/2026-10-17-${capability.follow_up}/`, import.meta.url),
     ];
     for (const artifact of ["proposal.md", "design.md", "tasks.md"]) {
       let found = false;
@@ -60,6 +61,37 @@ test("adapters and diagnostics report the same unsupported capability names", as
   const adapterNames = [createDeepSeekDescriptor(), createHermesDescriptor(), createPiDescriptor("0.74.2")].flatMap((descriptor) => descriptor.unsupported_capabilities ?? []);
   for (const name of adapterNames) assert.ok(TARIC_COMPATIBILITY_MANIFEST.capabilities.some((entry) => entry.id === name), `${name} is a manifest capability`);
   (await store.close());
+});
+
+test("adapter status and support documentation preserve the static/runtime boundary", async () => {
+  const guide = await readFile(new URL("../../../docs/agent-integration.md", import.meta.url), "utf8");
+  const readme = await readFile(new URL("../../../README.MD", import.meta.url), "utf8");
+  assert.match(guide, /`adapter\.status`/);
+  assert.match(guide, /instance_registration_state/);
+  assert.match(guide, /snapshot\.import/);
+  assert.match(readme, /Pi 1\.1\.0.*proposal\/checkpoint\/action\/result\/error hooks.*已支持/);
+  assert.doesNotMatch(readme, /proposal\/checkpoint\/action\/result 原生 hooks 仍标为 unsupported/);
+
+  const store = new AuthorityStore();
+  try {
+    const service = await createCoreService(store);
+    const principal = createPrincipal("host", "adapter-status-host");
+    const response = await service.dispatch("adapter.status", principal, {});
+    assert.equal(response.ok, true);
+    assert.deepEqual(response.data.adapters.map((entry) => entry.host_id), ["pi", "deepseek-harness", "hermes"]);
+    assert.ok(response.data.adapters.every((entry) => entry.instance_registration_state === "not_observed"));
+    assert.ok(response.data.adapters.every((entry) => entry.runtime_health_state === "not_observed"));
+    for (const adapter of response.data.adapters) {
+      const expected = TARIC_COMPATIBILITY_MANIFEST.capabilities.find((capability) => capability.id === adapter.manifest_capability.id);
+      assert.deepEqual(adapter.manifest_capability, expected);
+    }
+    const imported = await service.dispatch("snapshot.import", principal, { engagement_id: "ignored", snapshot: { records: [] } });
+    assert.equal(imported.ok, false);
+    assert.equal(imported.error.code, "unsupported_capability");
+    assert.deepEqual(await store.events(), []);
+  } finally {
+    await store.close();
+  }
 });
 
 test("design inputs are frozen for reference use only", async () => {

@@ -1,6 +1,19 @@
 # Single-host authority reads and maintenance
 
-CLI and MCP resolve the same persistent SQLite authority and content root. Set `TARIC_DB` and `TARIC_CONTENT_ROOT` explicitly when operating a separate deployment. SQLite uses WAL and one canonical writer; clients use that Core service. A maintenance CLI process opens its own connection to the same local authority. Shared files, NFS locks, Git repositories, or independent SQLite copies do not provide a multi-host backend.
+Current capability contracts and saved validation results are summarized in [the capability improvement release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md). Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Saved benchmark reports are historical evidence and should be kept unchanged when collecting new samples.
+
+> Last reviewed: 2026-10-18
+
+CLI and MCP resolve the same persistent SQLite authority and content root. Set `TARIC_DB` and `TARIC_CONTENT_ROOT` explicitly when operating a separate deployment. The default runtime profile is `single_host_sqlite`; an explicit `multi_host_authority` profile must use the PostgreSQL runbooks instead. SQLite uses WAL and serializes write transactions. CLI, MCP, proxy and maintenance processes may open separate connections to the same local file; same-process driver queues do not coordinate separate processes. Shared files, NFS locks, Git repositories, or independent SQLite copies do not provide a multi-host backend.
+
+Before maintenance, confirm that the process is pointing at the intended pair of paths:
+
+```sh
+printf 'authority=%s\ncontent_root=%s\n' "${TARIC_DB:-$HOME/.taric/authority.sqlite}" "${TARIC_CONTENT_ROOT:-<db-directory>/content}"
+node packages/cli/dist/bin.js capability.status
+```
+
+The content root contains both Artifact payloads and the authority-bound cursor key. Back up the SQLite file, the configured content root, and `.taric-context-cursor-key.v1` as one unit. A database-only backup can restore records but cannot preserve existing cursor continuations or local Artifact bytes.
 
 ## Bounded queries
 
@@ -28,11 +41,13 @@ taric audit.reconcile '{"action":"rebuild"}'
 taric audit.reconcile '{"action":"reconcile"}'
 ```
 
-Doctor, verify, preview, and export hold a pinned read transaction. Reports carry `read_seq` and authority/projection watermarks. Doctor and preview check Artifact files without changing their catalog state or appending audit events. Export materializes one selected authority state, preserves migration metadata and integrity hashes, and omits payload bytes and private Artifact locations.
+Doctor, verify, preview, and export hold a pinned read transaction. Reports carry `read_seq` and authority/projection watermarks. Doctor and preview check Artifact files without changing their catalog state or appending audit events. Export materializes the latest version of each canonical record at the selected sequence, including L0/recalled records excluded by ordinary recall, with integrity metadata and sensitive-field filtering. It omits payload bytes/private locations and does not back up all history, leases, proposals/reviews or the spool.
 
-Explicit replay/rebuild/reconcile may repair derived state through ordinary writer transactions. They preserve previous canonical versions and audit hashes, and append recovery events when applicable. Their response includes `source_read_seq`, the final `read_seq`, and watermarks. Artifact state changes occur only during explicit reconciliation. Readers can continue on their fixed sequence while a local writer commits through WAL.
+Explicit replay/rebuild/reconcile may repair derived state through ordinary writer transactions. They preserve previous canonical versions and audit hashes, and append recovery events when applicable. Their response includes `source_read_seq`, the final `read_seq`, and watermarks. `audit.reconcile {}` is also a mutating path: it consumes outbox and reconciles Artifact state. Always specify `action:"preview"` for observation only. Readers can continue on their fixed sequence while a local writer commits through WAL.
 
 Maintenance runs synchronously in its own CLI process. It is not an asynchronous service worker and does not hold a writer lock for read-only checks. Full audit/hash verification and portable exports may use memory and time proportional to selected history. Startup and doctor validate authority consistency; normal writes reuse that validation until `PRAGMA data_version` reports another connection's commit. Each mutation still validates its own candidate, references, ownership, and expected version in its write transaction.
+
+If `audit.doctor` reports authority drift, invalid permissions, a broken audit chain, or missing Artifact content, treat the authority as write-blocked until the reported condition is understood. `audit.reconcile` only repairs the derived state and publication markers selected by its action; it never invents canonical records, recreates missing payloads, or changes retention policy. After restoring the database or content root, rerun `audit.doctor`, `audit.verify`, and the relevant Artifact integrity checks before resuming writers.
 
 ## Reproduce scale measurements
 
@@ -40,15 +55,20 @@ Maintenance runs synchronously in its own CLI process. It is not an asynchronous
 npm run build
 node --no-warnings scripts/benchmark-authority.mjs
 node --no-warnings scripts/benchmark-authority.mjs --sizes=10000,50000
+node --no-warnings scripts/benchmark-authority.mjs --sizes=10000,50000 --output=/tmp/taric-authority-scale-current.json
+node --no-warnings scripts/benchmark-authority.mjs --sizes=10000,50000 --output=/tmp/taric-authority-scale-current.json --replace=true
+node --no-warnings scripts/benchmark-authority.mjs --sizes=500 --output=/tmp/authority-scale-smoke.json
 node --test packages/core/test/authority-scale.test.mjs packages/core/test/persistent-cursor.test.mjs
 ```
 
-The harness builds versioned 10k and 50k fixtures through validated snapshot import, then measures 100 individual commits and 100 proposal-to-L1 admissions at each populated size. Each sample also contains two scope/Engagement records, 100 direct mutations, and 100 admitted records. Fixture population is reported separately. Read phases use separate processes and report their pinned source sequence, elapsed time, serialized bytes where applicable, and process RSS. Each RSS maximum includes that worker's startup validation; before/after RSS helps distinguish measurement allocation from the process high-water mark.
+The harness restores versioned 10k and 50k primary-Engagement fixtures, adds a 25-revision high-churn record, three secondary Engagements, and 100 direct commits plus 100 proposal-to-L1 admissions. Fixture population is reported separately. Read phases run in separate processes on the same generated authority and preserve the pinned source sequence. Each phase reports SQL statement/returned/affected row deltas, queue wait and SQL elapsed time, application-processing residual, RSS, WAL file size before/after, event-loop delay samples, serialization bytes/time, and p50/p95. Snapshot and context phases additionally time record JSON hydration, freshness/filter evaluation, record sorting, context projection, page projection, and cursor encoding; page projection includes the cursor stage, so those values are nested and must not be added together. The delay monitor includes a short post-operation observation window so an otherwise empty histogram can record its timer sample. Singleton phase summaries have one sample (so p50 equals p95); three context continuation samples are reported individually. `--output` writes a new file and refuses to overwrite an existing report unless `--replace=true` is explicitly supplied.
 
-The report separates commit/admission p95, first list page and continuation, snapshot materialization, export materialization, and context first-page/continuation costs. Snapshot/export are O(N) materializations, and context continuation re-fetches and orders its pinned snapshot. The continuation sample contains three pages; it does not claim a constant-time or constant-memory implementation. These synthetic local measurements do not establish throughput for a different host, dataset, or deployment, and do not supply quality-evaluation truth or recall evidence.
+SQL timers bracket driver operations; application-processing residual is total phase time minus measured queue and SQL time, so it includes JSON hydration/filter work and JavaScript overhead rather than claiming a pure hydration measurement. Context ordering/projection/cursor stages use opt-in timers and contain no record data. WAL deltas are file sizes, not physical disk I/O or checkpoint cost. Event-loop delay is sampled with `monitorEventLoopDelay`; `sample_count: 0` means no timer tick landed during that phase. RSS high-water marks include worker startup and phase setup.
 
-See [context recovery](context-recovery.md) for key ownership, rotation, and restart behavior. Recorded scale evidence is saved separately in [authority-scale-v1.json](benchmarks/authority-scale-v1.json).
+The report separates commit/admission p95, first list page and continuation, snapshot materialization, export materialization, and context first-page/continuation costs. Snapshot/export remain O(N) materializations. The candidate Context path uses bounded keyset pages pinned to `read_seq`; each page records `read_stats` and enforces its scan budget. The three continuation samples also have an aggregate p50/p95, but do not establish a constant-time or constant-memory deployment guarantee. These synthetic local measurements do not establish throughput for a different host, dataset, or deployment, and do not supply quality-evaluation truth or recall evidence.
 
-The recorded run used Node 22.21.1, SQLite WAL, and an Intel i5-7287U host on 2026-10-14. At 10k/50k fixtures, commit p95 was 17.7/15.2 ms and proposal-to-L1 p95 was 54.0/34.7 ms (100 samples each). The pinned sequences were 10403/50403. Snapshot materialization took 420/1737 ms; export took 896/2809 ms with process peak RSS of 162/446 MiB. The 50k export serialized 21.3 MB. These are observations from that host and fixture, not bounds.
+See [context recovery](context-recovery.md) for key ownership, rotation, and restart behavior. The [authority-scale-v2-baseline.json](benchmarks/authority-scale-v2-baseline.json) is the preserved legacy Context baseline; [authority-scale-v3.json](benchmarks/authority-scale-v3.json) is the final bounded candidate run. Never treat the 500-row smoke fixture or historical v1/v2 measurements as final candidate evidence.
 
-The first incomplete scale run exposed an unindexed audit-to-version join. `record_versions_commit_sequence` now supports that join; a query-plan regression rejects a full version scan there. Fixture import still took 30/245 seconds in the completed run and is recorded independently of individual mutation latency. Context first pages took 1.08/3.79 seconds; the three continuation samples ranged 1.91–11.55/2.72–3.59 seconds. The raw report retains the slow sample and all RSS/sequence metadata. Context continuation is an identified O(N) read cost, not a latency release gate inferred from commit p95.
+The historical [v1 run](benchmarks/authority-scale-v1.json) used Node 22.21.1, SQLite WAL, and an Intel i5-7287U host on 2026-10-14. At 10k/50k fixtures, commit p95 was 17.7/15.2 ms and proposal-to-L1 p95 was 54.0/34.7 ms (100 samples each). The pinned sequences were 10403/50403. Snapshot materialization took 420/1737 ms; export took 896/2809 ms with process peak RSS of 162/446 MiB. The 50k export serialized 21.3 MB. These are observations from that host and fixture, not bounds.
+
+The first incomplete scale run exposed an unindexed audit-to-version join. `record_versions_commit_sequence` now supports that join; a query-plan regression rejects a full version scan there. Fixture import is recorded independently of mutation latency. The preserved legacy baseline and final candidate retain raw phase metrics, RSS, sequence, SQL, WAL, event-loop, serialization, cursor, and bounded-read metadata; the 50k candidate first page measured 3.08 seconds versus 5.36 seconds legacy (42.5% lower), below the stated 50% target.

@@ -37,7 +37,7 @@ const fixtures = {
   workRun: () => ({ ...base(), work_item_ref: randomUUID(), status: "running", generation: 1 }),
   checkpoint: () => ({ ...base(), work_item_ref: randomUUID(), work_run_ref: randomUUID(), attempt_ref: randomUUID(), generation: 1, target_version: 1, work_item_version: 1, scope_version: 0, owner: { host_id: "pi", agent_id: "worker" }, lease_expires_at: "2026-10-09T00:02:00.000Z", source_read_seq: 1, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: randomUUID(), read_seq: 1, builder_version: "context/1.0" } }),
   actionIntent: () => ({ ...base(), target: "host-ref", method: "inspect", status: "recommended", mode: "llm_recommend" }),
-  artifactSessionBinding: () => ({ engagement_id: randomUUID(), session_id: "session-1", root: "/tmp/session-1" }),
+  artifactSessionBinding: () => ({ engagement_id: randomUUID(), session_id: "session-1", root: "/tmp/session-1", mode: "host-session" }),
   artifactStoreBegin: () => ({ engagement_id: randomUUID(), session_id: "session-1", payload_kind: "binary", media_type: "application/octet-stream" }),
   artifactStoreAppend: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", ordinal: 0, chunk_hash: `sha256:${"a".repeat(64)}`, data: "YQ==", encoding: "base64" }),
   artifactStoreCommit: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", total_bytes: 1, content_hash: `sha256:${"a".repeat(64)}` }),

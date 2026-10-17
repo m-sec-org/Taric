@@ -269,7 +269,7 @@ export function createAuthorityRuntimeScenarios(
     },
     async artifact() {
       const ctx = await domain("artifact"); const session_id = `session-${uuidv7()}`; const sessionRoot = join(contentRoot, session_id);
-      await invoke(ctx.service, "artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: sessionRoot });
+      await invoke(ctx.service, "artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: sessionRoot, mode: "host-session" });
       const reader = createPrincipal("host", ctx.host.id, ctx.engagement_id, ["content_read"]);
       const body = Buffer.from([0, 255, 42, 10, 8, 1]); const content_hash = sha256(body);
       const begin = await invoke(ctx.service, "artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" });
@@ -289,7 +289,7 @@ export function createAuthorityRuntimeScenarios(
       failed(await restarted.dispatch("artifact.content.read", reader, { engagement_id: ctx.engagement_id, session_id, content_ref: committed.content_ref }), "unavailable_host");
       const faultSession = `fault-${uuidv7()}`;
       const artifacts = new ArtifactContentStore(contentRoot, authority, { fault: (point) => { if (point === "after_publication_marker") throw new Error("isolated publication stop"); } });
-      await artifacts.initialize(); await artifacts.bind({ engagement_id: ctx.engagement_id, session_id: faultSession, root: join(contentRoot, faultSession) });
+      await artifacts.initialize(); await artifacts.bind({ engagement_id: ctx.engagement_id, session_id: faultSession, root: join(contentRoot, faultSession), mode: "host-session" }, ctx.host.id);
       const upload = await artifacts.begin({ engagement_id: ctx.engagement_id, session_id: faultSession, payload_kind: "binary", media_type: "application/octet-stream" });
       await artifacts.append({ engagement_id: ctx.engagement_id, session_id: faultSession, upload_id: String(upload.upload_id), ordinal: 0, data: body.toString("base64"), chunk_hash: content_hash });
       await assert.rejects(artifacts.commit({ engagement_id: ctx.engagement_id, session_id: faultSession, upload_id: String(upload.upload_id), total_bytes: body.length, content_hash }), /isolated publication stop/);
@@ -323,7 +323,7 @@ export function createAuthorityRuntimeScenarios(
     },
     async fencing() {
       const ctx = await domain("fencing"); const session_id = `fence-${uuidv7()}`;
-      await invoke(ctx.service, "artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: join(contentRoot, session_id) });
+      await invoke(ctx.service, "artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: join(contentRoot, session_id), mode: "host-session" });
       const { run } = await runFor(ctx, { task_session_ref: session_id });
       const body = Buffer.from("fenced upload"); const content_hash = sha256(body);
       const upload = await invoke(ctx.service, "artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain",

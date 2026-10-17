@@ -1,0 +1,80 @@
+{
+  "version": "host-state-poll/1",
+  "measured_at": "2026-10-17T03:45:04.124Z",
+  "runtime": {
+    "node": "v22.21.1",
+    "platform": "darwin",
+    "arch": "x64",
+    "notifications_enabled": false
+  },
+  "budget": {
+    "baseline_calls": 10,
+    "baseline_interval_ms": 20,
+    "discovery_deadline_ms": 1000,
+    "reconnect_attempts": 1,
+    "poll_initial_backoff_ms": 20,
+    "poll_max_backoff_ms": 250
+  },
+  "baseline": {
+    "calls": 10,
+    "request_latency": {
+      "sample_count": 10,
+      "p50_ms": 1.0335510000004433,
+      "p95_ms": 3.4043929999998
+    },
+    "cpu_microseconds": {
+      "user": 34627,
+      "system": 2062
+    },
+    "rss_delta_bytes": 651264
+  },
+  "cross_process_write": {
+    "record_id": "01a147f6-9253-7663-a3ee-37fc5838d3c4",
+    "committed_at": "2026-10-17T03:45:04.091Z"
+  },
+  "polling": {
+    "total_calls": 13,
+    "request_latency": {
+      "sample_count": 13,
+      "p50_ms": 0.9401669999997466,
+      "p95_ms": 3.4043929999998
+    },
+    "discovery_latency_from_commit_ms": 33,
+    "discovery_latency_from_poll_start_ms": 5.675103999999919,
+    "backoff_final_ms": 20,
+    "state": {
+      "l1_pending": 1,
+      "conflicts": 0,
+      "impacts": 0,
+      "unknown_actions": 0,
+      "expired_leases": 0,
+      "freshness_due": 0
+    },
+    "freshness": {
+      "evaluated_at": "2026-10-17T03:45:04.123Z",
+      "due_records_at_read": 0,
+      "due_record_count_complete": true,
+      "lease_expired_at_read": false,
+      "expired_lease_count_complete": true
+    }
+  },
+  "recovery": {
+    "failures": [
+      {
+        "code": "internal_error",
+        "message": "injected service restart boundary"
+      }
+    ],
+    "reconnect_latency_ms": 2.5363420000003316
+  },
+  "conclusion": {
+    "discovery_within_budget": true,
+    "notifications_required": false
+  },
+  "limitations": [
+    "SQLite single-host fixture",
+    "synthetic claim only",
+    "no real host/MCP resource subscription",
+    "timings are local process measurements"
+  ]
+}

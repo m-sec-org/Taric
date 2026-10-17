@@ -1,5 +1,9 @@
 # Local PostgreSQL with OrbStack
 
+The latest saved [runtime verification](benchmarks/postgres-runtime-v2.json) passed all 12 scenarios on PostgreSQL 17.11 and an independent `pg_dump`/`pg_restore` check of 24 tables (audit sequence 107→107). This supplements the older availability check below; it does not establish that a container is currently healthy or that a saved report matches a rebuilt release. Generate a fresh report for the selected candidate and deployment when required.
+
+> Last reviewed: 2026-10-18
+
 `compose.postgres.yaml` starts one Taric-only PostgreSQL service on the active Docker context. It publishes **only** `127.0.0.1:55432`, uses the `taric-authority` Compose project, and persists data in the named volume `taric-authority-postgres-data`. It does not depend on or manage other development containers.
 
 This is a local development/test deployment, not a production configuration. The checked-in password is public and the `taric` role is a database superuser created by the official image. Do not expose this service publicly or reuse its credentials. A production deployment needs operator-managed secrets, least-privilege roles, TLS, backup/recovery, and separate operational review.
@@ -52,10 +56,12 @@ TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/tari
   node --test packages/core/test/postgres-live.test.mjs packages/core/test/runtime-conformance.test.mjs
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
   TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-  node scripts/verify-postgres-runtime.mjs --output docs/benchmarks/postgres-runtime-v1.json
+  node scripts/verify-postgres-runtime.mjs --output docs/benchmarks/postgres-runtime-v2.json
 ```
 
 Tests use isolated schemas inside this development database; do not point the test URL at production. A skipped live test is missing evidence. Container health alone does not enable runtime: see [PostgreSQL runtime readiness](postgres-runtime-readiness.md) for the separate gate.
+
+`TARIC_TEST_DATABASE_URL` is test-harness input only. The process-facing runtime uses `TARIC_DATABASE_URL` together with `TARIC_AUTHORITY_PROFILE=multi_host_authority`; do not point a production host at a report generated from a different database/schema or build.
 
 ## Initialize and activate Taric
 
@@ -78,12 +84,12 @@ export TARIC_AUTHORITY_PROFILE=multi_host_authority
 export TARIC_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric
 export TARIC_HOST_ID=local-orbstack
 export TARIC_LEASE_MODE=server_side
-export TARIC_RUNTIME_CONFORMANCE="$PWD/docs/benchmarks/postgres-runtime-v1.json"
+export TARIC_RUNTIME_CONFORMANCE="$PWD/docs/benchmarks/postgres-runtime-v2.json"
 export TARIC_CONTENT_ROOT="$PWD/.taric/content"
 node packages/cli/dist/bin.js capability.status
 ```
 
-Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates the saved activation evidence; rebuild and rerun verification.
+Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Before accepting writes, confirm that the diagnostics report `runtime_state=enabled`, `backend=postgresql`, and server-side fencing. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates the saved activation evidence; rebuild and rerun verification. Keep the report and its permissions operator-controlled; runtime startup consumes it but never regenerates it.
 
 ## Operate without losing data
 
@@ -94,3 +100,5 @@ docker compose -f compose.postgres.yaml up -d --wait --wait-timeout 90
 ```
 
 Stopping or recreating this service retains its named volume. Do not remove the volume unless an explicit, separately reviewed data reset is intended. The official image's initialization variables apply only to an empty data directory; changing a password in Compose does not rotate an existing database password. See the [official environment-variable documentation](https://github.com/docker-library/docs/blob/master/postgres/README.md#environment-variables).
+
+For a deliberate local reset, stop the service first, record the data-loss decision, and remove only the named volume `taric-authority-postgres-data` through the same Compose project. Never use `down -v` or broad Docker cleanup commands when other deployments share the Docker context.

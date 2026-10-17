@@ -131,3 +131,110 @@ State-changing API operations SHALL accept an idempotency key where retry is pos
 #### Scenario: Reuse an idempotency key with another payload
 - **WHEN** a client reuses a key with a different payload
 - **THEN** Taric returns an idempotency conflict and does not apply the new payload
+
+### Requirement: Unified authority startup resolution
+CLI、MCP 和其他 Phase 1 runtime entrypoints SHALL use one authority resolver for backend profile, SQLite path, content root, principal context, and deployment diagnostics. The single-host default SHALL select a persistent SQLite authority; `:memory:` is permitted only for tests or explicit configuration. An explicitly selected multi-host profile SHALL fail closed with a stable blocked/unavailable diagnostic before opening SQLite when its shared service is unavailable, and SHALL never fall back to an independent SQLite copy. Startup diagnostics MAY use stderr but initialize responses SHALL not disclose local filesystem paths.
+
+#### Scenario: Start CLI and MCP with the same configuration
+- **WHEN** CLI and MCP receive the same environment/configuration
+- **THEN** both resolve the same backend profile, authority path, and content root and apply the same startup guard
+
+#### Scenario: Restart the default runtime
+- **WHEN** a client writes through the default single-host runtime, exits, and starts it again
+- **THEN** the committed authority state remains available from the persistent SQLite path
+
+#### Scenario: Start an unavailable multi-host profile
+- **WHEN** an operator selects a multi-host profile whose PostgreSQL service or health contract is unavailable
+- **THEN** the entrypoint returns a structured blocked/unavailable error before opening SQLite and does not write authority state
+
+### Requirement: Expose explicit governance phase operations
+The versioned runtime API SHALL distinguish proposal submission, deterministic L1 admission, and authorized L2 finding promotion. `admission.evaluate` or equivalent responses MUST declare the resulting trust phase and MUST NOT imply evidence/freshness/independence gates were run when only L1 checks were performed. The registry SHALL expose an explicit `admission.promote_l2` operation for finding promotion; it SHALL require writer/operator authority plus the independent-review inputs, while reviewer identity alone SHALL not grant canonical writer authority. L2 promotion SHALL return stable authorization/validation errors when the caller lacks the required capability.
+
+#### Scenario: Call L1 admission
+- **WHEN** an authorized operator submits a structurally valid pending proposal for admission
+- **THEN** the response identifies the L1 machine-approved phase, policy/version inputs used, and any remaining L2 requirements
+
+#### Scenario: Call L2 promotion
+- **WHEN** an authorized writer submits a finding with a fixed evidence snapshot and independent review
+- **THEN** the service performs the L2 hard gates and returns an auditable independently-verified result or a structured rejection
+
+#### Scenario: Model attempts promotion
+- **WHEN** a model-facing principal calls an L2 promotion or canonical writer operation
+- **THEN** the service denies it before mutation and leaves proposal/canonical state unchanged
+
+### Requirement: Preserve framed adapter requests and stable public errors
+The authenticated adapter transport SHALL process every complete newline-delimited request in its input buffer, preserve an incomplete trailing frame, and return one structured response per request. Core errors SHALL carry stable machine-readable codes and sanitized public messages; unknown internal exceptions SHALL map to a generic internal error. Clients and adapters MUST NOT infer error codes from free-form message text.
+
+#### Scenario: Process pipelined adapter requests
+- **WHEN** one socket write contains multiple complete JSON requests or a complete request followed by a partial frame
+- **THEN** the adapter returns one response for each complete request and processes the partial frame after its remainder arrives
+
+#### Scenario: Hide an unknown internal error
+- **WHEN** an operation throws an exception without a declared public error code
+- **THEN** the transport returns the stable internal error code and generic message without exposing the exception text
+
+### Requirement: Provide a bounded host state view before optional notifications
+
+Taric SHALL expose an authenticated host/operator state view for one authorized Engagement per bounded request, returning a scope-safe watermark, fixed read time/freshness, L1 pending counts, conflicts/impact, unknown actions, and lease anomalies. Capability/runtime diagnostics SHALL respect the same authorization boundary. The view MUST NOT expose other Engagement existence, raw Artifact bytes, global sequence values, or global event history. Expiry and freshness SHALL be computed at the pinned read time even without a new commit. Periodic polling with retry/backoff SHALL remain correct when notifications are unavailable; incomplete scans MUST be explicit rather than reported as complete counts.
+
+#### Scenario: Host reads its state view
+- **WHEN** an authenticated host requests a state view for an authorized Engagement
+- **THEN** Taric returns bounded aggregate state and watermarks for that Engagement without raw content or cross-Engagement metadata
+
+#### Scenario: Scope is revoked
+- **WHEN** a host loses Engagement or resource permission before a state read
+- **THEN** the request returns an authorization error and does not disclose whether the prior view changed
+
+#### Scenario: Polling observes a change
+- **WHEN** a host polls after another process commits a change
+- **THEN** the next authorized read can observe a later watermark even if no notification was delivered
+
+#### Scenario: Lease expires without a commit
+- **WHEN** a lease or freshness threshold expires between polls without any intervening authority commit
+- **THEN** the next state read computes the expired status using its fixed read time and does not rely solely on a changed commit sequence
+
+#### Scenario: Model requests the host queue
+- **WHEN** a model principal requests the host state view
+- **THEN** Taric returns an authorization error and the model tool inventory remains limited to the existing six tools
+
+### Requirement: Keep optional state notifications best-effort
+
+If state notifications are enabled, Taric SHALL treat them as bounded, best-effort, mergeable change hints. Delivery and ordering MUST NOT be required for correctness. Taric SHALL reauthorize subscriptions and reads, scope them to permitted resources, limit subscriptions and queued bytes, and disconnect slow consumers so clients can recover by polling and rereading state. Notifications MUST NOT invoke models, schedule work, or authorize actions.
+
+Notification activation SHALL require measured polling cost or discovery latency to exceed a host budget recorded before measurement. For an MCP host surface, Taric SHALL negotiate a compatible protocol, expose resource discovery/read/subscribe/unsubscribe with stable resource URIs, and emit standard URI-only resource-updated notifications; authorized reads return scoped watermarks. Subscription registration SHALL close the read/subscribe race, cross-process changes SHALL remain detectable without stealing an outbox consumer, and reconnect SHALL reread state before advancing a locally completed range. Unsupported old positions SHALL require a new read, not general event replay.
+
+#### Scenario: Notification is lost or duplicated
+- **WHEN** a subscribed host misses or receives duplicate state notifications
+- **THEN** polling and an authorized state read recover the current state without requiring event replay
+
+#### Scenario: Subscription loses authorization
+- **WHEN** a principal loses Engagement or resource access while subscribed
+- **THEN** Taric cancels the affected subscription and sends no further information about that scope
+
+#### Scenario: Subscriber is too slow
+- **WHEN** a subscriber exceeds its bounded queue or delivery limit
+- **THEN** Taric merges pending change hints or disconnects the subscriber, and polling remains the recovery path
+
+#### Scenario: Polling meets its budget
+- **WHEN** measured polling cost and discovery delay satisfy the host's recorded budgets
+- **THEN** subscriptions remain disabled and polling is delivered without claiming subscription support
+
+#### Scenario: Commit occurs during subscription registration
+- **WHEN** another process commits after the initial read but before subscription registration completes
+- **THEN** a watermark recheck or equivalent bounded check exposes the change and the host can recover it through an authorized read
+
+### Requirement: Keep deferred import and replay paths explicitly unsupported
+
+Snapshot import, general event replay, arbitrary Artifact path access, and unverified native transport activation SHALL return `unsupported_capability` or the applicable stable contract error. These responses MUST NOT create fallback SQLite state, partially modify authority, publish content, or reinterpret historical material as a current observation.
+
+#### Scenario: Caller requests snapshot import
+- **WHEN** an operator submits a snapshot import request through a public API
+- **THEN** Taric returns an unsupported-capability error before mutation and leaves authority, counters, outbox, and projections unchanged
+
+#### Scenario: Caller requests event replay
+- **WHEN** a client requests a general replay or arbitrary historical event stream
+- **THEN** Taric rejects the operation without exposing internal events or creating a replay cursor
+
+#### Scenario: Multi-host readiness is missing
+- **WHEN** an explicitly selected shared backend lacks matching current evidence or health
+- **THEN** startup is blocked with a stable diagnostic and does not fall back to SQLite

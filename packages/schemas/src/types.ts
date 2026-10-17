@@ -60,6 +60,11 @@ export interface ArtifactSessionBinding {
   engagement_id: Uuid;
   session_id: string;
   root: string;
+  mode: "host-session" | "run-bound";
+  work_run_id?: Uuid;
+  attempt_id?: Uuid;
+  generation?: number;
+  owner_host?: string;
   binding_id?: string;
   created_at?: Timestamp;
   manifest_hash?: Sha256;
@@ -136,6 +141,7 @@ export interface ArtifactContentList {
   media_type?: string;
   work_run_id?: Uuid;
   include_content?: boolean;
+  max_response_bytes?: number;
 }
 
 export interface ArtifactSessionOutput {

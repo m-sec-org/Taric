@@ -1,17 +1,34 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { closeSync, copyFileSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { finished } from "node:stream/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { uuidv7 } from "./identity.js";
 import { ContractValidationError } from "./validation.js";
 
 export const ARTIFACT_CHUNK_BYTES = 64 * 1024 * 1024;
+const ARTIFACT_BASE64_CHARS = Math.ceil(ARTIFACT_CHUNK_BYTES / 3) * 4;
+const ARTIFACT_METADATA_MAX_BYTES = 16 * 1024;
 export const ARTIFACT_DEPLOYMENT_PROFILE = Object.freeze({
   version: "artifact-deployment/1",
   id: "local_process_crash",
   decoded_chunk_bytes: ARTIFACT_CHUNK_BYTES,
-  base64_transport_chars: Math.ceil(ARTIFACT_CHUNK_BYTES / 3) * 4,
-  json_metadata_max_bytes: 16 * 1024,
-  transport_envelope_max_bytes: Math.ceil(ARTIFACT_CHUNK_BYTES / 3) * 4 + 16 * 1024,
+  base64_transport_chars: ARTIFACT_BASE64_CHARS,
+  json_metadata_max_bytes: ARTIFACT_METADATA_MAX_BYTES,
+  transport_envelope_max_bytes: ARTIFACT_BASE64_CHARS + ARTIFACT_METADATA_MAX_BYTES,
+  response_envelope_max_bytes: ARTIFACT_BASE64_CHARS + ARTIFACT_METADATA_MAX_BYTES,
+  binary_transport_header_max_bytes: ARTIFACT_METADATA_MAX_BYTES,
+  binary_transport_envelope_max_bytes: ARTIFACT_CHUNK_BYTES + ARTIFACT_METADATA_MAX_BYTES + 4,
+  json_rpc_line_max_bytes: 1024 * 1024,
+  json_rpc_artifact_read_max_decoded_bytes: 512 * 1024,
+  json_rpc_artifact_page_items_max: 16,
+  json_rpc_page_content_max_decoded_bytes: 128 * 1024,
+  receive_chunk_bytes: 64 * 1024,
+  receive_queue_chunks: 2,
+  receive_queue_bytes_max: 128 * 1024,
+  active_uploads_max: 2,
+  page_items_max: 1000,
+  metadata_page_bytes_max: 1024 * 1024,
   publication: "staging_copy_atomic_rename_catalog_transaction",
   recovery: "verified_publication_markers",
   fsync: "none",
@@ -31,9 +48,23 @@ const MAX_BASE64_CHARS = Math.ceil(ARTIFACT_CHUNK_BYTES / 3) * 4;
 export type ArtifactPayloadKind = "text" | "binary" | "manifest";
 export type ArtifactContentStatus = "external" | "pending" | "available" | "unavailable" | "integrity_failed" | "quarantined";
 export interface ArtifactStoreError extends Error { code: "validation_error" | "authorization_error" | "conflict" | "stale_version" | "unavailable_host" | "idempotency_conflict"; }
-export interface ArtifactBinding { engagement_id: string; session_id: string; root: string; binding_id: string; created_at: string; }
+export type ArtifactSessionMode = "host-session" | "run-bound";
+export interface ArtifactBinding {
+  engagement_id: string;
+  session_id: string;
+  root: string;
+  binding_id: string;
+  created_at: string;
+  mode: ArtifactSessionMode;
+  work_run_id?: string;
+  attempt_id?: string;
+  generation?: number;
+  owner_host?: string;
+}
 export interface ArtifactBeginInput { engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; storage_mode?: "external" | "taric_stored"; charset?: string; content_encoding?: string; transfer_encoding?: string; captured_at?: string; summary_ref?: string; summary?: string; expected_bytes?: number; expected_hash?: string; category?: string; host_ref?: string; work_run_id?: string; attempt_id?: string; generation?: number; base_content_ref?: string; parent_ref?: string; derived_from?: string; child_refs?: string[]; idempotency_key?: string; }
 export interface ArtifactAppendInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; data: string; encoding?: "base64"; chunk_hash: string; idempotency_key?: string; }
+export interface ArtifactBinaryAppendInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; bytes: Uint8Array; chunk_hash: string; idempotency_key?: string; }
+export interface ArtifactBinaryAppendStreamInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; byte_length: number; chunk_hash: string; idempotency_key?: string; }
 export interface ArtifactCommitInput { engagement_id: string; session_id: string; upload_id: string; total_bytes: number; chunk_count?: number; content_hash: string; idempotency_key?: string; }
 export interface ArtifactRow { content_ref: string; artifact_id: string; version: number; engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; charset?: string; content_encoding?: string; transfer_encoding?: string; storage_mode?: "external" | "taric_stored"; category?: string; summary_ref?: string; captured_at?: string; host_ref?: string; byte_length: number; chunk_count: number; content_hash?: string; manifest_hash?: string; content_status: ArtifactContentStatus; integrity_status: "unverified" | "verified" | "mismatch" | "missing"; stored_at: string; work_run_id?: string; attempt_id?: string; generation?: number; parent_ref?: string; child_refs?: string[]; relative_dir: string; manifest_path: string; }
 interface Upload { upload_id: string; artifact_id: string; version: number; binding: ArtifactBinding; principal: string; input: ArtifactBeginInput; staging_dir: string; chunks: Array<{ ordinal: number; bytes: number; hash: string; path: string }>; total_bytes: number; }
@@ -65,8 +96,26 @@ interface ArtifactCatalogAuthority {
 
 function fail(code: ArtifactStoreError["code"], message: string): never { throw new ContractValidationError(code, message); }
 function hashBytes(bytes: Uint8Array): string { return `sha256:${createHash("sha256").update(bytes).digest("hex")}`; }
+function isCanonicalBase64(value: string): boolean {
+  if (!BASE64.test(value) || value.length % 4 !== 0) return false;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (value.endsWith("==")) return value.length > 0 && alphabet.indexOf(value[value.length - 3]!) % 16 === 0;
+  if (value.endsWith("=")) return value.length > 0 && alphabet.indexOf(value[value.length - 2]!) % 4 === 0;
+  return true;
+}
+function hashFile(path: string, aggregate?: ReturnType<typeof createHash>): string {
+  const digest = createHash("sha256");
+  const fd = openSync(path, "r");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  try {
+    let bytesRead = 0;
+    while ((bytesRead = readSync(fd, buffer, 0, buffer.length, null)) > 0) { const bytes = buffer.subarray(0, bytesRead); digest.update(bytes); aggregate?.update(bytes); }
+  } finally { closeSync(fd); }
+  return `sha256:${digest.digest("hex")}`;
+}
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a],[b]) => a.localeCompare(b)).map(([key,item]) => [key,canonical(item)])); return value; }
 function requestHash(value: unknown): string { return hashBytes(Buffer.from(JSON.stringify(canonical(value)))); }
+function jsonBytes(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
 function checkHash(value: string, label: string): void { if (!SHA.test(value)) fail("validation_error", `${label} must be sha256`); }
 function safeSegment(value: string, label: string): void { if (!value || value === "." || value === ".." || value.includes("/") || value.includes("\\")) fail("validation_error", `${label} must be an opaque segment`); }
 function isWithin(root: string, candidate: string): boolean { return candidate === root || candidate.startsWith(`${root}${sep}`); }
@@ -81,7 +130,7 @@ export class ArtifactContentStore {
   readonly #uploads = new Map<string, Upload>();
   readonly #rows = new Map<string, ArtifactRow>();
   readonly #idempotency = new Map<string, { operation: string; principal: string; engagement_id: string; request_hash: string; result: unknown }>();
-  readonly #uploadOperations = new Map<string, Promise<void>>();
+  readonly #uploadOperations = new Map<string, { tail: Promise<void>; depth: number }>();
   readonly #authority?: ArtifactCatalogAuthority;
   readonly #options: ArtifactContentOptions;
   #initialization?: Promise<void>;
@@ -125,7 +174,10 @@ export class ArtifactContentStore {
         const committed = await this.#authority?.artifactCatalogRow?.(row.engagement_id, row.session_id, row.content_ref);
         const alreadyCommitted = Boolean(row.content_hash && row.manifest_hash && committed?.content_hash === row.content_hash && committed.manifest_hash === row.manifest_hash);
         const upload = this.#uploads.get(marker.upload_id);
-        if (upload && !alreadyCommitted) await this.assertFence(upload.input, upload.principal);
+        if (!alreadyCommitted) {
+          if (!upload) continue;
+          await this.assertFence(upload.input, upload.principal);
+        }
         if (this.#authority?.completeArtifactPublication) await this.#authority.completeArtifactPublication(marker.upload_id, row, body.chunks ?? manifest.chunks, body.idempotency);
         this.#rows.set(this.rowKey(row), row);
         this.#uploads.delete(marker.upload_id);
@@ -135,11 +187,20 @@ export class ArtifactContentStore {
     }
   }
   deploymentProfile(): typeof ARTIFACT_DEPLOYMENT_PROFILE { return ARTIFACT_DEPLOYMENT_PROFILE; }
-  async bind(input: { engagement_id: string; session_id: string; root: string }): Promise<ArtifactBinding> {
+  async bind(input: { engagement_id: string; session_id: string; root: string; mode: ArtifactSessionMode; work_run_id?: string; attempt_id?: string; generation?: number; owner_host?: string }, principal = "unknown"): Promise<ArtifactBinding> {
     await this.initialize();
     // Binding overlap is a spool-wide invariant, so this write refreshes all local owners.
     await this.refreshBindings();
-    safeSegment(input.engagement_id, "engagement_id"); safeSegment(input.session_id, "session_id"); const requested = resolve(input.root);
+    safeSegment(input.engagement_id, "engagement_id"); safeSegment(input.session_id, "session_id");
+    if (input.mode !== "host-session" && input.mode !== "run-bound") fail("validation_error", "session binding mode is required");
+    if (input.mode === "run-bound") {
+      if (!input.work_run_id || !input.attempt_id || !Number.isSafeInteger(input.generation) || input.generation! < 1 || !input.owner_host) fail("validation_error", "run-bound session requires WorkRun, Attempt, generation, and owner");
+      if (input.owner_host !== principal) fail("authorization_error", "run-bound session owner must match the transport principal");
+      if (!this.#authority) fail("stale_version", "run-bound session requires an authority fence");
+    } else if (input.work_run_id !== undefined || input.attempt_id !== undefined || input.generation !== undefined || input.owner_host !== undefined) {
+      fail("validation_error", "host-session binding cannot include run attribution");
+    }
+    const requested = resolve(input.root);
     if (requested !== this.#configuredRoot && !requested.startsWith(`${this.#configuredRoot}${sep}`)) fail("authorization_error", "session root is outside configured content root");
     mkdirSync(requested, { recursive: true, mode: 0o700 }); const canonicalRequested = realpathSync(requested);
     if (canonicalRequested !== this.#root && !canonicalRequested.startsWith(`${this.#root}${sep}`)) fail("authorization_error", "session root is outside configured content root");
@@ -147,17 +208,18 @@ export class ArtifactContentStore {
       if (bound.engagement_id === input.engagement_id && bound.session_id === input.session_id) continue;
       if (isWithin(bound.root, canonicalRequested) || isWithin(canonicalRequested, bound.root)) fail("conflict", "task session roots cannot overlap");
     }
-    const existing = this.#bindings.get(this.bindingKey(input.engagement_id, input.session_id)); if (existing) { mkdirSync(requested, { recursive: true, mode: 0o700 }); if (realpathSync(existing.root) !== realpathSync(requested)) fail("conflict", "task session is already bound to another root"); return existing; }
-    const binding = { engagement_id: input.engagement_id, session_id: input.session_id, root: canonicalRequested, binding_id: uuidv7(), created_at: new Date().toISOString() };
+    const existing = this.#bindings.get(this.bindingKey(input.engagement_id, input.session_id)); if (existing) { mkdirSync(requested, { recursive: true, mode: 0o700 }); if (realpathSync(existing.root) !== realpathSync(requested) || existing.mode !== input.mode || existing.work_run_id !== input.work_run_id || existing.attempt_id !== input.attempt_id || existing.generation !== input.generation || existing.owner_host !== input.owner_host) fail("conflict", "task session is already bound with different authority"); return existing; }
+    const binding: ArtifactBinding = { engagement_id: input.engagement_id, session_id: input.session_id, root: canonicalRequested, binding_id: uuidv7(), created_at: new Date().toISOString(), mode: input.mode, ...(input.work_run_id ? { work_run_id: input.work_run_id } : {}), ...(input.attempt_id ? { attempt_id: input.attempt_id } : {}), ...(input.generation !== undefined ? { generation: input.generation } : {}), ...(input.owner_host ? { owner_host: input.owner_host } : {}) };
     await this.#authority?.saveArtifactSession(binding);
     writeFileSync(join(canonicalRequested, "manifest.json"), JSON.stringify({ schema_version: "1.0.0", engagement_id: binding.engagement_id, session_id: binding.session_id, segments: [], watermarks: { catalog: 0, manifest: 0 } }) + "\n", { mode: 0o600 });
     this.#bindings.set(this.bindingKey(input.engagement_id, input.session_id), binding);
-    await this.#authority?.recordArtifactEvent("artifact.session.bound", input.engagement_id, binding.binding_id, { session_id: input.session_id });
+    await this.#authority?.recordArtifactEvent("artifact.session.bound", input.engagement_id, binding.binding_id, { session_id: input.session_id, mode: input.mode, work_run_id: input.work_run_id, attempt_id: input.attempt_id, generation: input.generation });
     this.saveCatalog();
     return binding;
   }
   async begin(input: ArtifactBeginInput, principal = "unknown"): Promise<Record<string, unknown>> {
     await this.initialize();
+    if (Buffer.byteLength(JSON.stringify(input), "utf8") > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes) fail("validation_error", "Artifact transport metadata exceeds its 16 KiB bound");
     return this.artifactMutation(() => this.beginUpload(input, principal));
   }
   private async beginUpload(input: ArtifactBeginInput, principal: string): Promise<Record<string, unknown>> {
@@ -174,6 +236,9 @@ export class ArtifactContentStore {
     }
     safeSegment(artifactId, "artifact_id");
     await this.assertFence(input, principal);
+    const storedInput: ArtifactBeginInput = binding.mode === "run-bound"
+      ? { ...input, work_run_id: binding.work_run_id!, attempt_id: binding.attempt_id!, generation: binding.generation! }
+      : input;
     if (input.summary && /(https?:\/\/|token|secret|cookie|authorization|bearer)/i.test(input.summary)) fail("validation_error", "summary contains host-only or sensitive metadata");
     const children = input.child_refs ?? [];
     if (new Set(children).size !== children.length || children.includes(artifactId)) fail("validation_error", "composite child references must be unique and cannot reference the parent");
@@ -182,30 +247,97 @@ export class ArtifactContentStore {
     if (derivedFrom) { const parent = await this.findRow(input.engagement_id, input.session_id, derivedFrom); if (!parent) fail("authorization_error", "derived Artifact parent is not in this task session"); if (parent.parent_ref === artifactId) fail("validation_error", "derived Artifact references cannot form a cycle"); }
     if ((input.storage_mode ?? "taric_stored") === "external") {
       if (!input.host_ref) fail("validation_error", "external Artifact requires host_ref");
-      const row: ArtifactRow = { content_ref: `${artifactId}@v${version}`, artifact_id: artifactId, version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: input.payload_kind, media_type: input.media_type, storage_mode: "external", category: input.category, summary_ref: input.summary_ref, captured_at: input.captured_at, host_ref: input.host_ref, byte_length: input.expected_bytes ?? 0, chunk_count: 0, content_hash: input.expected_hash, content_status: "external", integrity_status: "unverified", stored_at: new Date().toISOString(), work_run_id: input.work_run_id, attempt_id: input.attempt_id, generation: input.generation, parent_ref: derivedFrom, child_refs: input.child_refs, relative_dir: "", manifest_path: "" };
+      const row: ArtifactRow = { content_ref: `${artifactId}@v${version}`, artifact_id: artifactId, version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: input.payload_kind, media_type: input.media_type, storage_mode: "external", category: input.category, summary_ref: input.summary_ref, captured_at: input.captured_at, host_ref: input.host_ref, byte_length: input.expected_bytes ?? 0, chunk_count: 0, content_hash: input.expected_hash, content_status: "external", integrity_status: "unverified", stored_at: new Date().toISOString(), work_run_id: storedInput.work_run_id, attempt_id: storedInput.attempt_id, generation: storedInput.generation, parent_ref: derivedFrom, child_refs: input.child_refs, relative_dir: "", manifest_path: "" };
       await this.#authority?.saveArtifactCatalogRow(row, [], undefined, undefined, principal); this.#rows.set(this.rowKey(row), row); this.saveCatalog(); const result = { artifact_id: artifactId, content_ref: row.content_ref, version, storage_mode: "external", content_status: "external" }; await this.saveIdempotentResult(input.idempotency_key, "artifact.store.begin", principal, input.engagement_id, beginHash, result); return result;
     }
-    const uploadId = uuidv7(); const stagingDir = join(binding.root, ".staging", uploadId); mkdirSync(stagingDir, { recursive: true, mode: 0o700 }); const upload: Upload = { upload_id: uploadId, artifact_id: artifactId, version, binding, principal, input: { ...input, parent_ref: derivedFrom }, staging_dir: stagingDir, chunks: [], total_bytes: 0 }; await this.persistUpload(upload); this.#uploads.set(uploadId, upload);
+    const uploadId = uuidv7(); const stagingDir = join(binding.root, ".staging", uploadId); mkdirSync(stagingDir, { recursive: true, mode: 0o700 }); const upload: Upload = { upload_id: uploadId, artifact_id: artifactId, version, binding, principal, input: { ...storedInput, parent_ref: derivedFrom }, staging_dir: stagingDir, chunks: [], total_bytes: 0 }; await this.persistUpload(upload); this.#uploads.set(uploadId, upload);
     const result = { upload_id: uploadId, artifact_id: artifactId, version, next_ordinal: 0, max_chunk_bytes: ARTIFACT_CHUNK_BYTES, deployment_profile: ARTIFACT_DEPLOYMENT_PROFILE, content_status: "pending" }; await this.saveIdempotentResult(input.idempotency_key, "artifact.store.begin", principal, input.engagement_id, beginHash, result); return result;
   }
   async append(input: ArtifactAppendInput, principal = "unknown"): Promise<Record<string, unknown>> {
     await this.initialize();
     return this.uploadOperation(input.upload_id, () => this.artifactMutation(() => this.appendUpload(input, principal)));
   }
+  /** Append already-decoded bytes from the trusted content transport. This avoids a base64 copy. */
+  async appendBinary(input: ArtifactBinaryAppendInput, principal = "unknown"): Promise<Record<string, unknown>> {
+    await this.initialize();
+    const bytes = Buffer.isBuffer(input.bytes) ? input.bytes : Buffer.from(input.bytes.buffer, input.bytes.byteOffset, input.bytes.byteLength);
+    return this.uploadOperation(input.upload_id, () => this.artifactMutation(() => this.appendDecodedUpload(input, principal, bytes, false)));
+  }
+  async appendBinaryStream(input: ArtifactBinaryAppendStreamInput, principal: string, source: AsyncIterable<Uint8Array>): Promise<Record<string, unknown>> {
+    await this.initialize();
+    return this.uploadOperation(input.upload_id, () => this.artifactMutation(() => this.appendBinaryStreamQueued(input, principal, source)));
+  }
   private async appendUpload(input: ArtifactAppendInput, principal: string): Promise<Record<string, unknown>> {
-    const appendHash = requestHash({ ...input, data: undefined, transport_hash: typeof input.data === "string" ? hashBytes(Buffer.from(input.data)) : null }); const priorResult = await this.idempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash); if (priorResult) return priorResult as Record<string, unknown>;
     const upload = await this.requireUpload(input, principal);
     await this.assertFence(upload.input, principal);
     if (!Number.isSafeInteger(input.ordinal) || input.ordinal < 0 || input.ordinal > upload.chunks.length) fail("validation_error", "chunk ordinal must be ordered"); if (input.encoding !== undefined && input.encoding !== "base64") fail("validation_error", "encoding must be base64");
     if (typeof input.data !== "string" || input.data.length > MAX_BASE64_CHARS) fail("validation_error", "base64 transport envelope exceeds 64 MiB decoded chunk limit");
-    if (Buffer.byteLength(JSON.stringify({ ...input, data: "" }), "utf8") > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes) fail("validation_error", "Artifact transport metadata exceeds its envelope bound");
-    if (!input.data || !BASE64.test(input.data) || input.data.length % 4 !== 0) fail("validation_error", "data must be canonical base64 transport");
-    const bytes = Buffer.from(input.data, "base64"); if (bytes.length > ARTIFACT_CHUNK_BYTES || bytes.toString("base64") !== input.data) fail("validation_error", "chunk exceeds the decoded limit or is not canonical base64"); checkHash(input.chunk_hash, "chunk_hash"); if (hashBytes(bytes) !== input.chunk_hash) fail("conflict", "chunk hash mismatch");
-    this.#options.measure?.("decode");
+    const metadataBytes = Buffer.byteLength(JSON.stringify({ ...input, data: "" }), "utf8");
+    if (metadataBytes > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes) fail("validation_error", "Artifact transport metadata exceeds its envelope bound");
+    if (!input.data || !isCanonicalBase64(input.data)) fail("validation_error", "data must be canonical base64 transport");
+    const envelopeBytes = metadataBytes + input.data.length;
+    if (envelopeBytes > ARTIFACT_DEPLOYMENT_PROFILE.transport_envelope_max_bytes) fail("validation_error", "Artifact transport envelope exceeds its bound");
+    const bytes = Buffer.from(input.data, "base64"); if (bytes.length > ARTIFACT_CHUNK_BYTES) fail("validation_error", "chunk exceeds the decoded limit");
+    return this.appendDecodedUpload(input, principal, bytes, true, upload);
+  }
+  private async appendDecodedUpload(input: ArtifactAppendInput | ArtifactBinaryAppendInput, principal: string, bytes: Buffer, base64Transport: boolean, knownUpload?: Upload): Promise<Record<string, unknown>> {
+    if (bytes.length > ARTIFACT_CHUNK_BYTES) fail("validation_error", "chunk exceeds the decoded limit");
+    checkHash(input.chunk_hash, "chunk_hash"); const decodedHash = hashBytes(bytes); if (decodedHash !== input.chunk_hash) fail("conflict", "chunk hash mismatch");
+    const appendHash = requestHash({ engagement_id: input.engagement_id, session_id: input.session_id, upload_id: input.upload_id, ordinal: input.ordinal, chunk_hash: input.chunk_hash, transport_hash: decodedHash });
+    const priorResult = await this.idempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash);
+    if (priorResult) return priorResult as Record<string, unknown>;
+    const upload = knownUpload ?? await this.requireUpload(input, principal);
+    if (!knownUpload) await this.assertFence(upload.input, principal);
+    if (!Number.isSafeInteger(input.ordinal) || input.ordinal < 0 || input.ordinal > upload.chunks.length) fail("validation_error", "chunk ordinal must be ordered");
+    if (!base64Transport) this.#options.measure?.("decode");
     const existing = upload.chunks[input.ordinal]; if (existing) { if (existing.hash !== input.chunk_hash || existing.bytes !== bytes.length) fail("idempotency_conflict", "chunk ordinal already contains different bytes"); const result = { upload_id: input.upload_id, ordinal: input.ordinal, next_ordinal: upload.chunks.length, idempotent: true }; await this.saveIdempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash, result); return result; }
     const path = join(upload.staging_dir, `chunk-${String(input.ordinal).padStart(8, "0")}.part`); writeFileSync(path, bytes, { mode: 0o600 }); upload.chunks.push({ ordinal: input.ordinal, bytes: bytes.length, hash: input.chunk_hash, path }); upload.total_bytes += bytes.length; await this.persistUpload(upload);
     this.#options.measure?.("append");
     const result = { upload_id: input.upload_id, ordinal: input.ordinal, next_ordinal: upload.chunks.length, bytes: bytes.length }; await this.saveIdempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash, result); return result;
+  }
+  private async appendBinaryStreamQueued(input: ArtifactBinaryAppendStreamInput, principal: string, source: AsyncIterable<Uint8Array>): Promise<Record<string, unknown>> {
+    if (Buffer.byteLength(JSON.stringify(input), "utf8") > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes) fail("validation_error", "Artifact transport metadata exceeds its 16 KiB bound");
+    const upload = await this.requireUpload(input, principal);
+    await this.assertFence(upload.input, principal);
+    if (!Number.isSafeInteger(input.ordinal) || input.ordinal < 0 || input.ordinal > upload.chunks.length) fail("validation_error", "chunk ordinal must be ordered");
+    if (!Number.isSafeInteger(input.byte_length) || input.byte_length < 1 || input.byte_length > ARTIFACT_CHUNK_BYTES) fail("validation_error", "binary chunk byte_length must be within the 64 MiB decoded limit");
+    checkHash(input.chunk_hash, "chunk_hash");
+    const stagingPath = join(upload.staging_dir, `chunk-${String(input.ordinal).padStart(8, "0")}.${uuidv7()}.receive`);
+    const output = createWriteStream(stagingPath, { flags: "wx", mode: 0o600, highWaterMark: 64 * 1024 });
+    const outputDone = finished(output); outputDone.catch(() => {});
+    const digest = createHash("sha256"); let received = 0;
+    try {
+      for await (const part of source) {
+        const bytes = Buffer.isBuffer(part) ? part : Buffer.from(part.buffer, part.byteOffset, part.byteLength);
+        if (received + bytes.length > input.byte_length || received + bytes.length > ARTIFACT_CHUNK_BYTES) fail("validation_error", "binary body exceeded its declared bound");
+        digest.update(bytes); received += bytes.length;
+        if (!output.write(bytes)) await once(output, "drain");
+      }
+      output.end(); await outputDone;
+      if (received !== input.byte_length) fail("validation_error", "binary body ended before its declared byte_length");
+      const receivedHash = `sha256:${digest.digest("hex")}`;
+      if (receivedHash !== input.chunk_hash) fail("conflict", "chunk hash mismatch");
+      const appendHash = requestHash({ engagement_id: input.engagement_id, session_id: input.session_id, upload_id: input.upload_id, ordinal: input.ordinal, chunk_hash: input.chunk_hash, transport_hash: receivedHash });
+      const priorResult = await this.idempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash);
+      if (priorResult) { rmSync(stagingPath, { force: true }); return priorResult as Record<string, unknown>; }
+      const existing = upload.chunks[input.ordinal];
+      if (existing) {
+        if (existing.hash !== input.chunk_hash || existing.bytes !== received) fail("idempotency_conflict", "chunk ordinal already contains different bytes");
+        rmSync(stagingPath, { force: true });
+        const result = { upload_id: input.upload_id, ordinal: input.ordinal, next_ordinal: upload.chunks.length, idempotent: true };
+        await this.saveIdempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash, result);
+        return result;
+      }
+      const path = join(upload.staging_dir, `chunk-${String(input.ordinal).padStart(8, "0")}.part`);
+      renameSync(stagingPath, path);
+      upload.chunks.push({ ordinal: input.ordinal, bytes: received, hash: receivedHash, path }); upload.total_bytes += received; await this.persistUpload(upload);
+      this.#options.measure?.("append");
+      const result = { upload_id: input.upload_id, ordinal: input.ordinal, next_ordinal: upload.chunks.length, bytes: received };
+      await this.saveIdempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, appendHash, result);
+      return result;
+    } catch (cause) {
+      output.destroy(); await outputDone.catch(() => {}); rmSync(stagingPath, { force: true }); throw cause;
+    }
   }
   async commit(input: ArtifactCommitInput, principal = "unknown"): Promise<ArtifactRow> {
     await this.initialize();
@@ -216,7 +348,7 @@ export class ArtifactContentStore {
     const commitHash = requestHash(input); const prior = await this.idempotentResult(input.idempotency_key, "artifact.store.commit", principal, input.engagement_id, commitHash); if (prior) return prior as ArtifactRow;
     const upload = await this.requireUpload(input, principal); checkHash(input.content_hash, "content_hash");
     await this.assertFence(upload.input, principal);
-    if (upload.total_bytes !== input.total_bytes || upload.chunks.length !== (input.chunk_count ?? upload.chunks.length)) fail("conflict", "upload byte or chunk count mismatch"); const fullHash = createHash("sha256"); for (const chunk of upload.chunks.sort((a, b) => a.ordinal - b.ordinal)) { const bytes = readFileSync(chunk.path); if (bytes.length !== chunk.bytes || hashBytes(bytes) !== chunk.hash) fail("conflict", "staged chunk failed integrity verification"); fullHash.update(bytes); }
+    if (upload.total_bytes !== input.total_bytes || upload.chunks.length !== (input.chunk_count ?? upload.chunks.length)) fail("conflict", "upload byte or chunk count mismatch"); const fullHash = createHash("sha256"); for (const chunk of upload.chunks.sort((a, b) => a.ordinal - b.ordinal)) { if (statSync(chunk.path).size !== chunk.bytes || hashFile(chunk.path, fullHash) !== chunk.hash) fail("conflict", "staged chunk failed integrity verification"); }
     if (`sha256:${fullHash.digest("hex")}` !== input.content_hash) fail("conflict", "content hash mismatch"); if (upload.input.expected_bytes !== undefined && upload.input.expected_bytes !== input.total_bytes) fail("conflict", "expected byte count mismatch"); if (upload.input.expected_hash && upload.input.expected_hash !== input.content_hash) fail("conflict", "expected content hash mismatch");
     const storedAt = new Date().toISOString(); const parts = storedAt.slice(0, 10).split("-"); const relDir = join("artifacts", ...parts, upload.artifact_id.slice(0, 2), upload.artifact_id, `v${String(upload.version).padStart(6, "0")}`); const dir = join(upload.binding.root, relDir); const publishDir = `${dir}.publishing-${input.upload_id}`;
     const manifestChunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }> = []; let offset = 0; for (const chunk of upload.chunks) { const filename = `payload-${String(chunk.ordinal + 1).padStart(6, "0")}.part`; manifestChunks.push({ ordinal: chunk.ordinal, offset, bytes: chunk.bytes, hash: chunk.hash, path: relative(upload.binding.root, join(dir, filename)).split(sep).join("/") }); offset += chunk.bytes; }
@@ -256,12 +388,21 @@ export class ArtifactContentStore {
   }
   /** Serializes this consumer's ordered upload; filesystem sharing is not an authority lock. */
   private async uploadOperation<T>(uploadId: string, operation: () => Promise<T>): Promise<T> {
-    const prior = this.#uploadOperations.get(uploadId) ?? Promise.resolve();
+    const current = this.#uploadOperations.get(uploadId);
+    const prior = current?.tail ?? Promise.resolve();
+    const state = current ?? { tail: Promise.resolve(), depth: 0 };
+    state.depth += 1;
     const result = prior.then(operation);
-    const settled = result.then(() => {}, () => {});
-    this.#uploadOperations.set(uploadId, settled);
+    state.tail = result.then(() => {}, () => {});
+    this.#uploadOperations.set(uploadId, state);
     try { return await result; }
-    finally { if (this.#uploadOperations.get(uploadId) === settled) this.#uploadOperations.delete(uploadId); }
+    finally {
+      const active = this.#uploadOperations.get(uploadId);
+      if (active === state) {
+        state.depth -= 1;
+        if (state.depth === 0) this.#uploadOperations.delete(uploadId);
+      }
+    }
   }
   async read(input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; principal_id?: string }): Promise<Record<string, unknown>> {
     await this.initialize();
@@ -280,7 +421,7 @@ export class ArtifactContentStore {
     return { ...await this.read({ ...input, length: Math.min(requested, max) }), max_response_bytes: max };
   }
   async metadata(input: { engagement_id: string; session_id: string; content_ref: string }): Promise<Record<string, unknown>> { await this.initialize(); const row = await this.requireRow(input); const { relative_dir: _dir, manifest_path: _manifest, host_ref: _hostRef, ...safe } = row; return safe; }
-  async list(input: { engagement_id: string; session_id: string; cursor?: string; page_size?: number; category?: string; media_type?: string; work_run_id?: string; include_content?: boolean; principal_id?: string }): Promise<Record<string, unknown>> {
+  async list(input: { engagement_id: string; session_id: string; cursor?: string; page_size?: number; category?: string; media_type?: string; work_run_id?: string; include_content?: boolean; max_response_bytes?: number; principal_id?: string }): Promise<Record<string, unknown>> {
     await this.initialize();
     const pageSize = input.page_size ?? 100; if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) fail("validation_error", "page_size must be bounded"); await this.requireBinding(input.engagement_id, input.session_id);
     const cursor = input.cursor ? cursorDecode(input.cursor) : undefined;
@@ -295,15 +436,38 @@ export class ArtifactContentStore {
       if (cursor?.content_ref) { const index = rows.findIndex((row) => row.stored_at === cursor.stored_at && row.content_ref === cursor.content_ref); if (index < 0) fail("validation_error", "invalid list cursor"); rows = rows.slice(index + 1); }
       hasMore = rows.length > pageSize; rows = rows.slice(0, pageSize);
     }
-    const last = rows.at(-1); const next_cursor = hasMore && last ? cursorEncode({ engagement_id: input.engagement_id, session_id: input.session_id, principal_id: input.principal_id ?? null, category: input.category ?? null, media_type: input.media_type ?? null, work_run_id: input.work_run_id ?? null, stored_at: last.stored_at, content_ref: last.content_ref }) : undefined;
-    const content = input.include_content && rows[0] ? await this.read({ engagement_id: input.engagement_id, session_id: input.session_id, content_ref: rows[0].content_ref, principal_id: input.principal_id }) : undefined;
-    return { items: rows.map(({ relative_dir: _dir, manifest_path: _manifest, host_ref: _hostRef, ...row }) => row), next_cursor, catalog_watermark: watermark.catalog_watermark, index_watermark: watermark.index_watermark, index_status: watermark.index_status, content, max_response_bytes: input.include_content ? ARTIFACT_CHUNK_BYTES : undefined };
+    const pageItems = rows.map(({ relative_dir: _dir, manifest_path: _manifest, host_ref: _hostRef, ...row }) => row);
+    let next_cursor: string | undefined;
+    const metadata = () => {
+      const last = rows.at(-1);
+      next_cursor = hasMore && last ? cursorEncode({ engagement_id: input.engagement_id, session_id: input.session_id, principal_id: input.principal_id ?? null, category: input.category ?? null, media_type: input.media_type ?? null, work_run_id: input.work_run_id ?? null, stored_at: last.stored_at, content_ref: last.content_ref }) : undefined;
+      return { items: pageItems, next_cursor, catalog_watermark: watermark.catalog_watermark, index_watermark: watermark.index_watermark, index_status: watermark.index_status };
+    };
+    let pageMetadata = metadata();
+    while (jsonBytes(pageMetadata) > ARTIFACT_DEPLOYMENT_PROFILE.metadata_page_bytes_max) {
+      if (pageItems.length <= 1) fail("validation_error", "Artifact metadata page exceeds its 1 MiB bound");
+      pageItems.pop(); rows.pop(); hasMore = true; pageMetadata = metadata();
+    }
+    const max = input.max_response_bytes ?? ARTIFACT_CHUNK_BYTES;
+    if (!Number.isSafeInteger(max) || max < 1 || max > ARTIFACT_CHUNK_BYTES) fail("validation_error", "max_response_bytes must be bounded");
+    const content = input.include_content && rows[0] ? await this.readBounded({ engagement_id: input.engagement_id, session_id: input.session_id, content_ref: rows[0].content_ref, max_response_bytes: max, principal_id: input.principal_id }) : undefined;
+    return { ...pageMetadata, content, max_response_bytes: input.include_content ? max : undefined };
   }
   async output(input: { engagement_id: string; session_id: string; cursor?: string; execution_cursor?: string; page_size?: number; include_content?: boolean; max_response_bytes?: number; work_run_id?: string; attempt_id?: string; principal_id?: string }): Promise<Record<string, unknown>> {
     const max = input.max_response_bytes ?? ARTIFACT_CHUNK_BYTES; if (!Number.isSafeInteger(max) || max < 1 || max > ARTIFACT_CHUNK_BYTES) fail("validation_error", "max_response_bytes must be bounded");
-    const page = await this.list({ ...input, include_content: false }); const first = (page.items as Array<{ content_ref: string }>)[0]; const content = input.include_content && first ? await this.readBounded({ engagement_id: input.engagement_id, session_id: input.session_id, content_ref: first.content_ref, max_response_bytes: max, principal_id: input.principal_id }) : undefined;
-    const executionPage = this.#authority?.executionCatalogPage ? await this.#authority.executionCatalogPage({ engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id, attempt_id: input.attempt_id, cursor: input.execution_cursor, page_size: Math.min(input.page_size ?? 100, MAX_PAGE_SIZE) }) : { items: await this.#authority?.executionCatalogRows({ engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id, attempt_id: input.attempt_id }) ?? [], index_watermark: 0, next_cursor: undefined };
-    return { ...page, execution: executionPage.items, execution_next_cursor: executionPage.next_cursor, execution_index_watermark: executionPage.index_watermark, include_content: Boolean(input.include_content), max_response_bytes: max, content };
+    let pageSize = Math.min(input.page_size ?? 100, MAX_PAGE_SIZE);
+    let page: Record<string, unknown>; let executionPage: { items: Array<Record<string, unknown>>; index_watermark: number; next_cursor?: string };
+    let result: Record<string, unknown>;
+    while (true) {
+      page = await this.list({ ...input, page_size: pageSize, include_content: false });
+      executionPage = this.#authority?.executionCatalogPage ? await this.#authority.executionCatalogPage({ engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id, attempt_id: input.attempt_id, cursor: input.execution_cursor, page_size: pageSize }) : { items: await this.#authority?.executionCatalogRows({ engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id, attempt_id: input.attempt_id }) ?? [], index_watermark: 0, next_cursor: undefined };
+      result = { ...page, execution: executionPage.items, execution_next_cursor: executionPage.next_cursor, execution_index_watermark: executionPage.index_watermark };
+      if (jsonBytes(result) <= ARTIFACT_DEPLOYMENT_PROFILE.metadata_page_bytes_max) break;
+      if (pageSize <= 1) fail("validation_error", "Artifact session output page exceeds its 1 MiB bound");
+      pageSize = Math.max(1, Math.floor(pageSize / 2));
+    }
+    const first = (page.items as Array<{ content_ref: string }>)[0]; const content = input.include_content && first ? await this.readBounded({ engagement_id: input.engagement_id, session_id: input.session_id, content_ref: first.content_ref, max_response_bytes: max, principal_id: input.principal_id }) : undefined;
+    return { ...result, include_content: Boolean(input.include_content), max_response_bytes: max, content };
   }
   async reconcile(input: { cursor?: string; page_size?: number; engagement_id?: string; session_id?: string; read_only?: boolean } = {}): Promise<{ valid: boolean; pending_publications: Array<Record<string, unknown>>; unavailable: string[]; integrity_failed: string[]; checked: number; next_cursor?: string }> {
     await this.initialize();
@@ -393,6 +557,7 @@ export class ArtifactContentStore {
     if (!binding) fail("authorization_error", "task session is not registered for this content host");
     let root: string; try { root = realpathSync(binding.root); } catch { fail("unavailable_host", "task session is unavailable"); }
     if (!isWithin(this.#root, root)) fail("authorization_error", "task session root escaped configured content root");
+    if (binding.mode !== "host-session" && binding.mode !== "run-bound") fail("validation_error", "task session binding mode is invalid");
     return binding;
   }
   private async requireUpload(input: { engagement_id: string; session_id: string; upload_id: string }, principal: string): Promise<Upload> {
@@ -421,6 +586,13 @@ export class ArtifactContentStore {
   private async persistUpload(upload: Upload): Promise<void> { await this.#authority?.saveArtifactUpload(upload.upload_id, upload.binding.engagement_id, upload.binding.session_id, upload as unknown as Record<string, unknown>); }
   private async assertFence(input: ArtifactBeginInput, principal: string): Promise<void> {
     const hasAny = Boolean(input.work_run_id || input.attempt_id || input.generation !== undefined);
+    const binding = this.#bindings.get(this.bindingKey(input.engagement_id, input.session_id));
+    if (binding?.mode === "run-bound") {
+      if (hasAny && (input.work_run_id !== binding.work_run_id || input.attempt_id !== binding.attempt_id || input.generation !== binding.generation)) fail("validation_error", "run-bound Artifact attribution conflicts with the registered session");
+      if (!this.#authority || !binding.work_run_id || !binding.attempt_id || !Number.isSafeInteger(binding.generation)) fail("stale_version", "run-bound Artifact session has no durable fence");
+      await this.#authority.validateArtifactFence({ engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: binding.work_run_id, attempt_id: binding.attempt_id, generation: binding.generation!, principal });
+      return;
+    }
     if (!hasAny) return;
     if (!input.work_run_id || !input.attempt_id || !Number.isSafeInteger(input.generation) || input.generation! < 1) fail("validation_error", "run-scoped Artifact writes require WorkRun, Attempt, and generation");
     if (!this.#authority) fail("stale_version", "run-scoped Artifact writes require an authority fence");

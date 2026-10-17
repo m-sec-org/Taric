@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 
 const execFileAsync = promisify(execFile);
 const cliPath = join(import.meta.dirname, "..", "dist", "bin.js");
@@ -82,6 +84,60 @@ test("adapter version and health examples run in subprocesses", async () => {
   assert.equal(manifest.core_connected, true);
   assert.equal(manifest.compatibility_manifest.hosts["deepseek-harness"].version, "0.2.0-rc.2");
   assert.equal(manifest.compatibility_manifest.hosts.hermes.version, "0.19.0");
+});
+
+test("Node proxy serves a real Bun client, pins the host principal, and restarts cleanly", async (t) => {
+  const bun = spawnSync("bun", ["--version"], { encoding: "utf8" });
+  if (bun.error?.code === "ENOENT") return t.skip("Bun is unavailable in this environment");
+  assert.equal(bun.status, 0, bun.stderr);
+  const dir = await mkdtemp(join(tmpdir(), "taric-proxy-bun-"));
+  const socket = join(dir, "core.sock");
+  const db = join(dir, "authority.sqlite");
+  let engagement;
+  const env = { ...process.env, TARIC_DB: db, TARIC_CONTENT_ROOT: join(dir, "content"), TARIC_CORE_SOCKET: socket, TARIC_ADAPTER_TOKEN: "d".repeat(48), TARIC_ENGAGEMENT_ID: engagement, TARIC_PRINCIPAL_ID: "fixed-host" };
+  const runCli = (args) => execFileAsync(process.execPath, [cliPath, ...args], { env });
+  const waitForSocket = async (child) => {
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null) throw new Error(`proxy exited before listening (${child.exitCode})`);
+      try { await (await import("node:fs/promises")).stat(socket); return; } catch { await delay(25); }
+    }
+    throw new Error("proxy did not create its socket");
+  };
+  const startProxy = async () => {
+    const child = spawn(process.execPath, [cliPath, "proxy"], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    await waitForSocket(child).catch(async (cause) => {
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+      throw new Error(`${cause.message}: ${stderr}`);
+    });
+    return child;
+  };
+  const stopProxy = async (child) => {
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    child.kill("SIGTERM");
+    await exited;
+  };
+  const client = new URL("../../../scripts/adapter-rpc-bun-client.mjs", import.meta.url).pathname;
+  const runBunClient = async () => execFileAsync("bun", [client, "--probe-privilege"], { env });
+  try {
+    const initialized = JSON.parse((await runCli(["engagement.init", JSON.stringify({ name: "bun-proxy", scope: { allowed_targets: ["example.test"], excluded_targets: [], rules_of_engagement_ref: "roe:bun-proxy" } })])).stdout);
+    engagement = initialized.data.id;
+    env.TARIC_ENGAGEMENT_ID = engagement;
+    let proxy = await startProxy();
+    try {
+      const first = await runBunClient();
+      assert.equal(JSON.parse(first.stdout.split("\n")[0]).data.engagement_id, engagement);
+      assert.deepEqual(JSON.parse(first.stdout.split("\n")[1]).data, { operator: "denied", reviewer: "denied", writer: "denied", principal_switch: "denied" });
+    } finally { await stopProxy(proxy); }
+    proxy = await startProxy();
+    try {
+      const restarted = await runBunClient();
+      assert.equal(JSON.parse(restarted.stdout.split("\n")[0]).data.engagement_id, engagement);
+    } finally { await stopProxy(proxy); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test("taric exits nonzero and keeps stdout empty for unsupported capability", async () => {

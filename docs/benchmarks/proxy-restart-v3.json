@@ -1,0 +1,51 @@
+{
+  "version": "proxy-restart/1",
+  "started_at": "2026-10-17T05:04:47.676Z",
+  "measured_at": "2026-10-17T05:04:57.926Z",
+  "harness_elapsed_ms": 10247.939146,
+  "runtime": {
+    "node": "v22.21.1",
+    "bun": "1.3.13",
+    "platform": "darwin",
+    "arch": "x64"
+  },
+  "authority": {
+    "persistent_during_run": true,
+    "storage": "temporary SQLite file retained across proxy process restart",
+    "socket_mode": "0600"
+  },
+  "measured": {
+    "commands": [
+      "node scripts/benchmark-proxy-restart.mjs --output=docs/benchmarks/proxy-restart-v3.json",
+      "node packages/cli/dist/bin.js proxy",
+      "bun scripts/adapter-rpc-bun-client.mjs"
+    ],
+    "calls": 6,
+    "retries": 1,
+    "waits_ms": [
+      606.7023730000001,
+      368.35410200000115,
+      105.8844769999996
+    ],
+    "restart_ms": [
+      1533.7925930000001
+    ],
+    "outcomes": [
+      "changed_retry_rejected",
+      "stale_generation_renewal_rejected"
+    ]
+  },
+  "conclusion": {
+    "public_entrypoints_only": true,
+    "idempotency_after_restart": true,
+    "run_state_survives_proxy_restart": true,
+    "stale_generation_rejected": true
+  },
+  "limitations": [
+    "local Unix socket",
+    "single-host SQLite",
+    "timings are one synthetic run",
+    "implementation labor-hours were not instrumented",
+    "does not certify external credentials or network failure"
+  ]
+}

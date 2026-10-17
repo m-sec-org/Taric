@@ -56,7 +56,7 @@ test("Artifact consumers refresh bindings, uploads, idempotency and catalog stat
   const second = new ArtifactContentStore(root, secondAuthority);
   try {
     await Promise.all([first.initialize(), second.initialize()]);
-    await first.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const begin = { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", idempotency_key: uuidv7() };
     const upload = await first.begin(begin, "host");
     assert.equal((await second.begin(begin, "host")).upload_id, upload.upload_id);
@@ -77,7 +77,7 @@ async function assertConcurrentArtifactIdempotency(firstAuthority, secondAuthori
   const root = join(dir, "content"); const engagement_id = uuidv7(); const session_id = "session";
   const first = new ArtifactContentStore(root, firstAuthority); const second = new ArtifactContentStore(root, secondAuthority);
   await Promise.all([first.initialize(), second.initialize()]);
-  await first.bind({ engagement_id, session_id, root: join(root, session_id) });
+  await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
   const externalInput = { engagement_id, session_id, payload_kind: "text", media_type: "text/plain", storage_mode: "external", host_ref: "opaque-host-ref", idempotency_key: uuidv7() };
   const [firstExternal, secondExternal] = await Promise.all([first.begin(externalInput, "host"), second.begin(externalInput, "host")]);
   assert.deepEqual(secondExternal, firstExternal);
@@ -130,7 +130,7 @@ test("Artifact commit succeeds when another initializer completes after rename b
   const first = new ArtifactContentStore(root, delayedAuthority); const second = new ArtifactContentStore(root, authority);
   try {
     await first.initialize();
-    await first.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const work = await authority.createRecord({ engagement_id, kind: "work_item", title: "artifact publication race", status: "queued", acceptance_criteria: ["publish once"] }, "L1");
     const run = await authority.claimWorkRun({ engagement_id, work_item_id: work.id, host_id: "host", agent_id: "agent", task_session_ref: session_id, ttl_ms: 60_000 });
     const bytes = Buffer.from("published by recovery");
@@ -164,7 +164,7 @@ test("Artifact recovery and reconcile leave another host's spool and markers alo
   try {
     const first = new ArtifactContentStore(root, authority, { fault: (point) => { if (point === "after_rename") throw new Error("simulated process stop"); } });
     await first.initialize();
-    await first.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const upload = await first.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }, "host");
     await first.append({ engagement_id, session_id, upload_id: upload.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: hash(bytes) }, "host");
     await assert.rejects(first.commit({ engagement_id, session_id, upload_id: upload.upload_id, total_bytes: bytes.length, content_hash: hash(bytes) }, "host"), /simulated process stop/);
@@ -202,7 +202,7 @@ test("Artifact awaits backend failures before exposing a publication", async () 
   try {
     const artifacts = new ArtifactContentStore(root, broken);
     await artifacts.initialize();
-    await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const bytes = Buffer.from("not yet published");
     const upload = await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }, "host");
     await artifacts.append({ engagement_id, session_id, upload_id: upload.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: hash(bytes) }, "host");
@@ -224,7 +224,7 @@ test("Artifact serializes concurrent ordered appends and commit within one proce
   try {
     const artifacts = new ArtifactContentStore(root, authority);
     await artifacts.initialize();
-    await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const chunks = [Buffer.from([0, 1, 255]), Buffer.from([17, 42, 0])]; const bytes = Buffer.concat(chunks);
     const upload = await artifacts.begin({ engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" }, "host");
     const append = (ordinal, principal = "host") => artifacts.append({ engagement_id, session_id, upload_id: upload.upload_id, ordinal, data: chunks[ordinal].toString("base64"), chunk_hash: hash(chunks[ordinal]) }, principal);
@@ -250,7 +250,7 @@ test("Artifact reconcile continues bounded pages across local sessions and optio
     const artifacts = new ArtifactContentStore(root, authority);
     await artifacts.initialize();
     for (const session_id of ["second", "first"]) {
-      await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) });
+      await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
       await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain", storage_mode: "external", host_ref: "opaque" }, "host");
     }
     for (const scope of [{}, { engagement_id }]) {
@@ -280,7 +280,7 @@ test("live PostgreSQL Artifact consumers refresh shared catalogs without process
     const second = new ArtifactContentStore(root, secondAuthority);
     // These consumers run in one process; catalog sharing does not grant filesystem safety.
     await Promise.all([first.initialize(), second.initialize()]);
-    await first.bind({ engagement_id, session_id, root: join(root, session_id) });
+    await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
     const bytes = Buffer.from([0, 255, 17, 42]);
     const upload = await first.begin({ engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" }, "host");
     await second.append({ engagement_id, session_id, upload_id: upload.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: hash(bytes) }, "host");

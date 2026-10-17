@@ -20,7 +20,7 @@ test("Core stores and retrieves exact binary bytes while list remains metadata-o
   const ctx = (await setup());
   try {
     const session_id = "task-session"; const root = join(ctx.dir, "content", "session-a");
-    const bind = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    const bind = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
     assert.equal(bind.ok, true); assert.equal("root" in bind.data, false);
     const bytes = Buffer.from([0, 255, 1, 13, 10, 128]); const content_hash = sha256(bytes);
     const begun = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: content_hash }));
@@ -48,12 +48,12 @@ test("transport rejects oversized or non-canonical base64 before decoding", asyn
   const ctx = (await setup());
   try {
     const session_id = "transport-session";
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: join(ctx.dir, "content", session_id) }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: join(ctx.dir, "content", session_id), mode: "host-session" }));
     const begun = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" }));
     assert.equal((await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: "YQ", chunk_hash: sha256(Buffer.from("a")) })).error.code, "validation_error");
     const direct = new ArtifactContentStore(join(ctx.dir, "direct-content")); await direct.initialize();
     const directSession = "direct-session";
-    (await direct.bind({ engagement_id: ctx.engagement_id, session_id: directSession, root: join(ctx.dir, "direct-content", directSession) }));
+    (await direct.bind({ engagement_id: ctx.engagement_id, session_id: directSession, root: join(ctx.dir, "direct-content", directSession), mode: "host-session" }, ctx.host.id));
     const directUpload = (await direct.begin({ engagement_id: ctx.engagement_id, session_id: directSession, payload_kind: "binary", media_type: "application/octet-stream" }));
     (await assert.rejects(async () => (await direct.append({ engagement_id: ctx.engagement_id, session_id: directSession, upload_id: directUpload.upload_id, ordinal: 0, data: { length: 90_000_000 }, chunk_hash: sha256(Buffer.alloc(0)) })), (error) => error.code === "validation_error"));
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
@@ -63,14 +63,14 @@ test("incomplete and mismatched uploads stay invisible and session roots reject 
   const ctx = (await setup());
   try {
     const root = join(ctx.dir, "content", "session-a"); const session_id = "task-session";
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
     const begin = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));
     assert.equal((await ctx.service.dispatch("artifact.content.list", ctx.host, { engagement_id: ctx.engagement_id, session_id })).data.items.length, 0);
     const bytes = Buffer.from("original body"); const digest = sha256(bytes);
     assert.equal((await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: sha256(Buffer.from("wrong")) })).error.code, "conflict");
     assert.equal((await ctx.service.dispatch("artifact.store.commit", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, total_bytes: bytes.length, content_hash: digest })).error.code, "conflict");
     const outside = mkdtempSync(join(tmpdir(), "taric-outside-")); symlinkSync(outside, join(ctx.dir, "content", "escape"));
-    assert.equal((await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id: "escape-session", root: join(ctx.dir, "content", "escape", "sub") })).error.code, "authorization_error");
+    assert.equal((await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id: "escape-session", root: join(ctx.dir, "content", "escape", "sub"), mode: "host-session" })).error.code, "authorization_error");
     rmSync(outside, { recursive: true, force: true });
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
 });
@@ -79,7 +79,7 @@ test("artifact catalog survives Core recreation and corrupt/missing payloads fai
   const dir = mkdtempSync(join(tmpdir(), "taric-artifacts-restart-")); const db = join(dir, "authority.sqlite"); const root = join(dir, "content");
   let store = new AuthorityStore(db); let service = (await createCoreService(store, root)); const engagement_id = uuidv7(); const host = createPrincipal("host", "host-a", engagement_id); const reader = createPrincipal("host", "reader-a", engagement_id, ["content_read"]); const session_id = "task-session";
   try {
-    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(root, "session-a") }));
+    (await service.dispatch("artifact.session.bind", host, { engagement_id, session_id, root: join(root, "session-a"), mode: "host-session" }));
     const bytes = Buffer.from("persisted"); const digest = sha256(bytes); const begun = (await service.dispatch("artifact.store.begin", host, { engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));
     (await service.dispatch("artifact.store.append", host, { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest }));
     const committed = (await service.dispatch("artifact.store.commit", host, { engagement_id, session_id, upload_id: begun.data.upload_id, total_bytes: bytes.length, content_hash: digest })); (await store.close());
@@ -97,7 +97,7 @@ test("external references stay external and begin/commit retries are request-bou
   const ctx = (await setup());
   try {
     const session_id = "task-session"; const root = join(ctx.dir, "content", "session-a");
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
     const external = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", storage_mode: "external", host_ref: "opaque-host-ref", idempotency_key: "external-1" }));
     assert.equal(external.data.content_status, "external"); assert.equal(external.data.upload_id, undefined);
     assert.equal((await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", storage_mode: "external", host_ref: "opaque-host-ref", idempotency_key: "external-1" })).data.content_ref, external.data.content_ref);
@@ -117,7 +117,7 @@ test("derived Artifact versions retain opaque identity and publish bounded manif
   try {
     const session_id = "version-session";
     const sessionRoot = join(ctx.dir, "content", session_id);
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: sessionRoot }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: sessionRoot, mode: "host-session" }));
     const put = async (body) => {
       const digest = sha256(body);
       const begin = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain", expected_bytes: body.length, expected_hash: digest }));
@@ -140,20 +140,82 @@ test("run-scoped Artifact writes are bound to the active session Attempt and gen
   const ctx = (await setup());
   try {
     const session_id = "run-session"; const root = join(ctx.dir, "content", "run-session");
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
+    const runHost = createPrincipal("host", ctx.host.id, ctx.engagement_id, [], undefined, session_id);
     const work_item_id = uuidv7();
     (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "inspect", status: "queued", acceptance_criteria: ["done"] }, "L2"));
-    const claimed = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", task_session_ref: session_id, ttl_ms: 1_000 }));
+    const claimed = (await ctx.service.dispatch("work.claim", runHost, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", ttl_ms: 1_000 }));
     assert.equal(claimed.ok, true);
     const bytes = Buffer.from("attempt body"); const digest = sha256(bytes);
-    const begin = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain", work_run_id: claimed.data.run_id, attempt_id: claimed.data.attempt_ref, generation: claimed.data.generation }));
+    const begin = (await ctx.service.dispatch("artifact.store.begin", runHost, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain", work_run_id: claimed.data.run_id, attempt_id: claimed.data.attempt_ref, generation: claimed.data.generation }));
+    assert.equal(begin.ok, true);
+    (await ctx.service.dispatch("artifact.store.append", runHost, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest }));
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const reclaimed = (await ctx.service.dispatch("work.reclaim", runHost, { engagement_id: ctx.engagement_id, work_run_id: claimed.data.run_id, agent_id: "worker-2" }));
+    assert.equal(reclaimed.ok, true);
+    const staleCommit = (await ctx.service.dispatch("artifact.store.commit", runHost, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, total_bytes: bytes.length, content_hash: digest }));
+    assert.equal(staleCommit.error.code, "stale_version");
+  } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
+test("run-bound sessions establish the run link atomically and inherit attribution", async () => {
+  const ctx = (await setup());
+  try {
+    const session_id = "bound-session";
+    const work_item_id = uuidv7();
+    (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "bound", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    const claimed = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", ttl_ms: 10_000 }));
+    assert.equal(claimed.ok, true);
+    const bound = (await ctx.service.dispatch("artifact.session.bind", ctx.host, {
+      engagement_id: ctx.engagement_id,
+      session_id,
+      root: join(ctx.dir, "content", session_id),
+      mode: "run-bound",
+      work_run_id: claimed.data.run_id,
+      attempt_id: claimed.data.attempt_ref,
+      generation: claimed.data.generation,
+      owner_host: ctx.host.id,
+    }));
+    assert.equal(bound.ok, true);
+    const bytes = Buffer.from("bound body"); const digest = sha256(bytes);
+    const begin = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));
     assert.equal(begin.ok, true);
     (await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest }));
-    await new Promise((resolve) => setTimeout(resolve, 1_100));
-    const reclaimed = (await ctx.service.dispatch("work.reclaim", ctx.host, { engagement_id: ctx.engagement_id, work_run_id: claimed.data.run_id, agent_id: "worker-2" }));
-    assert.equal(reclaimed.ok, true);
-    const staleCommit = (await ctx.service.dispatch("artifact.store.commit", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, total_bytes: bytes.length, content_hash: digest }));
-    assert.equal(staleCommit.error.code, "stale_version");
+    const committed = (await ctx.service.dispatch("artifact.store.commit", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, total_bytes: bytes.length, content_hash: digest }));
+    assert.equal(committed.ok, true);
+    assert.equal(committed.data.work_run_id, claimed.data.run_id);
+    assert.equal(committed.data.attempt_id, claimed.data.attempt_ref);
+    assert.equal(committed.data.generation, claimed.data.generation);
+    assert.equal((await ctx.store.artifactSessions({ engagement_id: ctx.engagement_id, session_id }))[0].mode, "run-bound");
+    assert.equal((await ctx.service.dispatch("artifact.session.bind", ctx.model, { engagement_id: ctx.engagement_id, session_id: "model-session", root: join(ctx.dir, "content", "model-session"), mode: "host-session" })).error.code, "authorization_error");
+  } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
+test("session binding mode is mandatory and cannot be downgraded or created by a model", async () => {
+  const ctx = (await setup());
+  try {
+    const session_id = "strict-session";
+    const root = join(ctx.dir, "content", session_id);
+    const missingMode = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    assert.equal(missingMode.ok, false);
+    assert.equal(missingMode.error.code, "validation_error");
+    const denied = (await ctx.service.dispatch("artifact.session.bind", ctx.model, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
+    assert.equal(denied.ok, false);
+    assert.equal(denied.error.code, "authorization_error");
+    const crossEngagement = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: uuidv7(), session_id, root, mode: "host-session" }));
+    assert.equal(crossEngagement.ok, false);
+    assert.equal(crossEngagement.error.code, "authorization_error");
+    const bound = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
+    assert.equal(bound.ok, true);
+    const work_item_id = uuidv7();
+    (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "strict", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    const claimed = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker" }));
+    const changed = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "run-bound", work_run_id: claimed.data.run_id, attempt_id: claimed.data.attempt_ref, generation: claimed.data.generation, owner_host: ctx.host.id }));
+    assert.equal(changed.ok, false);
+    assert.equal(changed.error.code, "conflict");
+    const stored = (await ctx.store.artifactSessions({ engagement_id: ctx.engagement_id, session_id }))[0];
+    assert.equal(stored.mode, "host-session");
+    assert.equal(stored.work_run_id ?? undefined, undefined);
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
 });
 
@@ -161,14 +223,15 @@ test("execution sidecars expose metadata and correlated Artifact references with
   const ctx = (await setup());
   try {
     const session_id = "execution-session"; const root = join(ctx.dir, "content", "execution-session");
-    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root }));
+    (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
+    const runHost = createPrincipal("host", ctx.host.id, ctx.engagement_id, [], undefined, session_id);
     const work_item_id = uuidv7(); (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "execute", status: "queued", acceptance_criteria: ["done"] }, "L2"));
-    const run = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", task_session_ref: session_id }));
+    const run = (await ctx.service.dispatch("work.claim", runHost, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker" }));
     assert.equal(run.ok, true);
     const checkpoint = { work_item_ref: work_item_id, work_run_ref: run.data.run_id, attempt_ref: run.data.attempt_ref, generation: run.data.generation, target_version: run.data.target_version, work_item_version: run.data.work_item_version, scope_version: run.data.scope_version, owner: run.data.owner, lease_expires_at: run.data.lease_expires_at, source_read_seq: run.data.read_seq, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.data.read_seq, builder_version: "test" } };
-    const committed = (await ctx.service.dispatch("checkpoint.commit", ctx.host, { engagement_id: ctx.engagement_id, work_run_id: run.data.run_id, host_id: ctx.host.id, generation: run.data.generation, checkpoint }));
+    const committed = (await ctx.service.dispatch("checkpoint.commit", runHost, { engagement_id: ctx.engagement_id, work_run_id: run.data.run_id, host_id: ctx.host.id, generation: run.data.generation, checkpoint }));
     assert.equal(committed.ok, true);
-    const output = (await ctx.service.dispatch("artifact.session.output", ctx.host, { engagement_id: ctx.engagement_id, session_id, work_run_id: run.data.run_id, page_size: 10 }));
+    const output = (await ctx.service.dispatch("artifact.session.output", runHost, { engagement_id: ctx.engagement_id, session_id, work_run_id: run.data.run_id, page_size: 10 }));
     assert.equal(output.ok, true); assert.ok(output.data.execution.some((item) => item.kind === "checkpoint"));
     assert.doesNotMatch(JSON.stringify(output.data.execution), /hidden_reasoning|cookie|token|raw body/i);
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }

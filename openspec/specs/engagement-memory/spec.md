@@ -6,23 +6,27 @@ Defines Taric's host-independent engagement memory, evidence-reference, retrieva
 ## Requirements
 
 ### Requirement: Engagement-scoped domain records
-The system SHALL represent engagement scope, resources and revisions, observations, typed relations, claims, test hypotheses, work items, evidence references, findings, and coverage state with versioned schemas and globally unique identifiers. PTES phases SHALL be classification and indexing dimensions, not a mandatory linear workflow. Every persisted type SHALL be validated at every write boundary, including required fields, allowed fields, enums, formats, engagement ownership, references, and legal state transitions.
+The system SHALL represent engagement scope, resources and revisions, observations, typed relations, claims, test hypotheses, work items, evidence references, findings, and coverage state with versioned schemas and globally unique identifiers. PTES phases SHALL be classification and indexing dimensions, not a mandatory linear workflow. Every persisted type SHALL be validated at every write boundary, including required fields, allowed fields, enums, formats, engagement ownership, references, and legal state transitions. Proposal submission SHALL validate its envelope and candidate domain shape before creating a pending row; a legal proposal that is incomplete only because evidence or review is not yet available MAY remain explicitly pending/quarantined.
 
 #### Scenario: Create a domain record
 - **WHEN** an authorized writer commits a valid proposal for an engagement
-- **THEN** the record receives a globally unique identifier, an engagement reference, a committed version, and provenance
+- **THEN** the record receives a Core-assigned globally unique UUIDv7, an engagement reference, a committed version, and provenance
 
 #### Scenario: Reject a cross-engagement reference
 - **WHEN** a proposal links a record to an object outside its authorized engagement boundary
-- **THEN** the system rejects the commit and records the validation result
+- **THEN** the system rejects the commit and records the validation result without changing proposal or canonical state
 
 #### Scenario: Reject an invalid domain record
-- **WHEN** a write through any transport omits a required field, uses an invalid value, or references a missing object
+- **WHEN** a write through any transport omits a required field, uses an invalid value, has an inconsistent subject type/kind, or references a missing object
 - **THEN** the write returns a structured validation error and makes no state change
 
 #### Scenario: Validate protective-control outcome
 - **WHEN** an access decision reports that the edge blocked a request before origin access
 - **THEN** the origin outcome is recorded as not reached and the coverage cell remains blocked by control
+
+#### Scenario: Preserve an evidence-incomplete proposal
+- **WHEN** a structurally valid candidate awaits evidence, review, or an asynchronously produced reference
+- **THEN** the system stores it only as an explicit pending/quarantine proposal and does not treat it as canonical or admitted
 
 ### Requirement: Evidence references
 
@@ -118,15 +122,23 @@ The system SHALL record bounded positive and negative observations with method, 
 - **THEN** 服务以 transport 身份为准并拒绝请求，不接受 body 中的自报权限
 
 ### Requirement: Canonical identity is writer-owned and immutable
-canonical 主键 SHALL 由 Core writer 分配全局 UUIDv7，不接受 caller 指定的 canonical UUID、非 UUIDv7 ID、旧 TYPE-NNN 或 ULID。proposal 可以携带受约束的 proposal/request identity，但不能把它升级为 canonical 主键。已存在实体的 `engagement_id`、kind 和逻辑 identity 字段不可由 update 改写；同一 ID 在不同 Engagement 或 kind 下复用必须拒绝，不能造成 SQL 索引列与 record body 不一致。
+canonical 主键 SHALL 由 Core writer 分配全局 UUIDv7，不接受 caller 指定的 canonical UUID、非 UUIDv7 ID、旧 TYPE-NNN 或 ULID。proposal 可以携带受约束的 proposal_id 或 client_request_id，但不能把它升级为 canonical 主键。已存在实体的 `engagement_id`、kind 和逻辑 identity 字段不可由 update 改写；更新必须使用独立的 `target_id`/`subject_ref`、Engagement 和 expected version，由 Core 校验目标类型与归属。同一 ID 在不同 Engagement 或 kind 下复用必须拒绝，不能造成索引列与 record body 不一致。
 
 #### Scenario: Reuse a canonical ID across engagements
-- **WHEN** 一个已存在 canonical ID 被提交到另一个 Engagement 或更换 kind/逻辑 identity
-- **THEN** writer 返回 identity conflict，保留原记录及其归属，不写入新 body 或 object reference
+- **WHEN** an existing canonical ID is submitted to another Engagement or with a changed kind/identity
+- **THEN** the writer returns an identity conflict and preserves the original record and ownership
 
 #### Scenario: Caller supplies a privileged canonical ID
-- **WHEN** model/adapter proposal 尝试把 caller UUID、ULID 或旧格式 ID 作为新 canonical 主键
-- **THEN** writer 只保留候选来源关联并自行分配 UUIDv7，或按契约拒绝该字段
+- **WHEN** a model or adapter proposal attempts to promote a caller UUID, ULID, or legacy ID to a new canonical primary key
+- **THEN** the writer rejects the privileged field or stores it only as a constrained source/request reference
+
+#### Scenario: Assign identity for a new record
+- **WHEN** a proposal creates a new canonical entity with a caller-supplied id or no id
+- **THEN** Core ignores or rejects that canonical id, allocates a UUIDv7, and retains any accepted request identity only as proposal metadata
+
+#### Scenario: Update an existing record
+- **WHEN** a proposal updates an existing entity
+- **THEN** it names a separate target reference and expected version, and Core rejects a missing, cross-engagement, wrong-kind, or stale target without changing the entity
 
 ### Requirement: Preserve protective-control and access semantics
 Phase 1 SHALL provide the minimum protective-control contract: a ControlObservation and an AccessDecisionObservation must record Engagement/resource reference, operation, principal or auth metadata when available, network condition when available, evidence references, limitations, observed response layer, `origin_reached`, and the applicable control reference or explicit unknown. Control outcome (`observed|suspected|not_observed|inconclusive`) SHALL remain distinct from access decision (`allow|deny|challenge|filtered|unknown`). Unknown layers must not be attributed to a specific WAF/RASP/control; `origin_reached=true` requires supporting evidence. An edge/network block before origin SHALL create `blocked_by_control` coverage and SHALL NOT close origin coverage. Fingerprints alone produce only a suspected control observation.

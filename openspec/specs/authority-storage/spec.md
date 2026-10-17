@@ -81,16 +81,47 @@
 - **THEN** it operates without PostgreSQL configuration or service availability
 
 ### Requirement: Artifact session catalog and external payload boundary
-系统 SHALL 将 Artifact task-session binding、resumable upload state、committed metadata、chunk hashes/offsets/relative paths 和 commit audit event 保存到当前 SQLite authority，并对 session/catalog/chunk reference 提供查询索引。原始 payload bytes SHALL 只保存在配置内容根下的注册 task-session 文件 spool，不进入 SQLite Artifact catalog body、authority event、Markdown projection 或 snapshot。bind SHALL 验证 session root 位于配置内容根目录下，并拒绝路径逃逸。Artifact 文件发布与 SQLite catalog commit 当前不是同一个原子事务；启动 doctor/reconcile 尚不校验或重建该 spool。读取缺少 manifest/chunk 或发现 chunk length/hash 不匹配时 SHALL fail closed 并返回 unavailable/integrity error；Taric 不得静默创建、修复或删除原文。
+系统 SHALL 将 Artifact task-session binding、resumable upload state、committed metadata、chunk hashes/offsets/relative paths 和 commit audit event 保存到当前 SQLite authority，并对 session/catalog/chunk reference 提供查询索引。原始 payload bytes SHALL 只保存在配置内容根下的注册 task-session 文件 spool，不进入 SQLite Artifact catalog body、authority event、Markdown projection 或 snapshot。bind SHALL 验证 session root 位于配置内容根目录下，并拒绝路径逃逸。Artifact 文件发布与 SQLite catalog commit 不是同一个原子事务；启动 doctor/reconcile SHALL 识别 publication marker、孤儿或缺失内容的可恢复状态，但不得把未验证的 spool 标为可用。读取缺少 manifest/chunk 或发现 chunk length/hash 不匹配时 SHALL fail closed 并返回 unavailable/integrity error；Taric 不得静默创建、修复或删除原文。
 
 #### Scenario: Persist the Artifact catalog association
 - **WHEN** an authenticated host commits a complete upload
 - **THEN** Taric writes catalog metadata, chunk locator rows, upload removal, and the `artifact.content.committed` audit event atomically in SQLite while payload bytes remain in the task-session filesystem
 
 #### Scenario: Filesystem and SQLite publication are interrupted
-- **WHEN** the process stops between payload file publication and SQLite catalog commit
-- **THEN** the current implementation may leave an orphan payload/operation marker, and doctor/reconcile does not claim to have repaired it; operators can identify it only with external filesystem inspection until Artifact-specific reconciliation is implemented
+- **WHEN** the process stops between payload publication and SQLite catalog commit
+- **THEN** doctor/reconcile reports the pending marker or orphan state with an explicit recovery result, and no unverified content becomes available
 
 #### Scenario: Stored content is missing or tampered
-- **WHEN** a caller reads a known Artifact whose manifest/chunk is missing or whose chunk length/hash differs from catalog manifest metadata
+- **WHEN** a known Artifact manifest/chunk is missing or its length/hash differs from catalog metadata
 - **THEN** Taric fails closed with a structured unavailable or integrity error and never treats the payload as verified Evidence
+
+### Requirement: Bounded authority reads and operator maintenance
+引用校验、列表和读取 SHALL 使用可观测的有界/批量路径：跨对象引用检查必须按引用集合查询，常用 Engagement/kind/version 查询必须有相应索引，列表必须支持稳定 keyset 分页。固定 snapshot/export 可以物化与数据量相关的结果，但 SHALL 单独报告耗时、峰值内存和 source sequence；不得把小 fixture 的 p95 结果外推为大规模保证。doctor、verify、reconcile 和 snapshot export SHALL 是 operator-only 维护操作，并可在独立 CLI/worker 进程执行而不改变 SQLite 单写者事务语义。
+
+#### Scenario: Validate references at scale
+- **WHEN** a proposal contains many references in a large authority
+- **THEN** the service validates the set with indexed/batched queries and returns the same isolation result without one full-table scan per reference
+
+#### Scenario: Page a large list
+- **WHEN** an operator lists records beyond one response page
+- **THEN** the service returns a stable keyset cursor bound to filters and read sequence without duplicates or omissions
+
+#### Scenario: Run maintenance concurrently
+- **WHEN** an operator runs doctor, verify, reconcile, or snapshot export while writers are active
+- **THEN** the operation is authorized separately, reports its pinned sequence/watermarks, and does not bypass writer transactions or silently alter authority history
+
+### Requirement: Measure bounded authority reads and operator maintenance
+
+Authority read and operator maintenance operations SHALL use a fixed watermark or read sequence and SHALL expose enough diagnostics to distinguish queue wait, SQL scan/return rows, snapshot hydration, ordering/projection, serialization, cursor bytes, WAL growth, event-loop delay, elapsed time, and peak RSS. A budget exceeded during a required read SHALL return an explicit continuation or error. Operator maintenance SHALL be explicit, scoped, and observable; it MUST NOT silently rewrite authority history or claim execution isolation without measured evidence. Maintenance diagnostics SHALL state whether execution can delay ordinary writes or lease heartbeats.
+
+#### Scenario: Context page is measured
+- **WHEN** an operator runs the authority benchmark for a context page
+- **THEN** the report includes fixture size, sample count, p50/p95, read sequence, scanned/returned rows, cursor size, memory, and event-loop delay
+
+#### Scenario: Maintenance overlaps a write
+- **WHEN** doctor, verify, reconcile, or export runs while a normal write or lease heartbeat is pending
+- **THEN** the operation records queueing and watermark effects, keeps operator authorization, and does not claim an unmeasured worker isolation guarantee
+
+#### Scenario: Read budget cannot be met
+- **WHEN** a required context or snapshot read exceeds its scan or byte budget
+- **THEN** Taric returns a bounded continuation or structured budget error and does not return a partial result as complete

@@ -213,11 +213,16 @@
     },
     "artifactSessionBinding": {
       "type": "object",
-      "required": ["engagement_id", "session_id", "root"] ,
+      "required": ["engagement_id", "session_id", "root", "mode"] ,
       "properties": {
         "engagement_id": { "$ref": "#/$defs/uuid" },
         "session_id": { "$ref": "#/$defs/nonEmptyString" },
         "root": { "$ref": "#/$defs/nonEmptyString" },
+        "mode": { "enum": ["host-session", "run-bound"] },
+        "work_run_id": { "$ref": "#/$defs/uuid" },
+        "attempt_id": { "$ref": "#/$defs/uuid" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "owner_host": { "$ref": "#/$defs/nonEmptyString" },
         "binding_id": { "$ref": "#/$defs/nonEmptyString" },
         "created_at": { "$ref": "#/$defs/timestamp" },
         "manifest_hash": { "$ref": "#/$defs/sha256" }
@@ -311,7 +316,8 @@
         "category": { "type": "string" },
         "media_type": { "type": "string" },
         "work_run_id": { "$ref": "#/$defs/uuid" },
-        "include_content": { "type": "boolean" }
+        "include_content": { "type": "boolean" },
+        "max_response_bytes": { "type": "integer", "minimum": 1, "maximum": 67108864 }
       },
       "additionalProperties": false
     },

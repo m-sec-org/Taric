@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AuthorityStore, ContractValidationError, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
 
 async function workItem(store, engagement_id = uuidv7()) {
@@ -52,6 +55,37 @@ test("work claims create an explicit attempt and reclaim fences the old generati
   assert.equal(second.owner.host_id, "pi-b");
   (await assert.rejects(async () => (await store.renewWorkRun(first.run_id, first.generation, "pi-a", 60_000)), /expired|fenced|stale/i));
   (await store.close());
+});
+
+test("historical proposal material keeps source references and limits while transport provenance stays authenticated", async () => {
+  const store = new AuthorityStore();
+  const service = await createCoreService(store);
+  const engagement_id = uuidv7();
+  const host = createPrincipal("host", "history-host", engagement_id);
+  try {
+    const evidence = await store.commit({ id: uuidv7(), engagement_id, kind: "evidence", statement: "historical report reference", observed_at: "2024-01-02T03:04:05.000Z", limitations: ["source was not rechecked"] }, "L1");
+    const response = await service.dispatch("proposal.submit", host, {
+      engagement_id,
+      subject_type: "claim",
+      expected_version: 0,
+      content: {
+        schema_version: "1.0.0",
+        engagement_id,
+        kind: "claim",
+        proposition: "historical material is relevant context",
+        status: "proposed",
+        provenance: { host_id: "forged", producer_id: "historical-import", source_kind: "import", source_refs: [evidence.id] },
+        evidence_refs: [evidence.id],
+        limitations: ["not a current observation", "source was not rechecked"],
+      },
+    });
+    assert.equal(response.ok, true);
+    assert.equal(response.data.status, "pending");
+    assert.deepEqual(response.data.content.provenance.source_refs, [evidence.id]);
+    assert.equal(response.data.content.provenance.source_kind, "host");
+    assert.equal(response.data.content.provenance.host_id, host.id);
+    assert.equal((await store.list(engagement_id)).some((record) => record.id === response.data.canonical_id), false);
+  } finally { await service.close(); }
 });
 
 test("checkpoint commit requires the complete executable boundary and rejects hidden reasoning or foreign refs", async () => {
@@ -134,6 +168,39 @@ test("checkpoint proposals stay L0 and stale Attempt proposals are quarantined",
   assert.equal(stale.data.status, "rejected");
   assert.ok((await store.events()).some((event) => event.event_type === "proposal.stale_attempt_quarantine"));
   (await store.close());
+});
+
+test("run-scoped proposals verify the active Attempt, owner, lease, and task session", async () => {
+  const store = new AuthorityStore();
+  const root = mkdtempSync(join(tmpdir(), "taric-proposal-fence-"));
+  try {
+    const item = (await workItem(store));
+    const session_id = "proposal-session";
+    await store.saveArtifactSession({ engagement_id: item.engagement_id, session_id, root: join(root, session_id), binding_id: uuidv7(), created_at: new Date().toISOString(), mode: "host-session" });
+    const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker", task_session_ref: session_id, ttl_ms: 60_000 }));
+    const content = (runValue = run, workItemRef = item.id, overrides = {}) => ({ schema_version: "1.0.0", engagement_id: item.engagement_id, kind: "checkpoint", ...checkpoint(runValue, workItemRef), ...overrides });
+    const submit = (candidate, options = {}) => store.submitProposal({ proposal_id: uuidv7(), engagement_id: item.engagement_id, subject_type: "checkpoint", expected_version: 0, content: candidate }, { principal: options.principal ?? "worker", principalRole: options.principalRole ?? "model", engagement_id: item.engagement_id, workRunId: options.workRunId ?? run.run_id, generation: options.generation ?? run.generation });
+
+    const valid = await submit(content());
+    assert.equal(valid.status, "pending");
+
+    await assert.rejects(async () => submit(content(run, item.id, { attempt_ref: undefined })), (error) => error.code === "validation_error");
+    const wrongOwner = await submit(content(), { principal: "other-worker" });
+    assert.equal(wrongOwner.status, "rejected");
+    const staleGeneration = await submit(content(), { generation: run.generation + 1 });
+    assert.equal(staleGeneration.status, "rejected");
+
+    const shortItem = (await workItem(store, item.engagement_id));
+    const expiring = (await store.claimWorkRun({ work_item_id: shortItem.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker", ttl_ms: 1 }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const expired = await store.submitProposal({ proposal_id: uuidv7(), engagement_id: item.engagement_id, subject_type: "checkpoint", expected_version: 0, content: content(expiring, shortItem.id) }, { principal: "worker", principalRole: "model", engagement_id: item.engagement_id, workRunId: expiring.run_id, generation: expiring.generation });
+    assert.equal(expired.status, "rejected");
+    assert.equal((await store.list(item.engagement_id, { includeCandidates: true })).some((record) => record.kind === "checkpoint"), false);
+    assert.ok((await store.events()).filter((event) => event.event_type === "proposal.stale_attempt_quarantine").length >= 3);
+  } finally {
+    await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("service action recommendation flows through host decision and result without execution", async () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCoreService } from "@taric/core";
@@ -49,6 +49,21 @@ test("CLI preserves structured unsupported capability diagnostics on stderr", as
     assert.ok(envelope.error.follow_up);
     (await store.close());
 });
+
+test("CLI omits snapshot.import from supported commands and rejects it before mutation", async () => {
+    const store = new AuthorityStore();
+    const service = (await createCoreService(store));
+    try {
+        assert.equal(cliCommands.includes("snapshot.import"), false);
+        const result = await runCli(["snapshot.import", JSON.stringify({ engagement_id: "unused", snapshot: {} })], service, { id: "operator", role: "operator" });
+        assert.equal(result.exitCode, 1);
+        assert.equal(result.stdout, "");
+        assert.equal(JSON.parse(result.stderr).error.code, "unsupported_capability");
+        assert.deepEqual(await store.events(), []);
+    } finally {
+        await store.close();
+    }
+});
 test("CLI operator principal cannot self-declare a different engagement permission", async () => {
     const store = new AuthorityStore();
     const service = (await createCoreService(store));
@@ -89,7 +104,7 @@ test("Artifact CLI round-trips content through Core and requires explicit read c
     const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const call = async (operation, input, extra = []) => runCli([operation, JSON.stringify(input), ...extra], service, host);
     try {
-        const binding = await call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id) });
+    const binding = await call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id), mode: "host-session" });
         assert.equal(binding.exitCode, 0);
         const begun = JSON.parse((await call("artifact.store.begin", { engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream", expected_bytes: bytes.length, expected_hash: digest })).stdout).data;
         assert.equal(begun.content_status, "pending");
@@ -106,6 +121,29 @@ test("Artifact CLI round-trips content through Core and requires explicit read c
         (await store.close());
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test("Artifact CLI append-file streams a bounded file and rejects files above 64 MiB", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "taric-cli-artifact-file-"));
+    const engagement_id = uuidv7(); const session_id = "cli-file-session"; const contentRoot = join(dir, "content");
+    const store = new AuthorityStore(); const service = (await createCoreService(store, contentRoot)); const host = { id: "cli-file-host", role: "host", engagement_id };
+    const bytes = Buffer.from("streamed from a local file"); const file = join(dir, "payload.bin"); await writeFile(file, bytes);
+    try {
+        const binding = await runCli(["artifact.session.bind", JSON.stringify({ engagement_id, session_id, root: join(contentRoot, session_id), mode: "host-session" })], service, host);
+        assert.equal(binding.exitCode, 0);
+        const begun = JSON.parse((await runCli(["artifact.store.begin", JSON.stringify({ engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" })], service, host)).stdout).data;
+        const metadata = JSON.stringify({ engagement_id, session_id, upload_id: begun.upload_id, ordinal: 0 });
+        const appended = await runCli(["artifact.store.append-file", metadata, file], service, host);
+        assert.equal(appended.exitCode, 0);
+        assert.equal(JSON.parse(appended.stdout).data.bytes, bytes.length);
+        const digest = `sha256:${(await import("node:crypto")).createHash("sha256").update(bytes).digest("hex")}`;
+        const committed = await runCli(["artifact.store.commit", JSON.stringify({ engagement_id, session_id, upload_id: begun.upload_id, total_bytes: bytes.length, content_hash: digest })], service, host);
+        assert.equal(committed.exitCode, 0);
+
+        const oversized = join(dir, "oversized.bin"); await writeFile(oversized, Buffer.alloc(0)); await truncate(oversized, 64 * 1024 * 1024 + 1);
+        const rejected = await runCli(["artifact.store.append-file", metadata, oversized], service, host);
+        assert.equal(rejected.exitCode, 2); assert.equal(JSON.parse(rejected.stderr).error.code, "validation_error");
+    } finally { await service.close(); await rm(dir, { recursive: true, force: true }); }
 });
 test("configuration discovery validates a deterministic JSON file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "taric-cli-config-"));

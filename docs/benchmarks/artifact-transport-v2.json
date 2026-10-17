@@ -1,0 +1,354 @@
+{
+  "version": "artifact-transport-benchmark/1",
+  "measured_at": "2026-10-17T05:01:49.084Z",
+  "node": "v22.21.1",
+  "platform": "darwin",
+  "arch": "x64",
+  "cpu_model": "Intel(R) Core(TM) i5-7287U CPU @ 3.30GHz",
+  "cpu_count": 4,
+  "total_memory_bytes": 17179869184,
+  "command": {
+    "executable": "/opt/local/bin/node",
+    "script": "/Users/liuhongtao/development/Taric/scripts/benchmark-artifact-transport.mjs",
+    "arguments": [
+      "--bytes",
+      "67108864",
+      "--concurrency",
+      "1,2",
+      "--output",
+      "docs/benchmarks/artifact-transport-v2.json"
+    ]
+  },
+  "source_digest": "sha256:213dd8e7908f19ead7067d81c4070c0eff4bb7c4b868cb093cc8d0ec1078c16d",
+  "profile": {
+    "version": "artifact-deployment/1",
+    "id": "local_process_crash",
+    "decoded_chunk_bytes": 67108864,
+    "base64_transport_chars": 89478488,
+    "json_metadata_max_bytes": 16384,
+    "transport_envelope_max_bytes": 89494872,
+    "response_envelope_max_bytes": 89494872,
+    "binary_transport_header_max_bytes": 16384,
+    "binary_transport_envelope_max_bytes": 67125252,
+    "json_rpc_line_max_bytes": 1048576,
+    "json_rpc_artifact_read_max_decoded_bytes": 524288,
+    "json_rpc_artifact_page_items_max": 16,
+    "json_rpc_page_content_max_decoded_bytes": 131072,
+    "receive_chunk_bytes": 65536,
+    "receive_queue_chunks": 2,
+    "receive_queue_bytes_max": 131072,
+    "active_uploads_max": 2,
+    "page_items_max": 1000,
+    "metadata_page_bytes_max": 1048576,
+    "publication": "staging_copy_atomic_rename_catalog_transaction",
+    "recovery": "verified_publication_markers",
+    "fsync": "none",
+    "power_loss_durable": false
+  },
+  "requested_decoded_chunk_bytes": 67108864,
+  "sample_count": 6,
+  "results": [
+    {
+      "kind": "text",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 67108864,
+      "raw_transport_envelope_bytes": 67109235,
+      "concurrent_uploads": 1,
+      "transport": "authenticated_unix_socket_child_process_raw_append",
+      "client_pacing": "1 ms per 64 KiB",
+      "benchmark_arguments_for_case": [
+        "--bytes",
+        "67108864",
+        "--concurrency",
+        "1"
+      ],
+      "elapsed_ms": 3779.308647,
+      "throughput_bytes_per_second": 17756915.422420118,
+      "p95_upload_latency_ms": 3779.0832389999996,
+      "p95_sample_count": 1,
+      "client_rss_start_bytes": 70782976,
+      "client_peak_rss_bytes": 103813120,
+      "client_process_cumulative_max_rss_bytes": 104468480,
+      "client_rss_samples": 261,
+      "server_rss_bytes": 127447040,
+      "server_peak_rss_bytes": 127860736,
+      "server_rss_samples": 172,
+      "server_process_max_rss_bytes": 127860736,
+      "client_event_loop_delay_max_ms": 340.525055,
+      "client_event_loop_delay_mean_ms": 11.368753192156863,
+      "server_event_loop_delay_max_ms": 725.614591,
+      "server_event_loop_delay_mean_ms": 13.395568390243902,
+      "publication_failures": 0,
+      "upload_samples": [
+        {
+          "index": 0,
+          "status": "published",
+          "content_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "append_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "elapsed_ms": 3779.0832389999996
+        }
+      ],
+      "transport_limit_samples": {
+        "decoded_over_limit_attempt": "artifact.store.append.binary",
+        "decoded_over_limit_bytes": 67108865,
+        "decoded_over_limit_rejected": true,
+        "catalog_rows_before": 0,
+        "catalog_rows_after": 0,
+        "decoded_over_limit_no_publication": true,
+        "ordinary_json_line_over_limit_bytes": 1048577,
+        "ordinary_json_line_over_limit_closed": true,
+        "ordinary_json_close_wait_timeout_ms": 5000,
+        "limit_upload_id": "01a1483c-7be7-7621-a248-4f01ec1ffc26"
+      },
+      "json_base64_text_boundary": {
+        "transport": "authenticated_unix_socket_json_rpc_base64",
+        "decoded_chunk_bytes": 524288,
+        "concurrent_uploads": 1,
+        "cases": [
+          {
+            "status": "published_and_read",
+            "decoded_chunk_bytes": 524288,
+            "request_envelope_bytes": 699483,
+            "response_envelope_bytes": 699599,
+            "content_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "returned_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "elapsed_ms": 171.32718699999987,
+            "rpc_response_cap_bytes": 1048576
+          }
+        ]
+      },
+      "bounded_receive": {
+        "chunk_bytes": 65536,
+        "queued_chunks_max": 2,
+        "queued_bytes_max": 131072,
+        "active_uploads_max": 2
+      },
+      "durability": "local_process_crash"
+    },
+    {
+      "kind": "binary",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 67108864,
+      "raw_transport_envelope_bytes": 67109235,
+      "concurrent_uploads": 1,
+      "transport": "authenticated_unix_socket_child_process_raw_append",
+      "client_pacing": "1 ms per 64 KiB",
+      "benchmark_arguments_for_case": [
+        "--bytes",
+        "67108864",
+        "--concurrency",
+        "1"
+      ],
+      "elapsed_ms": 3709.3210280000003,
+      "throughput_bytes_per_second": 18091953.61992809,
+      "p95_upload_latency_ms": 3709.289014,
+      "p95_sample_count": 1,
+      "client_rss_start_bytes": 81199104,
+      "client_peak_rss_bytes": 105791488,
+      "client_process_cumulative_max_rss_bytes": 113467392,
+      "client_rss_samples": 242,
+      "server_rss_bytes": 104566784,
+      "server_peak_rss_bytes": 107352064,
+      "server_rss_samples": 176,
+      "server_process_max_rss_bytes": 107352064,
+      "client_event_loop_delay_max_ms": 709.885951,
+      "client_event_loop_delay_mean_ms": 11.813277042016805,
+      "server_event_loop_delay_max_ms": 1007.157247,
+      "server_event_loop_delay_mean_ms": 13.472244093023255,
+      "publication_failures": 0,
+      "upload_samples": [
+        {
+          "index": 0,
+          "status": "published",
+          "content_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "append_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "elapsed_ms": 3709.289014
+        }
+      ],
+      "transport_limit_samples": {
+        "decoded_over_limit_attempt": "artifact.store.append.binary",
+        "decoded_over_limit_bytes": 67108865,
+        "decoded_over_limit_rejected": true,
+        "catalog_rows_before": 0,
+        "catalog_rows_after": 0,
+        "decoded_over_limit_no_publication": true,
+        "ordinary_json_line_over_limit_bytes": 1048577,
+        "ordinary_json_line_over_limit_closed": true,
+        "ordinary_json_close_wait_timeout_ms": 5000,
+        "limit_upload_id": "01a1483c-929b-7c8e-9711-4a0f971e7952"
+      },
+      "bounded_receive": {
+        "chunk_bytes": 65536,
+        "queued_chunks_max": 2,
+        "queued_bytes_max": 131072,
+        "active_uploads_max": 2
+      },
+      "durability": "local_process_crash"
+    },
+    {
+      "kind": "text",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 134217728,
+      "raw_transport_envelope_bytes": 134218470,
+      "concurrent_uploads": 2,
+      "transport": "authenticated_unix_socket_child_process_raw_append",
+      "client_pacing": "1 ms per 64 KiB",
+      "benchmark_arguments_for_case": [
+        "--bytes",
+        "67108864",
+        "--concurrency",
+        "2"
+      ],
+      "elapsed_ms": 6964.226834000001,
+      "throughput_bytes_per_second": 19272452.089690216,
+      "p95_upload_latency_ms": 6963.890179000002,
+      "p95_sample_count": 2,
+      "client_rss_start_bytes": 80039936,
+      "client_peak_rss_bytes": 102871040,
+      "client_process_cumulative_max_rss_bytes": 113467392,
+      "client_rss_samples": 398,
+      "server_rss_bytes": 121827328,
+      "server_peak_rss_bytes": 123654144,
+      "server_rss_samples": 300,
+      "server_process_max_rss_bytes": 123654144,
+      "client_event_loop_delay_max_ms": 396.361727,
+      "client_event_loop_delay_mean_ms": 11.116863508951408,
+      "server_event_loop_delay_max_ms": 891.289599,
+      "server_event_loop_delay_mean_ms": 13.935284034305317,
+      "publication_failures": 0,
+      "upload_samples": [
+        {
+          "index": 0,
+          "status": "published",
+          "content_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "append_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "elapsed_ms": 6072.829667000002
+        },
+        {
+          "index": 1,
+          "status": "published",
+          "content_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "append_hash": "sha256:dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98",
+          "elapsed_ms": 6963.890179000002
+        }
+      ],
+      "transport_limit_samples": {
+        "decoded_over_limit_attempt": "artifact.store.append.binary",
+        "decoded_over_limit_bytes": 67108865,
+        "decoded_over_limit_rejected": true,
+        "catalog_rows_before": 0,
+        "catalog_rows_after": 0,
+        "decoded_over_limit_no_publication": true,
+        "ordinary_json_line_over_limit_bytes": 1048577,
+        "ordinary_json_line_over_limit_closed": true,
+        "ordinary_json_close_wait_timeout_ms": 5000,
+        "limit_upload_id": "01a1483c-b2b7-75bd-bd80-68383bf82f6a"
+      },
+      "json_base64_text_boundary": {
+        "transport": "authenticated_unix_socket_json_rpc_base64",
+        "decoded_chunk_bytes": 524288,
+        "concurrent_uploads": 2,
+        "cases": [
+          {
+            "status": "published_and_read",
+            "decoded_chunk_bytes": 524288,
+            "request_envelope_bytes": 699483,
+            "response_envelope_bytes": 699599,
+            "content_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "returned_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "elapsed_ms": 496.1797829999996,
+            "rpc_response_cap_bytes": 1048576
+          },
+          {
+            "status": "published_and_read",
+            "decoded_chunk_bytes": 524288,
+            "request_envelope_bytes": 699483,
+            "response_envelope_bytes": 699599,
+            "content_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "returned_hash": "sha256:5f7a26e1d78cd171b1aab0208da133e996c75285b94aa8ef06c6578ea0b26903",
+            "elapsed_ms": 494.95663499999864,
+            "rpc_response_cap_bytes": 1048576
+          }
+        ]
+      },
+      "bounded_receive": {
+        "chunk_bytes": 65536,
+        "queued_chunks_max": 2,
+        "queued_bytes_max": 131072,
+        "active_uploads_max": 2
+      },
+      "durability": "local_process_crash"
+    },
+    {
+      "kind": "binary",
+      "fixture_version": "artifact-pattern/1",
+      "decoded_chunk_bytes": 67108864,
+      "decoded_total_bytes": 134217728,
+      "raw_transport_envelope_bytes": 134218470,
+      "concurrent_uploads": 2,
+      "transport": "authenticated_unix_socket_child_process_raw_append",
+      "client_pacing": "1 ms per 64 KiB",
+      "benchmark_arguments_for_case": [
+        "--bytes",
+        "67108864",
+        "--concurrency",
+        "2"
+      ],
+      "elapsed_ms": 6948.761633000002,
+      "throughput_bytes_per_second": 19315344.96198482,
+      "p95_upload_latency_ms": 6946.653475000003,
+      "p95_sample_count": 2,
+      "client_rss_start_bytes": 78426112,
+      "client_peak_rss_bytes": 107565056,
+      "client_process_cumulative_max_rss_bytes": 113467392,
+      "client_rss_samples": 384,
+      "server_rss_bytes": 114434048,
+      "server_peak_rss_bytes": 117227520,
+      "server_rss_samples": 303,
+      "server_process_max_rss_bytes": 117227520,
+      "client_event_loop_delay_max_ms": 493.355007,
+      "client_event_loop_delay_mean_ms": 11.132318767596281,
+      "server_event_loop_delay_max_ms": 744.488959,
+      "server_event_loop_delay_mean_ms": 13.044197966101695,
+      "publication_failures": 0,
+      "upload_samples": [
+        {
+          "index": 0,
+          "status": "published",
+          "content_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "append_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "elapsed_ms": 6208.922694000001
+        },
+        {
+          "index": 1,
+          "status": "published",
+          "content_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "append_hash": "sha256:98dc891b284e4d84ac25b0c0a24fdbe39a7f0dbd643ad5e8aa06e02fc6258254",
+          "elapsed_ms": 6946.653475000003
+        }
+      ],
+      "transport_limit_samples": {
+        "decoded_over_limit_attempt": "artifact.store.append.binary",
+        "decoded_over_limit_bytes": 67108865,
+        "decoded_over_limit_rejected": true,
+        "catalog_rows_before": 0,
+        "catalog_rows_after": 0,
+        "decoded_over_limit_no_publication": true,
+        "ordinary_json_line_over_limit_bytes": 1048577,
+        "ordinary_json_line_over_limit_closed": true,
+        "ordinary_json_close_wait_timeout_ms": 5000,
+        "limit_upload_id": "01a1483c-d597-7d80-bbfa-76a331a540da"
+      },
+      "bounded_receive": {
+        "chunk_bytes": 65536,
+        "queued_chunks_max": 2,
+        "queued_bytes_max": 131072,
+        "active_uploads_max": 2
+      },
+      "durability": "local_process_crash"
+    }
+  ]
+}

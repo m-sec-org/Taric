@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { performance } from "node:perf_hooks";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -9,6 +10,15 @@ import { AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_META
 
 export type SqlTransactionMode = "read" | "write";
 export interface SqlRunResult { changes: number; lastInsertRowid?: number | bigint; }
+/** Lightweight per-driver counters used by bounded diagnostics and benchmarks. */
+export interface SqlMetrics {
+  statements: number;
+  rows_returned: number;
+  rows_affected: number;
+  queue_wait_ms: number;
+  sql_elapsed_ms: number;
+}
+export type SqlMetricsSnapshot = Readonly<SqlMetrics>;
 /** Core owns all transitions. Drivers own connections, clocks and SQL dialects. */
 export interface AuthoritySqlDriver {
   readonly backend: "sqlite" | "postgresql";
@@ -24,7 +34,12 @@ export interface AuthoritySqlDriver {
   dataVersion(): Promise<number | string>;
   jsonValue(column: string, field: string, type?: "text" | "number" | "boolean"): string;
   dateValue(expression: string): string;
+  metrics(): SqlMetricsSnapshot;
   close(): Promise<void>;
+}
+
+function statementCount(sql: string): number {
+  return Math.max(1, sql.split(";").map((part) => part.trim()).filter(Boolean).length);
 }
 
 class ConnectionQueue {
@@ -46,6 +61,7 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   readonly authorityId: string;
   private readonly db: DatabaseSync;
   private readonly queue: ConnectionQueue;
+  private readonly sqlMetrics: SqlMetrics = { statements: 0, rows_returned: 0, rows_affected: 0, queue_wait_ms: 0, sql_elapsed_ms: 0 };
   private initialization?: Promise<void>;
   private closed = false;
   constructor(filename = ":memory:") {
@@ -65,6 +81,8 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
       const hasRecords = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get());
       const schema = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get() as { value?: string } | undefined : undefined;
       if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible");
+      const storageFormat = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='storage_format'").get() as { value?: string } | undefined : undefined;
+      if (storageFormat && storageFormat.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible");
       const proposals = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposals'").get();
       if (proposals) {
         const columns = new Set((this.db.prepare("PRAGMA table_info(proposals)").all() as Array<{ name: string }>).map((column) => column.name));
@@ -85,14 +103,28 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   private async access<T>(operation: () => T | Promise<T>): Promise<T> {
     if (this.closed) throw new ContractValidationError("conflict", "authority store is closed");
     const scope = sqliteScope.getStore();
-    if (scope?.driver === this && scope.active) return operation();
+    if (scope?.driver === this && scope.active) {
+      const started = performance.now();
+      try { return await operation(); } finally { this.sqlMetrics.sql_elapsed_ms += performance.now() - started; }
+    }
     await this.ready;
-    return this.queue.run(operation);
+    const queued = performance.now();
+    return this.queue.run(async () => {
+      this.sqlMetrics.queue_wait_ms += performance.now() - queued;
+      const started = performance.now();
+      try { return await operation(); } finally { this.sqlMetrics.sql_elapsed_ms += performance.now() - started; }
+    });
   }
-  async get<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row | undefined> { return this.access(() => this.db.prepare(sql).get(...values as SQLInputValue[]) as Row | undefined); }
-  async all<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row[]> { return this.access(() => this.db.prepare(sql).all(...values as SQLInputValue[]) as Row[]); }
-  async run(sql: string, ...values: unknown[]): Promise<SqlRunResult> { return this.access(() => { const result = this.db.prepare(sql).run(...values as SQLInputValue[]); return { changes: Number(result.changes), lastInsertRowid: result.lastInsertRowid }; }); }
-  async exec(sql: string): Promise<void> { await this.access(() => this.db.exec(sql)); }
+  async get<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row | undefined> {
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const row = this.db.prepare(sql).get(...values as SQLInputValue[]) as Row | undefined; if (row) this.sqlMetrics.rows_returned++; return row; });
+  }
+  async all<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row[]> {
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const rows = this.db.prepare(sql).all(...values as SQLInputValue[]) as Row[]; this.sqlMetrics.rows_returned += rows.length; return rows; });
+  }
+  async run(sql: string, ...values: unknown[]): Promise<SqlRunResult> {
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const result = this.db.prepare(sql).run(...values as SQLInputValue[]); const changes = Number(result.changes); this.sqlMetrics.rows_affected += changes; return { changes, lastInsertRowid: result.lastInsertRowid }; });
+  }
+  async exec(sql: string): Promise<void> { await this.access(() => { this.sqlMetrics.statements += statementCount(sql); this.db.exec(sql); }); }
   async transaction<T>(mode: SqlTransactionMode, operation: () => T | Promise<T>): Promise<T> {
     const parent = sqliteScope.getStore();
     if (parent?.driver === this && parent.active) {
@@ -109,7 +141,9 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
       });
     }
     await this.ready;
+    const queued = performance.now();
     return this.queue.run(async () => {
+      this.sqlMetrics.queue_wait_ms += performance.now() - queued;
       const scope: SqliteScope = { driver: this, mode, active: true, savepoints: { next: 0 }, children: new ConnectionQueue() };
       this.db.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
       try { const value = await sqliteScope.run(scope, operation); await scope.children.drain(); this.db.exec("COMMIT"); return value; }
@@ -125,6 +159,7 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   }
   jsonValue(column: string, field: string): string { return `json_extract(${column},'$.${field}')`; }
   dateValue(expression: string): string { return `julianday(${expression})`; }
+  metrics(): SqlMetricsSnapshot { return { ...this.sqlMetrics }; }
   async close(): Promise<void> { await this.queue.run(() => { if (!this.closed) { this.db.close(); this.closed = true; } }); }
 }
 
@@ -163,6 +198,7 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
   readonly schema: string;
   private readonly quotedSchema: string;
   private readonly clientQueue?: ConnectionQueue;
+  private readonly sqlMetrics: SqlMetrics = { statements: 0, rows_returned: 0, rows_affected: 0, queue_wait_ms: 0, sql_elapsed_ms: 0 };
   private initialization?: Promise<void>;
   private closed = false;
   private initialized = false;
@@ -213,7 +249,9 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
   }
   /** Readiness can inspect an empty/incompatible schema without migrating it. */
   async inspect<T>(operation: (client: PostgresQueryable) => T | Promise<T>, mode: SqlTransactionMode = "read"): Promise<T> {
+    const queued = performance.now();
     const run = async () => {
+      this.sqlMetrics.queue_wait_ms += performance.now() - queued;
       const client = await this.acquire();
       try {
         await client.query(mode === "write" ? "BEGIN ISOLATION LEVEL READ COMMITTED" : "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -251,7 +289,19 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
   }
   private async query<Row>(sql: string, values: unknown[]): Promise<PostgresQueryResult<Row>> {
     const scope = postgresScope.getStore();
-    if (scope?.driver === this && scope.active) return numericRows(await scope.queries.run(() => scope.client.query<Row>(postgresParameters(sql), values)));
+    if (scope?.driver === this && scope.active) {
+      this.sqlMetrics.statements += statementCount(sql);
+      const queued = performance.now();
+      const result = numericRows(await scope.queries.run(async () => {
+        this.sqlMetrics.queue_wait_ms += performance.now() - queued;
+        const started = performance.now();
+        try { return await scope.client.query<Row>(postgresParameters(sql), values); }
+        finally { this.sqlMetrics.sql_elapsed_ms += performance.now() - started; }
+      }));
+      this.sqlMetrics.rows_returned += result.rows.length;
+      if (/^\s*(INSERT|UPDATE|DELETE|MERGE)\b/i.test(sql)) this.sqlMetrics.rows_affected += result.rowCount ?? 0;
+      return result;
+    }
     return this.transaction("read", () => this.query<Row>(sql, values));
   }
   async get<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row | undefined> { return (await this.query<Row>(sql, values)).rows[0]; }
@@ -271,5 +321,6 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
     return type === "number" ? `CAST(${value} AS BIGINT)` : type === "boolean" ? `(CASE ${value} WHEN 'true' THEN 1 WHEN 'false' THEN 0 ELSE NULL END)` : value;
   }
   dateValue(expression: string): string { return `CAST(${expression} AS TIMESTAMPTZ)`; }
+  metrics(): SqlMetricsSnapshot { return { ...this.sqlMetrics }; }
   async close(): Promise<void> { this.closed = true; }
 }

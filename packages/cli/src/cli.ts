@@ -1,9 +1,10 @@
-import { API_CONTRACT_VERSION, AuthorityConfigurationError, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type SharedAuthorityConfiguration } from "@taric/core";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { API_CONTRACT_VERSION, ARTIFACT_DEPLOYMENT_PROFILE, AuthorityConfigurationError, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type SharedAuthorityConfiguration } from "@taric/core";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "admission.promote_l2", "capture.observation", "control.list", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "artifact.session.bind", "artifact.store.begin", "artifact.store.append", "artifact.store.commit", "artifact.metadata", "artifact.content.read", "artifact.content.list", "artifact.session.output", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
+export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "admission.promote_l2", "capture.observation", "control.list", "host.state", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "artifact.session.bind", "artifact.store.begin", "artifact.store.append", "artifact.store.append-file", "artifact.store.commit", "artifact.metadata", "artifact.content.read", "artifact.content.list", "artifact.session.output", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
 
 /** 二级动词白名单。只有这里列出的组合才会被转发到 Core，未知组合不猜测。 */
 export const cliSubcommands: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -54,13 +55,33 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   const operation = normalizeCliOperation(argv);
   if (argv[0] === "adapter" && ["health", "version"].includes(argv[1] ?? "")) {
     if (argv[1] === "version") return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION } })}\n`, stderr: "" };
-    const health = await service.dispatch("capability.status", createPrincipal(principal.role, principal.id, principal.engagement_id), {});
+    const health = await service.dispatch("capability.status", createPrincipal(principal.role, principal.id, principal.engagement_id, [], undefined, principal.transport_session_id), {});
     const manifest = health.ok ? (health.data as Record<string, unknown>).compatibility_manifest : undefined;
     let adapter_config: Record<string, unknown> = {};
     const configPath = process.env.TARIC_ADAPTER_CONFIG ?? join(homedir(), ".taric", "adapters.json");
     try { adapter_config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>; } catch { /* absent config means no locally installed adapter */ }
     const healthReport = { compatibility_manifest: manifest, core_connected: health.ok, configured_adapters: adapter_config.adapters ?? {}, adapter_config_path: configPath };
     return { exitCode: health.ok ? 0 : 1, stdout: health.ok ? `${JSON.stringify({ ok: true, data: healthReport })}\n` : "", stderr: health.ok ? "" : `${JSON.stringify(health)}\n` };
+  }
+  if (operation === "artifact.store.append-file") {
+    if (argv.length !== 3) return cliError(2, "validation_error", "artifact.store.append-file requires metadata JSON and a local file path");
+    let request: Record<string, unknown>;
+    try { request = JSON.parse(argv[1] ?? "") as Record<string, unknown>; } catch { return cliError(2, "validation_error", "request must be valid JSON"); }
+    const fields = new Set(["engagement_id", "session_id", "upload_id", "ordinal", "idempotency_key"]);
+    if (!request || Array.isArray(request) || typeof request !== "object" || Object.keys(request).some((key) => !fields.has(key)) ||
+      ["engagement_id", "session_id", "upload_id"].some((key) => typeof request[key] !== "string") ||
+      typeof request.ordinal !== "number" || !Number.isSafeInteger(request.ordinal) || request.ordinal < 0 ||
+      (request.idempotency_key !== undefined && typeof request.idempotency_key !== "string")) return cliError(2, "validation_error", "Artifact append metadata is invalid");
+    let byte_length: number;
+    try { byte_length = statSync(argv[2]!).size; } catch { return cliError(2, "validation_error", "Artifact append file is unavailable"); }
+    if (!Number.isSafeInteger(byte_length) || byte_length < 1 || byte_length > 64 * 1024 * 1024) return cliError(2, "validation_error", "Artifact append file must contain 1 byte to 64 MiB");
+    if (Buffer.byteLength(JSON.stringify(request), "utf8") > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes) return cliError(2, "validation_error", "Artifact metadata exceeds the 16 KiB bound");
+    const digest = createHash("sha256");
+    try { for await (const chunk of createReadStream(argv[2]!, { highWaterMark: 64 * 1024 })) digest.update(chunk); }
+    catch { return cliError(2, "validation_error", "Artifact append file is unavailable"); }
+    const principalContext = createPrincipal(principal.role, principal.id, principal.engagement_id, principal.capabilities ?? [], undefined, principal.transport_session_id);
+    const response = await service.artifactStoreAppendBinaryStream(principalContext, { ...request, byte_length, chunk_hash: `sha256:${digest.digest("hex")}` } as Parameters<CoreService["artifactStoreAppendBinaryStream"]>[1], createReadStream(argv[2]!, { highWaterMark: 64 * 1024 }));
+    return { exitCode: response.ok ? 0 : 1, stdout: response.ok ? `${JSON.stringify(response)}\n` : "", stderr: response.ok ? "" : `${JSON.stringify(response)}\n` };
   }
   const consumed = cliSubcommands[argv[0] ?? ""] && argv[1] ? 2 : 1;
   const args = argv.slice(consumed);
@@ -71,7 +92,7 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   try { request = JSON.parse(json) as Record<string, unknown>; } catch { return { exitCode: 2, stdout: "", stderr: JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be valid JSON" } }) + "\n" }; }
   if (!request || Array.isArray(request) || typeof request !== "object") return { exitCode: 2, stdout: "", stderr: `${JSON.stringify({ ok: false, error: { code: "validation_error", message: "request must be a JSON object" } })}\n` };
   if (includeContent) request.include_content = true;
-  const response = await service.dispatch(operation, createPrincipal(principal.role, principal.id, principal.engagement_id, principal.capabilities ?? []), request);
+  const response = await service.dispatch(operation, createPrincipal(principal.role, principal.id, principal.engagement_id, principal.capabilities ?? [], undefined, principal.transport_session_id), request);
   return { exitCode: response.ok ? 0 : 1, stdout: response.ok ? `${JSON.stringify(response)}\n` : "", stderr: response.ok ? "" : `${JSON.stringify(response)}\n` };
 }
 
@@ -95,11 +116,27 @@ export function normalizeCliOperation(argv: string[]): string {
 
 export function cliHelp(): string {
   const groups = Object.entries(cliSubcommands).map(([group, verbs]) => `  ${group} ${verbs.join("|")}`).join("\n");
-  return `usage: taric <operation> [json]\n  <json> 必须是 JSON 对象；成功输出 stdout，失败输出 stderr\n\n别名:\n  init status propose review capture query capability.status adapter.status\n\n分组命令:\n${groups}\n\n完整 operation 清单:\n  ${cliCommands.join("\n  ")}`;
+  return `usage: taric <operation> [json]\n  <json> 必须是 JSON 对象；成功输出 stdout，失败输出 stderr\n  artifact.store.append-file <metadata-json> <path> streams one local file up to 64 MiB\n\n别名:\n  init status propose review capture query capability.status adapter.status\n\n分组命令:\n${groups}\n\n完整 operation 清单:\n  ${cliCommands.join("\n  ")}`;
+}
+
+function cliError(exitCode: CliExitCode, code: string, message: string) {
+  return { exitCode, stdout: "", stderr: `${JSON.stringify({ ok: false, error: { code, message } })}\n` };
 }
 
 /** CLI 进程入口。配置发现：TARIC_DB 优先，其次 ~/.taric/authority.sqlite。 */
 export async function runCliMain(argv: string[] = process.argv.slice(2)): Promise<CliExitCode> {
+  if (argv[0] === "proxy") {
+    if (argv.length > 1 && !["--help", "-h"].includes(argv[1] ?? "")) {
+      process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "validation_error", message: "proxy accepts configuration through environment variables" } })}\n`);
+      return 2;
+    }
+    if (argv.length > 1) {
+      process.stdout.write("usage: taric proxy\nConfigure TARIC_CORE_SOCKET, TARIC_ADAPTER_TOKEN, and TARIC_ENGAGEMENT_ID in the trusted host process.\n");
+      return 0;
+    }
+    const { runProxyMain } = await import("./proxy.js");
+    return await runProxyMain() as CliExitCode;
+  }
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
     process.stdout.write(`taric ${API_CONTRACT_VERSION}\n${cliHelp()}\n`);
     return 0;

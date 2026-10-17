@@ -9,7 +9,7 @@ import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
 import { ContractValidationError, schemaValidator, validateContract, validateProposalEnvelope } from "./validation.js";
 import { coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
 import { createAccessDecisionObservation, createControlObservation, type AccessDecisionObservationInput, type ControlObservationInput } from "./coverage.js";
-import { ArtifactContentStore, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactCommitInput } from "./artifact-content-store.js";
+import { ArtifactContentStore, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
 export const API_CONTRACT_VERSION = "1.0.0" as const;
@@ -26,6 +26,8 @@ export interface Principal {
     id: string;
     role: PrincipalRole;
     engagement_id?: string;
+    /** Configured by a trusted transport; request bodies never populate this value. */
+    transport_session_id?: string;
     capabilities?: readonly PrincipalCapability[];
     reviewer_attestation?: Readonly<ReviewerAttestation>;
     transport_verified: true;
@@ -34,7 +36,13 @@ export interface Principal {
 // object trusted by merely adding `transport_verified: true`.
 const verifiedPrincipals = new WeakSet<object>();
 const verifiedReviewerAttestations = new WeakMap<object, Readonly<ReviewerAttestation>>();
+const verifiedTransportSessions = new WeakMap<object, string>();
 export function registerTransportPrincipal<T extends Principal>(principal: T): T {
+    if (principal.transport_session_id !== undefined) {
+        if (principal.role !== "host" || typeof principal.transport_session_id !== "string" || !principal.transport_session_id.trim() || principal.transport_session_id.length > 256)
+            throw new ContractValidationError("validation_error", "transport session association requires a host principal and a bounded session id");
+        verifiedTransportSessions.set(principal, principal.transport_session_id);
+    }
     const attestation = principal.reviewer_attestation;
     if (attestation) {
         if (principal.role !== "reviewer" || !["deterministic", "model", "human"].includes(attestation.capability))
@@ -68,6 +76,7 @@ export type ApiResponse<T> = ApiEnvelope<T> | ErrorEnvelope;
 export async function createCoreServiceForPath(filename = ":memory:", configuredContentRoot?: string): Promise<CoreService> { return (await createCoreService(new AuthorityStore(filename), configuredContentRoot ?? process.env.TARIC_CONTENT_ROOT ?? (filename === ":memory:" ? join(tmpdir(), "taric-content", uuidv7()) : join(dirname(filename), "content")))); }
 export function createAuthorityStoreForCli(filename = ":memory:"): AuthorityStore { return new AuthorityStore(filename); }
 const deferred = {
+    "snapshot.import": "evolve-engagement-memory",
     "storage.backup": "evolve-engagement-memory",
     "storage.restore": "evolve-engagement-memory",
 } as const;
@@ -286,6 +295,7 @@ export interface CoreService {
     controlList(principal: Principal, input: {
         engagement_id: string;
     }): Promise<ApiResponse<Array<Record<string, unknown>>>>;
+    hostState(principal: Principal, input: { engagement_id: string; limit?: number }): Promise<ApiResponse<Record<string, unknown>>>;
     resume(principal: Principal, input: {
         engagement_id: string;
         work_run_id: string;
@@ -301,6 +311,7 @@ export interface CoreService {
         engagement_id: string;
         snapshot: unknown;
     }): Promise<ApiResponse<Record<string, unknown>>>;
+    adapterStatus(principal: Principal): Promise<ApiResponse<Record<string, unknown>>>;
     resourceRevise(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
     resourcePatch(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
     resourceRelation(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
@@ -314,9 +325,15 @@ export interface CoreService {
         engagement_id: string;
         session_id: string;
         root: string;
+        mode: "host-session" | "run-bound";
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        owner_host?: string;
     }): Promise<ApiResponse<Record<string, unknown>>>;
     artifactStoreBegin(principal: Principal, input: ArtifactBeginInput): Promise<ApiResponse<Record<string, unknown>>>;
     artifactStoreAppend(principal: Principal, input: ArtifactAppendInput): Promise<ApiResponse<Record<string, unknown>>>;
+    artifactStoreAppendBinaryStream(principal: Principal, input: ArtifactBinaryAppendStreamInput, source: AsyncIterable<Uint8Array>): Promise<ApiResponse<Record<string, unknown>>>;
     artifactStoreCommit(principal: Principal, input: ArtifactCommitInput): Promise<ApiResponse<Record<string, unknown>>>;
     artifactMetadata(principal: Principal, input: {
         engagement_id: string;
@@ -341,6 +358,7 @@ export interface CoreService {
         media_type?: string;
         work_run_id?: string;
         include_content?: boolean;
+        max_response_bytes?: number;
     }): Promise<ApiResponse<Record<string, unknown>>>;
     artifactSessionOutput(principal: Principal, input: {
         engagement_id: string;
@@ -376,28 +394,56 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             engagement_id: string;
             session_id: string;
             root: string;
+            mode: "host-session" | "run-bound";
+            work_run_id?: string;
+            attempt_id?: string;
+            generation?: number;
+            owner_host?: string;
         }) {
             const access = authorize(principal, "artifact.session.bind", input.engagement_id);
             if (!access.ok)
                 return access;
-            return (await safe(async () => { const { root: _root, ...binding } = (await artifactStore.bind(input)); return { ok: true as const, data: binding as unknown as Record<string, unknown> }; }));
+            const transportSession = verifiedTransportSessions.get(principal);
+            if (transportSession !== undefined && input.session_id !== transportSession)
+                return error("authorization_error", "session binding must match the trusted transport session");
+            if (input.mode === "run-bound" && input.owner_host !== principal.id)
+                return error("authorization_error", "run-bound session owner must match the transport principal");
+            return (await safe(async () => { const { root: _root, ...binding } = (await artifactStore.bind(input, principal.id)); return { ok: true as const, data: binding as unknown as Record<string, unknown> }; }));
         },
         async artifactStoreBegin(principal: Principal, input: ArtifactBeginInput) {
             const access = authorize(principal, "artifact.store.begin", input.engagement_id);
             if (!access.ok)
                 return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.begin(input, principal.id)) })));
         },
         async artifactStoreAppend(principal: Principal, input: ArtifactAppendInput) {
             const access = authorize(principal, "artifact.store.append", input.engagement_id);
             if (!access.ok)
                 return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.append(input, principal.id)) })));
+        },
+        async artifactStoreAppendBinaryStream(principal: Principal, input: ArtifactBinaryAppendStreamInput, source: AsyncIterable<Uint8Array>) {
+            const access = authorize(principal, "artifact.store.append", input.engagement_id);
+            if (!access.ok)
+                return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
+            return (await safe(async () => ({ ok: true as const, data: (await artifactStore.appendBinaryStream(input, principal.id, source)) })));
         },
         async artifactStoreCommit(principal: Principal, input: ArtifactCommitInput) {
             const access = authorize(principal, "artifact.store.commit", input.engagement_id);
             if (!access.ok)
                 return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: publicArtifactMetadata((await artifactStore.commit(input, principal.id))) })));
         },
         async artifactMetadata(principal: Principal, input: {
@@ -408,6 +454,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const access = authorize(principal, "artifact.metadata", input.engagement_id);
             if (!access.ok)
                 return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.metadata(input)) })));
         },
         async artifactContentRead(principal: Principal, input: {
@@ -422,6 +471,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const access = authorize(principal, "artifact.content.read", input.engagement_id);
             if (!access.ok)
                 return access;
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.readBounded({ ...input, principal_id: principal.id })) })));
         },
         async artifactContentList(principal: Principal, input: {
@@ -433,6 +485,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             media_type?: string;
             work_run_id?: string;
             include_content?: boolean;
+        max_response_bytes?: number;
         }) {
             const access = authorize(principal, "artifact.content.list", input.engagement_id);
             if (!access.ok)
@@ -444,6 +497,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!rawAccess.ok)
                     return rawAccess;
             }
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.list({ ...input, principal_id: principal.id })) })));
         },
         async artifactSessionOutput(principal: Principal, input: {
@@ -465,6 +521,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!rawAccess.ok)
                     return rawAccess;
             }
+            const sessionError = checkArtifactTransportSession(principal, input.session_id);
+            if (sessionError)
+                return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.output({ ...input, principal_id: principal.id })) })));
         },
         async buildContext(principal: Principal, input: {
@@ -517,8 +576,17 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                     contract_version?: string;
                 };
                 validateProposalEnvelope(envelope);
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, {
+                    work_run_id: work_run_id ?? (typeof input.content.work_run_ref === "string" ? input.content.work_run_ref : undefined),
+                    generation: generation ?? (typeof input.content.generation === "number" ? input.content.generation : undefined),
+                    content: input.content as Record<string, unknown>,
+                    request: input as unknown as Record<string, unknown>,
+                });
+                if (sessionError)
+                    return sessionError;
                 const content = { ...input.content, provenance: { ...(input.content.provenance ?? {}), host_id: principal.id, producer_id: principal.id, source_kind: principal.role === "model" ? "model" : "host" } } as ProposalCandidate;
-                return { ok: true as const, data: (await store.submitProposal({ ...envelope, content }, { idempotencyKey: idempotency_key, operation: "proposal.submit", principal: principal.id, engagement_id: input.engagement_id, workRunId: work_run_id ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined), generation: generation ?? (typeof content.generation === "number" ? content.generation : undefined), principalRole: principal.role })) as unknown as Record<string, unknown> };
+                const attribution = await hostTransportAttribution(store, principal, input.engagement_id, work_run_id ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined), generation ?? (typeof content.generation === "number" ? content.generation : undefined));
+                return { ok: true as const, data: (await store.submitProposal({ ...envelope, content }, { idempotencyKey: idempotency_key, operation: "proposal.submit", principal: principal.id, engagement_id: input.engagement_id, workRunId: work_run_id ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined), attemptId: attribution?.attempt_id ?? (typeof content.attempt_ref === "string" ? content.attempt_ref : undefined), sessionId: attribution?.session_id, generation: generation ?? (typeof content.generation === "number" ? content.generation : undefined), principalRole: principal.role })) as unknown as Record<string, unknown> };
             }));
         },
         async captureObservation(principal: Principal, input: {
@@ -534,6 +602,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "capture.observation", input.engagement_id);
             if (!response.ok)
                 return response;
+            const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, content: input.observation ?? input.content as Record<string, unknown>, request: input as unknown as Record<string, unknown> });
+            if (sessionError)
+                return sessionError;
             const content = input.observation ?? input.content;
             if (!content || typeof content !== "object")
                 return error("validation_error", "observation is required");
@@ -635,7 +706,10 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "work.claim", input.engagement_id);
             if (!response.ok)
                 return response;
-            return (await safe(async () => ({ ok: true as const, data: (await store.claimWorkRun({ ...input, host_id: principal.id })) })));
+            const sessionId = verifiedTransportSessions.get(principal);
+            if (input.task_session_ref !== undefined && input.task_session_ref !== sessionId)
+                return error("authorization_error", "task session association is assigned by the trusted transport");
+            return (await safe(async () => ({ ok: true as const, data: (await store.claimWorkRun({ ...input, task_session_ref: sessionId, host_id: principal.id })) })));
         },
         async workRenew(principal: Principal, input: {
             engagement_id: string;
@@ -703,6 +777,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (!response.ok)
                 return response;
             return (await safe(async () => {
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
                 if (!Number.isInteger(input.generation) || input.generation < 1)
                     return error("validation_error", "current generation is required");
                 const run = (await store.getWorkRun(input.work_run_id));
@@ -747,7 +824,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "checkpoint.commit", input.engagement_id);
             if (!response.ok)
                 return response;
-            return (await safe(async () => ({ ok: true as const, data: (await store.commitCheckpoint(input.work_run_id, input.generation, principal.id, input.checkpoint)) })));
+            return (await safe(async () => {
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
+                return { ok: true as const, data: (await store.commitCheckpoint(input.work_run_id, input.generation, principal.id, input.checkpoint)) };
+            }));
         },
         async actionRecommend(principal: Principal, input: {
             engagement_id: string;
@@ -776,6 +858,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                     if (input[field] !== undefined && (!Array.isArray(input[field]) || input[field]!.some((value) => typeof value !== "string")))
                         return error("validation_error", `${field} must be a string array`);
                 }
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
                 const run = input.work_run_id ? (await store.getWorkRun(input.work_run_id)) : undefined;
                 if (input.work_run_id && (!run || run.engagement_id !== input.engagement_id))
                     return error("conflict", "work run not found");
@@ -813,7 +898,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "action.host-decision", input.engagement_id);
             if (!response.ok)
                 return response;
-            return (await safe(async () => ({ ok: true as const, data: (await store.recordActionIntent({ ...input, host_id: principal.id, action_id: input.action_id, run_id: input.work_run_id, status: input.status })) })));
+            return (await safe(async () => {
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
+                return { ok: true as const, data: (await store.recordActionIntent({ ...input, host_id: principal.id, action_id: input.action_id, run_id: input.work_run_id, status: input.status })) };
+            }));
         },
         async actionHostResult(principal: Principal, input: {
             engagement_id: string;
@@ -828,7 +918,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "action.host-result", input.engagement_id);
             if (!response.ok)
                 return response;
-            return (await safe(async () => ({ ok: true as const, data: (await store.recordActionIntent({ ...input, host_id: principal.id, action_id: input.action_id, run_id: input.work_run_id, status: input.status })) })));
+            return (await safe(async () => {
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
+                return { ok: true as const, data: (await store.recordActionIntent({ ...input, host_id: principal.id, action_id: input.action_id, run_id: input.work_run_id, status: input.status })) };
+            }));
         },
         async actionReconcile(principal: Principal, input: {
             engagement_id: string;
@@ -841,7 +936,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "action.reconcile", input.engagement_id);
             if (!response.ok)
                 return response;
-            return (await safe(async () => ({ ok: true as const, data: (await store.reconcileAction(input.work_run_id, input.generation, input.result_ref, input.status, input.action_id, principal.id)) })));
+            return (await safe(async () => {
+                const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
+                if (sessionError)
+                    return sessionError;
+                return { ok: true as const, data: (await store.reconcileAction(input.work_run_id, input.generation, input.result_ref, input.status, input.action_id, principal.id)) };
+            }));
         },
         async observeControl(principal: Principal, input: ControlObservationInput) {
             const response = authorize(principal, "control.observe", input.engagement_id);
@@ -862,6 +962,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (!response.ok)
                 return response;
             return (await safe(async () => ({ ok: true as const, data: (await store.snapshot(input.engagement_id, { includeCandidates: true })).records.filter((record) => ["protective_control", "control_observation", "access_decision_observation"].includes(String(record.kind))) as Array<Record<string, unknown>> })));
+        },
+        async hostState(principal: Principal, input: { engagement_id: string; limit?: number }) {
+            const response = authorize(principal, "host.state", input.engagement_id);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => ({ ok: true as const, data: (await store.hostStateView(input.engagement_id, input.limit)) })));
         },
         async resume(principal: Principal, input: {
             engagement_id: string;
@@ -898,18 +1004,40 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             engagement_id: string;
             snapshot: unknown;
         }) {
-            const response = authorize(principal, "snapshot.import", input.engagement_id);
+            return error("unsupported_capability", "public snapshot import is unsupported; use isolated backend backup/restore", "evolve-engagement-memory");
+        },
+        async adapterStatus(principal: Principal) {
+            const response = authorize(principal, "adapter.status");
             if (!response.ok)
                 return response;
-            return (await safe(async () => {
-                if (typeof input.snapshot === "string" && input.snapshot.length > 20000000)
-                    return error("validation_error", "snapshot exceeds the import size limit");
-                const snapshot = typeof input.snapshot === "string" && !input.snapshot.trim().includes("\n") ? JSON.parse(input.snapshot) as Record<string, unknown> : input.snapshot;
-                const snapshotObject = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as Record<string, unknown> : undefined;
-                if (snapshotObject?.engagement_id !== undefined && snapshotObject.engagement_id !== input.engagement_id)
-                    return error("authorization_error", "snapshot Engagement does not match the request");
-                return { ok: true as const, data: (await store.importSnapshot(input.snapshot)) as unknown as Record<string, unknown> };
-            }));
+            const configured = readAdapterConfig().adapters;
+            const adapters = (["pi", "deepseek-harness", "hermes"] as const).map((host) => {
+                const manifest = TARIC_COMPATIBILITY_MANIFEST.hosts[host];
+                const capabilityId = host === "pi" ? "pi_native_adapter" : host === "deepseek-harness" ? "deepseek_native_adapter" : "hermes_native_adapter";
+                const manifestCapability = TARIC_COMPATIBILITY_MANIFEST.capabilities.find((capability) => capability.id === capabilityId);
+                const entry = configured && typeof configured === "object" && !Array.isArray(configured)
+                    ? (configured as Record<string, unknown>)[host]
+                    : undefined;
+                const config = entry && typeof entry === "object" && !Array.isArray(entry)
+                    ? entry as Record<string, unknown>
+                    : undefined;
+                const expectedVersion = "version" in manifest ? manifest.version : "1.1.0";
+                const expectedCommit = "commit" in manifest ? manifest.commit : "7c10bd4";
+                const version = typeof config?.version === "string" ? config.version : undefined;
+                const commit = typeof config?.commit === "string" ? config.commit : undefined;
+                return {
+                    host_id: host,
+                    support_state: manifestCapability?.state ?? manifest.state,
+                    manifest_capability: manifestCapability,
+                    configured: config?.enabled === true,
+                    configured_version: version,
+                    configured_commit: commit,
+                    configuration_matches_manifest: config?.enabled === true && version === expectedVersion && commit === expectedCommit,
+                    instance_registration_state: "not_observed",
+                    runtime_health_state: "not_observed",
+                };
+            });
+            return { ok: true as const, data: { adapters } };
         },
         async resourceRevise(principal: Principal, input: Record<string, unknown>) {
             const response = authorize(principal, "resource.revise", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
@@ -1038,7 +1166,8 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!validate || !validate(request))
                     return error("validation_error", `invalid ${operation} request`);
             }
-            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "capabilityStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "snapshot.import": "snapshotImport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            aliases["host.state"] = "hostState";
             const methodName = aliases[operation] ?? operation;
             if (operation === "admission.promote_l2")
                 return (await api.promoteFinding(principal, request as unknown as PromotionL2));
@@ -1087,10 +1216,86 @@ function authorize(principal: Principal, operation: string, engagementId?: strin
     }
     return { ok: true as const, data: { principal } };
 }
+async function checkHostTransportSession(store: AuthorityStore, principal: Principal, engagementId: string, input: {
+    work_run_id?: string;
+    generation?: number;
+    content?: Record<string, unknown>;
+    request?: Record<string, unknown>;
+}): Promise<ErrorEnvelope | undefined> {
+    if (principal.role !== "host")
+        return undefined;
+    const body = input.request ?? {};
+    const content = input.content ?? {};
+    if (["session_id", "transport_session_id", "task_session_ref"].some((field) => Object.prototype.hasOwnProperty.call(body, field) || Object.prototype.hasOwnProperty.call(content, field)))
+        return error("authorization_error", "session association is assigned by the trusted transport");
+
+    const sessionId = verifiedTransportSessions.get(principal);
+    if (!sessionId) {
+        const runId = input.work_run_id ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined);
+        if (runId) {
+            const run = await store.getWorkRun(runId);
+            if (run?.engagement_id === engagementId && typeof run.task_session_ref === "string")
+                return error("authorization_error", "run-bound host writes require the matching transport session association");
+        }
+        return undefined;
+    }
+
+    const binding = (await store.artifactSessions({ engagement_id: engagementId, session_id: sessionId }))[0];
+    if (!binding)
+        return error("authorization_error", "trusted transport session has no persisted Engagement binding");
+    if (binding.mode === "host-session") {
+        const runId = input.work_run_id ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined);
+        if (runId) {
+            const run = await store.getWorkRun(runId);
+            if (run?.engagement_id === engagementId && run.task_session_ref !== sessionId)
+                return error("authorization_error", "WorkRun belongs to another trusted transport session");
+            const owner = run?.owner as Record<string, unknown> | undefined;
+            if (run?.engagement_id === engagementId && owner?.host_id !== principal.id)
+                return error("authorization_error", "WorkRun belongs to another host principal");
+        }
+        return undefined;
+    }
+
+    if (binding.owner_host !== principal.id)
+        return error("authorization_error", "transport principal does not own the run-bound session");
+    if (!input.work_run_id || !Number.isSafeInteger(input.generation))
+        return error("validation_error", "run-bound host writes require the WorkRun and generation from the trusted session binding");
+    if (input.work_run_id !== binding.work_run_id || input.generation !== binding.generation)
+        return error("stale_version", "host write does not match the persisted run-bound session generation");
+    if (typeof content.work_run_ref === "string" && content.work_run_ref !== binding.work_run_id)
+        return error("stale_version", "proposal WorkRun reference does not match the persisted session binding");
+    if (typeof content.attempt_ref === "string" && content.attempt_ref !== binding.attempt_id)
+        return error("stale_version", "proposal Attempt reference does not match the persisted session binding");
+    if (typeof content.generation === "number" && content.generation !== binding.generation)
+        return error("stale_version", "proposal generation does not match the persisted session binding");
+    return undefined;
+}
+function checkArtifactTransportSession(principal: Principal, requestSessionId: string): ErrorEnvelope | undefined {
+    if (principal.role !== "host")
+        return undefined;
+    const sessionId = verifiedTransportSessions.get(principal);
+    return sessionId !== undefined && requestSessionId !== sessionId
+        ? error("authorization_error", "Artifact session must match the trusted transport session")
+        : undefined;
+}
+async function hostTransportAttribution(store: AuthorityStore, principal: Principal, engagementId: string, workRunId?: string, generation?: number): Promise<{ attempt_id?: string; session_id?: string } | undefined> {
+    if (principal.role !== "host" || !workRunId)
+        return undefined;
+    const sessionId = verifiedTransportSessions.get(principal);
+    if (!sessionId)
+        return undefined;
+    const run = await store.getWorkRun(workRunId);
+    if (!run || run.engagement_id !== engagementId || run.task_session_ref !== sessionId || !Number.isSafeInteger(generation) || generation !== run.generation)
+        return undefined;
+    const binding = (await store.artifactSessions({ engagement_id: engagementId, session_id: sessionId }))[0];
+    if (binding?.mode === "run-bound")
+        return { attempt_id: binding.attempt_id, session_id: binding.session_id };
+    return { attempt_id: typeof run.attempt_ref === "string" ? run.attempt_ref : undefined, session_id: sessionId };
+}
 function capabilityForOperation(operation: string): PrincipalCapability | undefined {
     if (operation === "admission.promote_l2")
         return "writer";
-    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "control.list", "engagement.status"].includes(operation))
+    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "control.list", "host.state", "engagement.status"].includes(operation))
         return "read";
     if (["proposal.submit", "capture.observation", "checkpoint.propose", "action.recommend"].includes(operation))
         return "propose";
@@ -1104,7 +1309,7 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
         return "checkpoint";
     if (["action.host-decision", "action.host-result", "action.reconcile"].includes(operation))
         return "action";
-    if (["audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "snapshot.import"].includes(operation))
+    if (["audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export"].includes(operation))
         return "audit";
     if (operation === "artifact.content.read")
         return "content_read";

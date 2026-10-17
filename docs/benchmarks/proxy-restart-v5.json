@@ -1,0 +1,1379 @@
+{
+  "version": "proxy-restart/2",
+  "started_at": "2026-10-17T16:33:03.654Z",
+  "measured_at": "2026-10-17T16:33:24.744Z",
+  "harness_elapsed_ms": 21086.886615,
+  "runtime": {
+    "node": "v22.21.1",
+    "bun": "1.3.13",
+    "platform": "darwin",
+    "arch": "x64"
+  },
+  "authority": {
+    "persistent_during_run": true,
+    "storage": "temporary SQLite file retained while the proxy and its embedded Core authority reopen across two process restarts",
+    "socket_mode": "0600"
+  },
+  "measured": {
+    "calls": 26,
+    "cli_calls": 7,
+    "rpc_calls": 19,
+    "retries": 2,
+    "waits_ms": [
+      4951.311151999999,
+      1739.8864279999998,
+      1293.8710980000005,
+      1339.9025150000007,
+      610.1297549999999,
+      1573.4747270000007,
+      87.15430799999922,
+      87.69052999999985,
+      111.1872540000004,
+      88.99198399999841,
+      81.03944299999966,
+      83.76958900000136,
+      80.32457599999907,
+      85.65773799999988,
+      82.74049300000115,
+      1439.5322450000003,
+      79.06454400000075,
+      1234.7840590000014,
+      136.8654749999987,
+      145.0772109999998,
+      115.30808600000091,
+      116.16554000000178,
+      134.21718099999998,
+      130.35408599999937,
+      114.43107299999974,
+      119.4650249999977
+    ],
+    "restart_ms": [
+      1428.9097619999993,
+      1782.0420760000015
+    ],
+    "proxy_instances": [
+      {
+        "pid": 14226,
+        "socket_mode": "0600"
+      },
+      {
+        "pid": 14406,
+        "socket_mode": "0600"
+      },
+      {
+        "pid": 14702,
+        "socket_mode": "0600"
+      }
+    ],
+    "samples": [
+      {
+        "transport": "node_cli",
+        "operation": "engagement.init",
+        "elapsed_ms": 4951.311151999999,
+        "request": {
+          "name": "proxy restart benchmark",
+          "scope": {
+            "allowed_targets": [
+              "https://proxy.fixture.invalid"
+            ],
+            "excluded_targets": [],
+            "rules_of_engagement_ref": "fixture:proxy"
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "schema_version": "1.0.0",
+            "created_at": "2026-10-17T16:33:08.592Z",
+            "provenance": {
+              "host_id": "taric-core",
+              "producer_id": "taric-core",
+              "source_kind": "host"
+            },
+            "id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "engagement",
+            "name": "proxy restart benchmark",
+            "status": "active",
+            "scope_ref": "01a14ab5-c3d9-7925-96ca-e8af684e613b",
+            "version": 1,
+            "trust_level": "L2",
+            "display_id": "TAR-000002",
+            "commit_seq": 2
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "artifact.session.bind",
+        "elapsed_ms": 1739.8864279999998,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "session_id": "proxy-restart-session",
+          "root": "/var/folders/lt/32z29b790x1gnscj2881bg7w0000gn/T/taric-proxy-restart-9MHLIy/content/proxy-restart-session",
+          "mode": "host-session"
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "session_id": "proxy-restart-session",
+            "binding_id": "01a14ab5-cab5-7918-8cd2-eef2bd757691",
+            "created_at": "2026-10-17T16:33:10.325Z",
+            "mode": "host-session"
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "proposal.submit",
+        "elapsed_ms": 1293.8710980000005,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "work_item",
+          "expected_version": 0,
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "work_item",
+            "title": "proxy restart fixture",
+            "status": "queued",
+            "acceptance_criteria": [
+              "restart"
+            ]
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "work_item",
+            "expected_version": 0,
+            "content": {
+              "created_at": "2026-10-17T16:33:11.636Z",
+              "provenance": {
+                "host_id": "benchmark-operator",
+                "producer_id": "benchmark-operator",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "work_item",
+              "title": "proxy restart fixture",
+              "status": "queued",
+              "acceptance_criteria": [
+                "restart"
+              ]
+            },
+            "id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+            "proposal_id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+            "content_hash": "sha256:1d6733b48bef6de5f4d29d4f5217f4f82992e22c691e215b918038b7c4ddd82c",
+            "status": "pending"
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "admission.evaluate",
+        "elapsed_ms": 1339.9025150000007,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "proposal_id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+          "expected_version": 0,
+          "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "ok": true,
+            "proposal": {
+              "id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+              "proposal_id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "subject_type": "work_item",
+              "expected_version": 0,
+              "canonical_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+              "canonical_version": 1,
+              "status": "admitted",
+              "content_hash": "sha256:1d6733b48bef6de5f4d29d4f5217f4f82992e22c691e215b918038b7c4ddd82c",
+              "content": {
+                "created_at": "2026-10-17T16:33:11.636Z",
+                "provenance": {
+                  "host_id": "benchmark-operator",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "schema_version": "1.0.0",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "work_item",
+                "title": "proxy restart fixture",
+                "status": "queued",
+                "acceptance_criteria": [
+                  "restart"
+                ]
+              }
+            },
+            "record": {
+              "schema_version": "1.0.0",
+              "created_at": "2026-10-17T16:33:11.636Z",
+              "provenance": {
+                "host_id": "benchmark-operator",
+                "producer_id": "benchmark-operator",
+                "source_kind": "host"
+              },
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "work_item",
+              "title": "proxy restart fixture",
+              "status": "queued",
+              "acceptance_criteria": [
+                "restart"
+              ],
+              "id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+              "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "policy_version": "taric-l1-structural-v1",
+              "trust_phase": "machine_approved",
+              "version": 1,
+              "trust_level": "L1",
+              "display_id": "TAR-000003",
+              "commit_seq": 5
+            },
+            "trust_phase": "machine_approved",
+            "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "policy_version": "taric-l1-structural-v1",
+            "remaining_l2_requirements": []
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 610.1297549999999,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "expected_version": 0,
+          "idempotency_key": "proxy-restart-01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "persistent proxy retry",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "expected_version": 0,
+            "content": {
+              "created_at": "2026-10-17T16:33:15.319Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "persistent proxy retry",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+            "proposal_id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+            "content_hash": "sha256:e7a1b25e84009824d2d7ae012f924ca7086d7f36f3e307320d6fe62991848afe",
+            "status": "pending"
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "admission.evaluate",
+        "elapsed_ms": 1573.4747270000007,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "proposal_id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+          "expected_version": 0,
+          "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "ok": true,
+            "proposal": {
+              "id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+              "proposal_id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "subject_type": "claim",
+              "expected_version": 0,
+              "canonical_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "canonical_version": 1,
+              "status": "admitted",
+              "content_hash": "sha256:e7a1b25e84009824d2d7ae012f924ca7086d7f36f3e307320d6fe62991848afe",
+              "content": {
+                "created_at": "2026-10-17T16:33:15.319Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-host",
+                  "source_kind": "host"
+                },
+                "schema_version": "1.0.0",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "persistent proxy retry",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": []
+              }
+            },
+            "record": {
+              "schema_version": "1.0.0",
+              "created_at": "2026-10-17T16:33:15.319Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-operator",
+                "source_kind": "host"
+              },
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "persistent proxy retry",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": [],
+              "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "policy_version": "taric-l1-structural-v1",
+              "trust_phase": "machine_approved",
+              "version": 1,
+              "trust_level": "L1",
+              "display_id": "TAR-000004",
+              "commit_seq": 8
+            },
+            "trust_phase": "machine_approved",
+            "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "policy_version": "taric-l1-structural-v1",
+            "remaining_l2_requirements": []
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "work.claim",
+        "elapsed_ms": 87.15430799999922,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "work_item_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+          "agent_id": "proxy-agent",
+          "ttl_ms": 60000
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+            "work_item_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "status": "claimed",
+            "owner": {
+              "host_id": "benchmark-host",
+              "agent_id": "proxy-agent"
+            },
+            "generation": 1,
+            "lease_expires_at": "2026-10-17T16:34:17.014Z",
+            "heartbeat_at": "2026-10-17T16:33:17.014Z",
+            "read_seq": 9,
+            "work_item_version": 1,
+            "target_version": 1,
+            "task_session_ref": "proxy-restart-session",
+            "scope_ref": "01a14ab5-c3d9-7925-96ca-e8af684e613b",
+            "scope_version": 1,
+            "attempt_ref": "01a14ab5-e4d6-7caa-925b-7ab54d9d3dd0"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 87.69052999999985,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:15.319Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "persistent proxy retry",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 1,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 10,
+            "committed_seq": 10,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 111.1872540000004,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:15.319Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "persistent proxy retry",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 1,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 10,
+            "committed_seq": 10,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 88.99198399999841,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "expected_version": 0,
+          "idempotency_key": "proxy-restart-01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "persistent proxy retry",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "expected_version": 0,
+            "content": {
+              "created_at": "2026-10-17T16:33:15.319Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "persistent proxy retry",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+            "proposal_id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+            "content_hash": "sha256:e7a1b25e84009824d2d7ae012f924ca7086d7f36f3e307320d6fe62991848afe",
+            "status": "pending"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 81.03944299999966,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "expected_version": 0,
+          "idempotency_key": "proxy-restart-01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "changed late retry",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          }
+        },
+        "response": {
+          "ok": false,
+          "error": {
+            "code": "idempotency_conflict",
+            "message": "idempotency key is bound to another request"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+              "ok": false,
+              "error": {
+                "code": "idempotency_conflict",
+                "message": "idempotency key is bound to another request"
+              }
+            }
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "work.renew",
+        "elapsed_ms": 83.76958900000136,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+          "generation": 1,
+          "ttl_ms": 60000
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+            "work_item_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "status": "claimed",
+            "owner": {
+              "host_id": "benchmark-host",
+              "agent_id": "proxy-agent"
+            },
+            "generation": 1,
+            "lease_expires_at": "2026-10-17T16:34:18.909Z",
+            "heartbeat_at": "2026-10-17T16:33:18.909Z",
+            "read_seq": 9,
+            "work_item_version": 1,
+            "target_version": 1,
+            "task_session_ref": "proxy-restart-session",
+            "scope_ref": "01a14ab5-c3d9-7925-96ca-e8af684e613b",
+            "scope_version": 1,
+            "attempt_ref": "01a14ab5-e4d6-7caa-925b-7ab54d9d3dd0"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "work.renew",
+        "elapsed_ms": 80.32457599999907,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+          "generation": 0,
+          "ttl_ms": 60000
+        },
+        "response": {
+          "ok": false,
+          "error": {
+            "code": "stale_version",
+            "message": "work run lease is expired or fenced"
+          },
+          "response": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+              "ok": false,
+              "error": {
+                "code": "stale_version",
+                "message": "work run lease is expired or fenced"
+              }
+            }
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 85.65773799999988,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+          "expected_version": 1,
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "first canonical revision",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+            "expected_version": 1,
+            "content": {
+              "created_at": "2026-10-17T16:33:19.073Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "first canonical revision",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+            "proposal_id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+            "content_hash": "sha256:35ce8786c74f0b482693b579904415d056639010f250cc8900620669ee781826",
+            "status": "pending"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 82.74049300000115,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+          "expected_version": 1,
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "competing canonical revision",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          }
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+            "expected_version": 1,
+            "content": {
+              "created_at": "2026-10-17T16:33:19.159Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "competing canonical revision",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+            "proposal_id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+            "content_hash": "sha256:f432e2ccbbd904802c158922a1ec5e545922b4c3bd15fe2b18e8f5259af5d340",
+            "status": "pending"
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "admission.evaluate",
+        "elapsed_ms": 1439.5322450000003,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "proposal_id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+          "expected_version": 1,
+          "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "ok": true,
+            "proposal": {
+              "id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+              "proposal_id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "subject_type": "claim",
+              "expected_version": 1,
+              "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "canonical_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "canonical_version": 2,
+              "status": "admitted",
+              "content_hash": "sha256:35ce8786c74f0b482693b579904415d056639010f250cc8900620669ee781826",
+              "content": {
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-host",
+                  "source_kind": "host"
+                },
+                "schema_version": "1.0.0",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": []
+              }
+            },
+            "record": {
+              "schema_version": "1.0.0",
+              "created_at": "2026-10-17T16:33:19.073Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-operator",
+                "source_kind": "host"
+              },
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "first canonical revision",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": [],
+              "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "policy_version": "taric-l1-structural-v1",
+              "trust_phase": "machine_approved",
+              "version": 2,
+              "trust_level": "L1",
+              "display_id": "TAR-000004",
+              "commit_seq": 14
+            },
+            "trust_phase": "machine_approved",
+            "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "policy_version": "taric-l1-structural-v1",
+            "remaining_l2_requirements": []
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 79.06454400000075,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 2,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 15,
+            "committed_seq": 15,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "node_cli",
+        "operation": "admission.evaluate",
+        "elapsed_ms": 1234.7840590000014,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "proposal_id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+          "expected_version": 1,
+          "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "ok": false,
+            "reason": "base version mismatch",
+            "proposal": {
+              "id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+              "proposal_id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "subject_type": "claim",
+              "expected_version": 1,
+              "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+              "status": "rejected",
+              "content_hash": "sha256:f432e2ccbbd904802c158922a1ec5e545922b4c3bd15fe2b18e8f5259af5d340",
+              "content": {
+                "created_at": "2026-10-17T16:33:19.159Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-host",
+                  "source_kind": "host"
+                },
+                "schema_version": "1.0.0",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "competing canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": []
+              }
+            }
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 136.8654749999987,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 2,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 16,
+            "committed_seq": 16,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "work.renew",
+        "elapsed_ms": 145.0772109999998,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+          "generation": 1,
+          "ttl_ms": 1
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+            "work_item_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "status": "claimed",
+            "owner": {
+              "host_id": "benchmark-host",
+              "agent_id": "proxy-agent"
+            },
+            "generation": 1,
+            "lease_expires_at": "2026-10-17T16:33:22.126Z",
+            "heartbeat_at": "2026-10-17T16:33:22.125Z",
+            "read_seq": 9,
+            "work_item_version": 1,
+            "target_version": 1,
+            "task_session_ref": "proxy-restart-session",
+            "scope_ref": "01a14ab5-c3d9-7925-96ca-e8af684e613b",
+            "scope_version": 1,
+            "attempt_ref": "01a14ab5-e4d6-7caa-925b-7ab54d9d3dd0"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 115.30808600000091,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 2,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 17,
+            "committed_seq": 17,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 116.16554000000178,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "expected_version": 0,
+          "idempotency_key": "proxy-restart-01a14ab5-d50b-7a99-9fe5-bfad4a87ea69-late",
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "expired Attempt result",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          },
+          "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+          "generation": 1
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "expected_version": 0,
+            "content": {
+              "created_at": "2026-10-17T16:33:22.426Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "expired Attempt result",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+            "proposal_id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+            "run_attribution": {
+              "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+              "attempt_id": "01a14ab5-e4d6-7caa-925b-7ab54d9d3dd0",
+              "generation": 1,
+              "session_id": "proxy-restart-session"
+            },
+            "content_hash": "sha256:8ec64f6cfad366975a34a3f2df745b552191f13520645777b512ffbfbec1329f",
+            "status": "rejected"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 134.21718099999998,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 2,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 18,
+            "committed_seq": 18,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.submit",
+        "elapsed_ms": 130.35408599999937,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "subject_type": "claim",
+          "expected_version": 0,
+          "idempotency_key": "proxy-restart-01a14ab5-d50b-7a99-9fe5-bfad4a87ea69-late",
+          "content": {
+            "schema_version": "1.0.0",
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "kind": "claim",
+            "proposition": "expired Attempt result",
+            "status": "proposed",
+            "evidence_refs": [],
+            "limitations": []
+          },
+          "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+          "generation": 1
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+            "subject_type": "claim",
+            "expected_version": 0,
+            "content": {
+              "created_at": "2026-10-17T16:33:22.426Z",
+              "provenance": {
+                "host_id": "benchmark-host",
+                "producer_id": "benchmark-host",
+                "source_kind": "host"
+              },
+              "schema_version": "1.0.0",
+              "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+              "kind": "claim",
+              "proposition": "expired Attempt result",
+              "status": "proposed",
+              "evidence_refs": [],
+              "limitations": []
+            },
+            "id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+            "proposal_id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+            "run_attribution": {
+              "work_run_id": "01a14ab5-e4d3-71d9-ad62-364668810fbd",
+              "attempt_id": "01a14ab5-e4d6-7caa-925b-7ab54d9d3dd0",
+              "generation": 1,
+              "session_id": "proxy-restart-session"
+            },
+            "content_hash": "sha256:8ec64f6cfad366975a34a3f2df745b552191f13520645777b512ffbfbec1329f",
+            "status": "rejected"
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "query",
+        "elapsed_ms": 114.43107299999974,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "kind": "claim",
+          "include_candidates": true
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "records": [
+              {
+                "schema_version": "1.0.0",
+                "created_at": "2026-10-17T16:33:19.073Z",
+                "provenance": {
+                  "host_id": "benchmark-host",
+                  "producer_id": "benchmark-operator",
+                  "source_kind": "host"
+                },
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "kind": "claim",
+                "proposition": "first canonical revision",
+                "status": "proposed",
+                "evidence_refs": [],
+                "limitations": [],
+                "id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "policy_version": "taric-l1-structural-v1",
+                "trust_phase": "machine_approved",
+                "version": 2,
+                "trust_level": "L1",
+                "display_id": "TAR-000004"
+              }
+            ],
+            "read_seq": 18,
+            "committed_seq": 18,
+            "projected_seq": 0
+          }
+        }
+      },
+      {
+        "transport": "bun_rpc",
+        "operation": "proposal.list",
+        "elapsed_ms": 119.4650249999977,
+        "request": {
+          "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+          "page_size": 100
+        },
+        "response": {
+          "ok": true,
+          "data": {
+            "proposals": [
+              {
+                "id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+                "proposal_id": "01a14ab5-cfd4-7fc7-a6a9-71484a52ddb6",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "subject_type": "work_item",
+                "expected_version": 0,
+                "canonical_id": "01a14ab5-d50b-7a99-9fe5-bfad4a87ea69",
+                "canonical_version": 1,
+                "status": "admitted",
+                "content_hash": "sha256:1d6733b48bef6de5f4d29d4f5217f4f82992e22c691e215b918038b7c4ddd82c",
+                "content": {
+                  "created_at": "2026-10-17T16:33:11.636Z",
+                  "provenance": {
+                    "host_id": "benchmark-operator",
+                    "producer_id": "benchmark-operator",
+                    "source_kind": "host"
+                  },
+                  "schema_version": "1.0.0",
+                  "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                  "kind": "work_item",
+                  "title": "proxy restart fixture",
+                  "status": "queued",
+                  "acceptance_criteria": [
+                    "restart"
+                  ]
+                },
+                "created_at": "2026-10-17T16:33:11.638Z"
+              },
+              {
+                "id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+                "proposal_id": "01a14ab5-de36-7371-a9c6-026dafd5a2bc",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "subject_type": "claim",
+                "expected_version": 0,
+                "canonical_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "canonical_version": 1,
+                "status": "admitted",
+                "content_hash": "sha256:e7a1b25e84009824d2d7ae012f924ca7086d7f36f3e307320d6fe62991848afe",
+                "content": {
+                  "created_at": "2026-10-17T16:33:15.319Z",
+                  "provenance": {
+                    "host_id": "benchmark-host",
+                    "producer_id": "benchmark-host",
+                    "source_kind": "host"
+                  },
+                  "schema_version": "1.0.0",
+                  "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                  "kind": "claim",
+                  "proposition": "persistent proxy retry",
+                  "status": "proposed",
+                  "evidence_refs": [],
+                  "limitations": []
+                },
+                "created_at": "2026-10-17T16:33:15.320Z"
+              },
+              {
+                "id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+                "proposal_id": "01a14ab5-ece1-71b3-9f8d-935173996145",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "subject_type": "claim",
+                "expected_version": 1,
+                "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "canonical_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "canonical_version": 2,
+                "status": "admitted",
+                "content_hash": "sha256:35ce8786c74f0b482693b579904415d056639010f250cc8900620669ee781826",
+                "content": {
+                  "created_at": "2026-10-17T16:33:19.073Z",
+                  "provenance": {
+                    "host_id": "benchmark-host",
+                    "producer_id": "benchmark-host",
+                    "source_kind": "host"
+                  },
+                  "schema_version": "1.0.0",
+                  "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                  "kind": "claim",
+                  "proposition": "first canonical revision",
+                  "status": "proposed",
+                  "evidence_refs": [],
+                  "limitations": []
+                },
+                "created_at": "2026-10-17T16:33:19.075Z"
+              },
+              {
+                "id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+                "proposal_id": "01a14ab5-ed37-76e7-8f99-448841f42dfb",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "subject_type": "claim",
+                "expected_version": 1,
+                "target_id": "01a14ab5-e480-7c83-b931-06cbea63c6e8",
+                "status": "rejected",
+                "content_hash": "sha256:f432e2ccbbd904802c158922a1ec5e545922b4c3bd15fe2b18e8f5259af5d340",
+                "content": {
+                  "created_at": "2026-10-17T16:33:19.159Z",
+                  "provenance": {
+                    "host_id": "benchmark-host",
+                    "producer_id": "benchmark-host",
+                    "source_kind": "host"
+                  },
+                  "schema_version": "1.0.0",
+                  "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                  "kind": "claim",
+                  "proposition": "competing canonical revision",
+                  "status": "proposed",
+                  "evidence_refs": [],
+                  "limitations": []
+                },
+                "created_at": "2026-10-17T16:33:19.160Z"
+              },
+              {
+                "id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+                "proposal_id": "01a14ab5-f9f9-7a93-949f-b705c15c01ac",
+                "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                "subject_type": "claim",
+                "expected_version": 0,
+                "status": "rejected",
+                "content_hash": "sha256:8ec64f6cfad366975a34a3f2df745b552191f13520645777b512ffbfbec1329f",
+                "content": {
+                  "created_at": "2026-10-17T16:33:22.426Z",
+                  "provenance": {
+                    "host_id": "benchmark-host",
+                    "producer_id": "benchmark-host",
+                    "source_kind": "host"
+                  },
+                  "schema_version": "1.0.0",
+                  "engagement_id": "01a14ab5-c3d9-7e4e-95d7-c0755650f8f9",
+                  "kind": "claim",
+                  "proposition": "expired Attempt result",
+                  "status": "proposed",
+                  "evidence_refs": [],
+                  "limitations": []
+                },
+                "created_at": "2026-10-17T16:33:22.426Z"
+              }
+            ],
+            "read_seq": 18
+          }
+        }
+      }
+    ],
+    "outcomes": [
+      "changed_retry_rejected",
+      "stale_generation_renewal_rejected",
+      "expected_version_cas_advanced_once",
+      "competing_cas_rejected_with_audit",
+      "expired_attempt_quarantined",
+      "late_retry_after_restart_has_no_new_commit"
+    ],
+    "call_scope": "all isolated operator Node CLI calls and fixed-host Bun RPC calls; wait includes client process startup and Core response",
+    "commands": [
+      "node scripts/benchmark-proxy-restart.mjs --output=docs/benchmarks/proxy-restart-v5.json",
+      "node packages/cli/dist/bin.js proxy",
+      "bun scripts/adapter-rpc-bun-client.mjs"
+    ]
+  },
+  "conclusion": {
+    "public_entrypoints_only": true,
+    "canonical_read_after_restart": true,
+    "idempotency_after_restart": true,
+    "run_state_survives_proxy_restart": true,
+    "stale_generation_rejected": true,
+    "expected_version_cas": true,
+    "expired_proposal_quarantined": true,
+    "late_retry_after_restart_has_no_new_commit": true
+  },
+  "limitations": [
+    "local Unix socket",
+    "single-host SQLite",
+    "timings are one synthetic run",
+    "implementation labor-hours were not instrumented",
+    "host-session isolation with explicit run attribution on the late proposal; not universal run-bound fencing",
+    "does not certify external credentials or network failure"
+  ]
+}

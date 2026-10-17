@@ -9,6 +9,7 @@ import {
   createDeepSeekDescriptor,
   createHermesAdapter,
   createHermesDescriptor,
+  createCustomAdapterDescriptor,
   createPiAdapter,
   createPiDescriptor,
   createPrincipal,
@@ -32,6 +33,38 @@ test("adapter contract rejects unsupported versions, capabilities and API mismat
   assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, supported: false }).reason, "unsupported_capability");
 });
 
+test("custom adapter identities are format-validated metadata and do not grant native capability", async () => {
+  const descriptor = createCustomAdapterDescriptor({
+    adapter_id: "acme/red-team",
+    framework_package: "@acme/agent",
+    distribution: "red-team",
+    version: "2.4.1-fork.1",
+    commit: "fork-2026",
+    declared_capabilities: ["writer", "reviewer"],
+  });
+  assert.equal(descriptor.host_id, "acme/red-team");
+  assert.equal(descriptor.framework_package, "@acme/agent");
+  assert.equal(descriptor.distribution, "red-team");
+  assert.equal(descriptor.version, "2.4.1-fork.1");
+  assert.equal(descriptor.commit, "fork-2026");
+  assert.deepEqual(descriptor.capabilities, []);
+  assert.equal(descriptor.supported, false);
+  assert.deepEqual(descriptor.declared_capabilities, ["writer", "reviewer"]);
+  assert.equal(validateAdapter(descriptor).accepted, false);
+  assert.equal(descriptor.framework_package, "@acme/agent");
+  assert.throws(() => createCustomAdapterDescriptor({ adapter_id: "../privileged", framework_package: "pkg", distribution: "dist", version: "1" }), /invalid adapter id/);
+
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  const client = new TaricAdapterClient(descriptor, service, createPrincipal("model", "model-a", engagement_id));
+  assert.equal((await client.call("engagement.status", { engagement_id })).ok, true);
+  const privileged = await client.call("checkpoint.commit", { engagement_id, work_run_id: uuidv7(), host_id: "model-a", generation: 1, checkpoint: {} });
+  assert.equal(privileged.ok, false);
+  assert.equal(privileged.error.code, "authorization_error");
+  await store.close();
+});
+
 test("adapter client never exposes the store and keeps engagement attribution", async () => {
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
@@ -42,8 +75,10 @@ test("adapter client never exposes the store and keeps engagement attribution", 
   assert.equal("store" in adapter, false);
   assert.equal("db" in adapter, false);
   assert.equal(adapter.descriptor.host_commit, "7c10bd4");
-  assert.deepEqual(adapter.status().capabilities, ["session_lifecycle", "context_injection"]);
-  assert.deepEqual(adapter.status().missing_capabilities, ["proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"]);
+  assert.deepEqual(adapter.status().capabilities, []);
+  assert.equal(adapter.status().service_connected, false);
+  assert.equal(adapter.status().capability_status.session_lifecycle.reason, "adapter instance has not registered runtime hooks or tools");
+  assert.deepEqual(adapter.status().missing_capabilities, ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"]);
 
   const accepted = await adapter.call("proposal.submit", {
     engagement_id,
@@ -53,6 +88,7 @@ test("adapter client never exposes the store and keeps engagement attribution", 
   });
   assert.equal(accepted.ok, false);
   assert.equal(accepted.error.code, "validation_error");
+  assert.equal(adapter.status().service_connected, true, "service_connected means the service returned a response, not that the host is healthy");
 
   const denied = await adapter.call("checkpoint.commit", { engagement_id, work_run_id: uuidv7(), host_id: "pi", generation: 1, checkpoint: {} });
   assert.equal(denied.ok, false);
@@ -101,7 +137,7 @@ test("authenticated adapter Artifact calls use Core authorization and content co
   const bytes = Buffer.from("adapter artifact bytes");
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   try {
-    assert.equal((await host.call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id) })).ok, true);
+    assert.equal((await host.call("artifact.session.bind", { engagement_id, session_id, root: join(contentRoot, session_id), mode: "host-session" })).ok, true);
     const begun = await host.call("artifact.store.begin", { engagement_id, session_id, payload_kind: "text", media_type: "text/plain", expected_bytes: bytes.length, expected_hash: digest });
     assert.equal(begun.ok, true);
     assert.equal((await host.call("artifact.store.append", { engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: digest })).ok, true);
@@ -125,6 +161,67 @@ test("untested Pi versions are unsupported", () => {
   const descriptor = createPiDescriptor("0.74.2");
   assert.equal(descriptor.supported, false);
   assert.deepEqual(descriptor.capabilities, []);
+});
+
+test("Pi capability status keeps technical availability separate from pending quality evidence", async () => {
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  const adapter = createPiAdapter(service, createPrincipal("host", "pi-host", engagement_id));
+  const initial = adapter.status();
+  assert.deepEqual(initial.capabilities, []);
+  assert.equal(initial.service_connected, false);
+  assert.equal(initial.quality_release_state, "pending");
+  assert.equal(initial.capability_status.session_lifecycle.runtime_state, "disabled");
+  const extension = { on() { return () => {}; } };
+  const loaded = await adapter.register(extension);
+  assert.equal(loaded.available_capabilities.includes("session_lifecycle"), true);
+  assert.equal(loaded.available_capabilities.includes("checkpoint"), false);
+  assert.equal(adapter.status().capabilities.includes("session_lifecycle"), true);
+  assert.equal(adapter.status().service_connected, false);
+  assert.equal(adapter.status().capability_status.checkpoint.runtime_state, "disabled");
+  assert.equal(adapter.status().quality_release_state, "pending");
+  await store.close();
+});
+
+test("Pi checkpoint and host result callbacks remain disabled without a valid run binding", async () => {
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  const adapter = createPiAdapter(service, createPrincipal("host", "pi-host", engagement_id));
+  const extension = { on() { return () => {}; }, registerTool() {} };
+  const loaded = await adapter.register(extension, {
+    checkpoint: () => ({ ok: true }),
+    resultForTool: () => ({ action_id: uuidv7(), mode: "host_hitl", status: "executed" }),
+  });
+  assert.equal(loaded.available_capabilities.includes("checkpoint"), false);
+  assert.equal(loaded.available_capabilities.includes("host_result"), false);
+  assert.equal(adapter.status().capability_status.checkpoint.reason.includes("run binding"), true);
+  await store.close();
+});
+
+test("stale, skipped, and mock adapter evidence cannot enable native capabilities", async () => {
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  for (const evidence of [
+    { version: "1.0.9", state: "verified" },
+    { version: "1.1.0", state: "skipped" },
+    { version: "1.1.0", state: "mock" },
+  ]) {
+    const adapter = createPiAdapter(service, createPrincipal("host", `pi-${evidence.state}`, engagement_id));
+    adapter.descriptor.certification_evidence = [{
+      framework_package: "@earendil-works/pi-coding-agent",
+      distribution: "pi",
+      version: evidence.version,
+      commit: "7c10bd4",
+      state: evidence.state,
+      ref: "fixture-only",
+    }];
+    assert.deepEqual(adapter.status().capabilities, []);
+    assert.equal(adapter.status().runtime_state, "disabled");
+  }
+  await store.close();
 });
 
 test("unknown native host versions are unsupported and advertise only actual fallback", () => {

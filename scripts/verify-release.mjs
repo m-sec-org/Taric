@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { cpus, totalmem } from "node:os";
 import { spawnSync } from "node:child_process";
 import { coreSchema, operationContracts } from "@taric/schemas";
 import { buildReleaseReport, buildSharedAuthorityReleaseEvidence, PostgresAuthorityStore, runAuthorityRuntimeConformance, policyDigest, TARIC_COMPATIBILITY_MANIFEST } from "../packages/core/dist/index.js";
@@ -16,8 +17,27 @@ const collect = (path) => {
   }
 };
 collect(join(root, "packages")); collect(join(root, "scripts"));
-sourceFiles.push("package.json", "package-lock.json", "tsconfig.json", "AGENTS.md"); sourceFiles.sort();
+sourceFiles.push("package.json", "package-lock.json", "tsconfig.json", "AGENTS.md", "readme.md"); sourceFiles.sort();
 const sourceDigest = digest(Buffer.concat(sourceFiles.flatMap((path) => [Buffer.from(`${path}\0`), readFileSync(join(root, path)), Buffer.from("\0")])));
+const bunVersion = spawnSync("bun", ["--version"], { cwd: root, encoding: "utf8" });
+const runtimeVersions = {
+  node: process.version,
+  bun: bunVersion.status === 0 ? bunVersion.stdout.trim() : null,
+  python: spawnSync("python3", ["--version"], { cwd: root, encoding: "utf8" }).stdout.trim() || null,
+};
+const buildDigest = (checkout) => {
+  const files = [];
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile()) files.push(relative(checkout, child));
+    }
+  };
+  for (const packageName of ["schemas", "core", "cli", "mcp"]) visit(join(checkout, "packages", packageName, "dist"));
+  files.sort();
+  return digest(Buffer.concat(files.flatMap((path) => [Buffer.from(`${path}\0`), readFileSync(join(checkout, path)), Buffer.from("\0")])));
+};
 const base_commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
 const directory = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "taric-clean-verification-"));
 const steps = []; const counts = [];
@@ -73,7 +93,7 @@ try {
     ...(!runtime_verified ? ["Complete passing live PostgreSQL runtime verification is required to establish task 6.2 completion"] : []),
     ...(!quality.passed ? ["Representative human annotation and baseline evidence is pending; synthetic fixture cannot establish quality"] : []),
   ];
-  const report = { version: "harden-authority-verification/1", base_commit, source_digest: sourceDigest, schema_digest: digest(JSON.stringify(coreSchema)), policy_digest: policyDigest(), fixture_digest: digest(readFileSync(fixturePath)), configuration: { node: process.version, platform: process.platform, checkout: "current source exported into an empty temporary directory", spec_count: readdirSync(join(root, "openspec/specs"), { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync(join(root, "openspec/specs", entry.name, "spec.md"))).length, operation_count: operationContracts.length, schema_definition_count: Object.keys(coreSchema.$defs).length, live_postgresql: liveRequested }, technical_passed, runtime_verified, implementation_complete, release_state: !technical_passed ? "failed" : implementation_complete && quality.passed ? "passed" : "blocked", checks: steps, test_counts: counts, capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities, quality, shared_authority: shared, postgres_runtime: live ?? null, blockers };
+  const report = { version: "taric-capability-verification/1", base_commit, source_digest: sourceDigest, build_digest: built ? buildDigest(directory) : null, schema_digest: digest(JSON.stringify(coreSchema)), policy_digest: policyDigest(), fixture_digest: digest(readFileSync(fixturePath)), configuration: { runtimes: runtimeVersions, host: { platform: process.platform, arch: process.arch, cpu_model: cpus()[0]?.model ?? null, cpu_count: cpus().length, total_memory_bytes: totalmem() }, checkout: "current source exported into an empty temporary directory", fixture_path: "packages/core/test/fixtures/memory-quality-v1.json", fixture_sample_count: samples.length, spec_count: readdirSync(join(root, "openspec/specs"), { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync(join(root, "openspec/specs", entry.name, "spec.md"))).length, operation_count: operationContracts.length, schema_definition_count: Object.keys(coreSchema.$defs).length, live_postgresql: liveRequested }, technical_passed, runtime_verified, implementation_complete, release_state: !technical_passed ? "failed" : implementation_complete && quality.passed ? "passed" : "blocked", checks: steps, test_counts: counts, capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities, quality, shared_authority: shared, postgres_runtime: live ?? null, blockers };
   const text = `${JSON.stringify(report, null, 2)}\n`;
   const outputIndex = process.argv.indexOf("--output");
   const postgresOutputIndex = process.argv.indexOf("--postgres-output");

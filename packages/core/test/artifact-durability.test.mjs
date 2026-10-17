@@ -24,7 +24,7 @@ for (const point of points) test(`Artifact restart after ${point} exposes only v
   let authority = new AuthorityStore(path);
   try {
     let artifacts = new ArtifactContentStore(root, authority, { fault: (at) => { if (at === point) throw new Error("injected process stop"); } }); await artifacts.initialize();
-    (await artifacts.bind({ engagement_id, session_id, root: sessionRoot }));
+    (await artifacts.bind({ engagement_id, session_id, root: sessionRoot, mode: "host-session" }));
     const body = Buffer.from("verified textual original\n"); const content_hash = hash(body);
     const started = (await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));
     (await artifacts.append({ engagement_id, session_id, upload_id: started.upload_id, ordinal: 0, data: body.toString("base64"), chunk_hash: content_hash }));
@@ -51,7 +51,7 @@ test("restart cannot recover a published marker with a tampered chunk", async ()
   const engagement_id = uuidv7(); const session_id = "session";
   try {
     const artifacts = new ArtifactContentStore(root, authority, { fault: (point) => { if (point === "after_publication_marker") throw new Error("crash"); } }); await artifacts.initialize();
-    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) }));
+    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" }));
     const body = Buffer.from([0, 255, 8, 42]); const content_hash = hash(body);
     const started = (await artifacts.begin({ engagement_id, session_id, payload_kind: "binary", media_type: "application/octet-stream" }));
     (await artifacts.append({ engagement_id, session_id, upload_id: started.upload_id, ordinal: 0, data: body.toString("base64"), chunk_hash: content_hash }));
@@ -66,11 +66,36 @@ test("restart cannot recover a published marker with a tampered chunk", async ()
   } finally { (await authority.close()); rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("restart leaves run-bound publication pending after its Attempt lease expires", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "taric-artifact-expired-run-"));
+  const path = join(dir, "authority.sqlite"); const root = join(dir, "content"); const engagement_id = uuidv7(); const session_id = "leased-session"; const host_id = "host-a";
+  let authority = new AuthorityStore(path);
+  try {
+    const work_item_id = uuidv7();
+    await authority.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "leased artifact", status: "queued", acceptance_criteria: ["persist"] }, "L2");
+    const run = await authority.claimWorkRun({ work_item_id, engagement_id, host_id, agent_id: "worker", ttl_ms: 1000 });
+    let artifacts = new ArtifactContentStore(root, authority, { fault: (point) => { if (point === "after_publication_marker") throw new Error("injected process stop"); } });
+    await artifacts.initialize();
+    await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "run-bound", work_run_id: run.run_id, attempt_id: run.attempt_ref, generation: run.generation, owner_host: host_id }, host_id);
+    const body = Buffer.from("must remain unavailable"); const content_hash = hash(body);
+    const started = await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }, host_id);
+    await artifacts.append({ engagement_id, session_id, upload_id: started.upload_id, ordinal: 0, data: body.toString("base64"), chunk_hash: content_hash }, host_id);
+    await assert.rejects(() => artifacts.commit({ engagement_id, session_id, upload_id: started.upload_id, total_bytes: body.length, content_hash }, host_id), /injected process stop/);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await authority.close(); authority = new AuthorityStore(path);
+    artifacts = new ArtifactContentStore(root, authority);
+    await artifacts.initialize();
+    assert.equal((await authority.artifactCatalogRows()).length, 0);
+    assert.equal((await artifacts.list({ engagement_id, session_id })).items.length, 0);
+    assert.equal((await artifacts.reconcile({ engagement_id, session_id })).pending_publications.length, 1);
+  } finally { await authority.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("reconcile detects both absent and corrupted committed chunks", async () => {
   const dir = mkdtempSync(join(tmpdir(), "taric-artifact-reconcile-")); const root = join(dir, "content"); const authority = new AuthorityStore(join(dir, "authority.sqlite"));
   try {
     const artifacts = new ArtifactContentStore(root, authority); await artifacts.initialize(); const engagement_id = uuidv7(); const session_id = "session";
-    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) }));
+    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" }));
     const put = async () => { const body = Buffer.from("same length"); const content_hash = hash(body); const started = (await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" })); (await artifacts.append({ engagement_id, session_id, upload_id: started.upload_id, ordinal: 0, data: body.toString("base64"), chunk_hash: content_hash })); return (await artifacts.commit({ engagement_id, session_id, upload_id: started.upload_id, total_bytes: body.length, content_hash })); };
     const absent = (await put()); const corrupt = (await put());
     rmSync(join(root, session_id, absent.relative_dir, "payload-000001.part"));

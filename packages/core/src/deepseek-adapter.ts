@@ -29,9 +29,12 @@ export function createDeepSeekDescriptor(version: string = SUPPORTED_DEEPSEEK_HO
   const supported = version === SUPPORTED_DEEPSEEK_HOST.version && commit === SUPPORTED_DEEPSEEK_HOST.commit;
   const capabilities: AdapterCapability[] = supported ? ["session_lifecycle"] : [];
   return {
-    host_id: "deepseek-harness", version, host_commit: commit,
+    host_id: "deepseek-harness", framework_package: SUPPORTED_DEEPSEEK_HOST.package, distribution: "deepseek-harness", version, commit, host_commit: commit,
     contract_version: ADAPTER_CONTRACT_VERSION, api_contract_version: API_CONTRACT_VERSION,
     capabilities: supported ? ["session_lifecycle"] : [], supported,
+    native_certified: supported,
+    certification_evidence: supported ? [{ framework_package: SUPPORTED_DEEPSEEK_HOST.package, distribution: "deepseek-harness", version: SUPPORTED_DEEPSEEK_HOST.version, commit: SUPPORTED_DEEPSEEK_HOST.commit, state: "verified", ref: "packages/core/test/host-adapters.test.mjs" }] : [],
+    quality_release_state: "pending",
     unsupported_capabilities: supported ? [] : ["deepseek_native_adapter"],
     test_evidence: supported ? ["deepseek-session-event-contract-v1"] : [],
     fallback: ["mcp.context.query", "mcp.resource.query", "mcp.proposal.submit", "cli"],
@@ -51,7 +54,7 @@ export class DeepSeekHarnessAdapter {
     this.#principal = principal;
   }
   call<T = unknown>(operation: string, request: Record<string, unknown>) { return this.client.call<T>(operation, request); }
-  status() { return { ...this.client.status(), service_connected: this.#principal.transport_verified === true, hooks: this.#loaded ? [...deepSeekHooks] : [], fallback: [...(this.descriptor.fallback ?? [])], test_evidence: [...(this.descriptor.test_evidence ?? [])] }; }
+  status() { return { ...this.client.status(), hooks: this.#loaded ? [...deepSeekHooks] : [], fallback: [...(this.descriptor.fallback ?? [])], test_evidence: [...(this.descriptor.test_evidence ?? [])] }; }
   async register(ctx: DeepSeekCordisContext, binding: DeepSeekBinding) {
     if (!this.descriptor.supported) throw new ContractValidationError("unsupported_capability", "unsupported_capability");
     if (this.#principal.role !== "host" || !this.#principal.transport_verified || !this.#principal.engagement_id || binding.engagement_id !== this.#principal.engagement_id) throw new ContractValidationError("authorization_error", "authorization_error");
@@ -72,6 +75,7 @@ export class DeepSeekHarnessAdapter {
       this.#disposers.push(disposer);
     }
     this.#loaded = true;
+    this.client.setRuntimeCapabilities(["session_lifecycle"]);
     return { loaded: true, hooks: [...deepSeekHooks], available_capabilities: [...this.descriptor.capabilities], missing_capabilities: ["context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"], reload_idempotent: true };
   }
   unload() { for (const dispose of this.#disposers.splice(0).reverse()) dispose(); this.#loaded = false; }
@@ -92,8 +96,11 @@ export function createDeepSeekHarnessAdapter(service: CoreService, principal: Pr
 export const SUPPORTED_HERMES_HOST = { version: "0.19.0", commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a" } as const;
 export function createHermesDescriptor(version: string = SUPPORTED_HERMES_HOST.version, commit: string = SUPPORTED_HERMES_HOST.commit): AdapterDescriptor {
   const supported = version === SUPPORTED_HERMES_HOST.version && commit === SUPPORTED_HERMES_HOST.commit;
-  return { host_id: "hermes", version, host_commit: commit, contract_version: ADAPTER_CONTRACT_VERSION, api_contract_version: API_CONTRACT_VERSION,
+  return { host_id: "hermes", framework_package: "hermes", distribution: "hermes", version, commit, host_commit: commit, contract_version: ADAPTER_CONTRACT_VERSION, api_contract_version: API_CONTRACT_VERSION,
     capabilities: supported ? ["session_lifecycle", "context_injection"] : [], supported,
+    native_certified: supported,
+    certification_evidence: supported ? [{ framework_package: "hermes", distribution: "hermes", version: SUPPORTED_HERMES_HOST.version, commit: SUPPORTED_HERMES_HOST.commit, state: "verified", ref: "packages/hermes-plugin/tests/test_plugin.py" }] : [],
+    quality_release_state: "pending",
     unsupported_capabilities: supported ? [] : ["hermes_native_adapter"], test_evidence: supported ? ["hermes-plugin-runtime-contract-v1"] : [],
     fallback: ["mcp.context.query", "mcp.resource.query", "mcp.proposal.submit", "cli"] };
 }

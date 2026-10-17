@@ -1,11 +1,24 @@
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const files = ["docs/agent-integration.md", "docs/authority-storage-runbook.md", "docs/context-recovery.md", "docs/multi-host-authority-runbook.md", "docs/postgres-runtime-readiness.md", "docs/taric-api.md", "docs/taric-code-design.md", "docs/taric-design.md", "docs/taric-implementation-analysis-review.md", "openspec/changes/harden-taric-authority-runtime/release-report.md"];
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const files = ["readme.md"];
+const collect = (directory) => {
+  for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (path !== "openspec/changes/archive") collect(path);
+    } else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
+  }
+};
+collect("docs");
+collect("openspec/specs");
+collect("openspec/changes");
 const slug = (heading) => heading.toLowerCase().trim().replace(/[\p{P}\p{S}]/gu, (character) => character === "-" || character === "_" ? character : "").replace(/\s/g, "-");
 const failures = [];
 let checked = 0;
-for (const file of files) {
+for (const file of [...new Set(files)].sort()) {
   const source = readFileSync(file, "utf8").replace(/```[\s\S]*?```/g, "");
   for (const match of source.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)) {
     const link = match[1];

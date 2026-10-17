@@ -18,7 +18,7 @@ Taric作为独立插件或扩展，自身不运行模型，不决策启动，不
 | 按授权在任务会话 spool 保存 opaque Artifact 原始字节 | 管理 Artifact 脱敏、凭据生命周期和保留策略 |
 | 记录宿主回传的动作决定和结果 | 管理凭据、审批人身份和用户授权 |
 
-Core 的权威边界是单主写入的 SQLite WAL authority；多主机 PostgreSQL profile 属于后续能力。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。可选 Artifact spool 的 payload 文件位于配置的内容根目录，不嵌入 authority 数据库、审计事件或模型输出。模型调用、worker 调度和目标系统请求不进入 Core。
+Core 的默认权威边界是单主写入的 SQLite WAL authority；多主机使用显式的 `multi_host_authority` PostgreSQL profile。SQLite 和 PostgreSQL 共用 Core 治理逻辑，但 PostgreSQL runtime 默认关闭，只有当前构建匹配的 conformance report、schema 和 lease health 全部通过才会启用。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。可选 Artifact spool 的 payload 文件位于配置的内容根目录，不嵌入 authority 数据库、审计事件或模型输出。模型调用、worker 调度和目标系统请求不进入 Core。
 
 Taric 支持三种动作协作模式：
 
@@ -39,8 +39,8 @@ Taric 支持三种动作协作模式：
 - 当前 Core 使用同步 SQLite API。长时间操作会阻塞调用进程。
 - 当前 Context Pack 预算使用序列化后的字符数估算。它不是模型 Token 计数。
 - `packages/mcp` 当前只实现模型工具：`context.query`、`resource.query`、`evidence.query`、`proposal.submit`、`checkpoint.propose`、`action.recommend`。
-- Pi 1.1.0 的 session/context 注入已支持；proposal/checkpoint/action/result 原生 hooks 仍标为 unsupported。DeepSeek 和 Hermes 仅在 compatibility manifest 声明的生命周期范围内支持，其他能力回退 CLI/MCP。
-- 当前跨适配器测试验证共享 Core 行为。它不等于真实宿主环境的端到端兼容认证。
+- Pi 1.1.0 的 proposal/checkpoint/action/result/error hooks 在受测 native adapter contract 范围内已支持；实际可用能力取决于该 adapter 实例完成注册，其中 checkpoint 和 host result 还要求对应 callback 与有效 WorkRun binding。此合同测试不等于外部宿主进程或生产环境认证。DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 和 Hermes 0.19.0 仅在 compatibility manifest 声明的生命周期范围内支持，未覆盖的能力回退 CLI/MCP。
+- `capability.status` 展示静态兼容清单，不代表 adapter 实例已注册；Core 的 `adapter.status` 仅比较已配置版本与清单，并将外部注册状态/健康标为 `not_observed`。当前跨适配器测试验证共享 Core 行为，不等于真实宿主环境的端到端兼容认证。
 
 ## 主要概念
 
@@ -83,20 +83,21 @@ packages/
   mcp/           可运行的 stdio MCP server；只暴露模型受限工具
   hermes-plugin/ Hermes 0.19.0 生命周期插件，通过认证 Core RPC 接入
 docs/
-  taric-design.md 设计说明
+  taric-code-design.md 设计说明
   taric-api.md    API 边界
   agent-integration.md Agent 接入指南
 openspec/
   specs/         当前能力规格
 ```
 
-`packages/cli` 提供 JSON 命令、配置发现、authority/deployment 诊断和 adapter 管理；`packages/mcp` 提供 stdio JSON-RPC server。Hermes 插件不替换 Hermes MemoryProvider，也不直接打开 authority 数据库。DeepSeek 与共享 PostgreSQL authority 的能力由 compatibility manifest 标为 partial/unsupported。
+`packages/cli` 提供 JSON 命令、配置发现、authority/deployment 诊断和 adapter 管理；`packages/mcp` 提供 stdio JSON-RPC server。Hermes 插件不替换 Hermes MemoryProvider，也不直接打开 authority 数据库。DeepSeek、Hermes 和共享 PostgreSQL authority 的实际覆盖范围由 compatibility manifest 和运行时 readiness 报告决定。
 
 ## 环境要求
 
 - Node.js 22 或更新版本。
 - npm 11 或兼容版本。
 - Python 3，用于运行 Hermes 插件测试。
+- PostgreSQL 14–18，仅在启用 `multi_host_authority` profile 时需要。
 
 Node.js 22 的 `node:sqlite` API 可能显示实验性警告。确认你的运行环境接受此限制。
 
@@ -111,49 +112,78 @@ npm run build
 npm test
 ```
 
-运行 Hermes 插件测试：
+`npm test` 会运行各 workspace 的 Node 测试和 Hermes 插件的 Python 测试。单独运行 Hermes 插件测试：
 
 ```bash
-cd packages/hermes-plugin
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s packages/hermes-plugin/tests
 ```
+
+构建后可直接查看 CLI 清单并检查本地 authority：
+
+```bash
+node packages/cli/dist/bin.js --help
+node packages/cli/dist/bin.js capability.status
+```
+
+CLI 形式为 `taric <operation> [json]`；成功响应写 stdout，失败响应写 stderr。默认数据库路径为 `~/.taric/authority.sqlite`，可用 `TARIC_DB` 和 `TARIC_CONTENT_ROOT` 显式指定。
 
 ## Core 示例
 
 下面的示例使用公开 Core API 创建本地 authority、初始化 Engagement，并以 operator 身份提交一个 proposal。模型客户端不应直接调用 `AuthorityStore.commit`。
 
 ```ts
-import { createCoreServiceForPath, createPrincipal, uuidv7 } from "@taric/core";
+import { createCoreServiceForPath, createPrincipal } from "@taric/core";
 
-const engagementId = uuidv7();
-const service = createCoreServiceForPath(":memory:");
+const service = await createCoreServiceForPath("./data/taric.sqlite");
+const init = await service.init({
+  name: "example engagement",
+  scope: {
+    allowed_targets: ["https://example.test"],
+    excluded_targets: [],
+    rules_of_engagement_ref: "roe:example"
+  }
+});
+if (!init.ok) throw new Error(init.error.message);
+const engagementId = String(init.data.id);
 const operator = createPrincipal("operator", "operator-1", engagementId);
-service.init({ id: engagementId, name: "example engagement" });
 
-const response = service.submitProposal(operator, {
+const response = await service.submitProposal(operator, {
   engagement_id: engagementId,
-  subject_type: "resource",
-  base_version: 0,
-  content: { id: uuidv7(), engagement_id: engagementId, kind: "resource", name: "example.test" }
+  subject_type: "claim",
+  expected_version: 0,
+  content: {
+    schema_version: "1.0.0",
+    engagement_id: engagementId,
+    kind: "claim",
+    proposition: "example.test is in scope",
+    status: "proposed",
+    evidence_refs: [],
+    limitations: ["awaiting verification"]
+  }
 });
 
 console.log(response);
+await service.close();
 ```
 
 `commit` 是内部 authority 写入 API；模型工具不得直接暴露。生产接入应使用 `createCoreService` 配合受认证 transport principal，或使用 CLI/MCP/adapter 契约。
 
 要保存模型生成的内容，请先使用 `submitProposal`。再由非 LLM writer 执行 admission。生产环境仍需接入受认证的 writer service。
 
-示例使用 `:memory:` 数据库。要保留数据，请传入数据库文件路径：
+测试时可以使用 `:memory:` 数据库；要保留数据，请传入数据库文件路径：
 
 ```ts
-const service = createCoreServiceForPath("./data/taric.sqlite");
+const service = await createCoreServiceForPath("./data/taric.sqlite");
 ```
 
 ## 文档章节
 
-- [设计说明：边界、目标、架构约束和差距评审](docs/taric-design.md)
+- [代码设计：架构、数据模型、Artifact 和发布门槛](docs/taric-code-design.md)
 - [API 边界：模型、宿主、恢复和投影合同](docs/taric-api.md)
-- [Agent 接入指南：支持矩阵、配置、原生 adapter 和后续 release gate](docs/agent-integration.md)
+- [Agent 接入指南：CLI、MCP、Pi、Hermes 和 DeepSeek](docs/agent-integration.md)
+- [authority 存储 runbook：单机维护、doctor 和基准](docs/authority-storage-runbook.md)
+- [Context recovery：游标密钥、resume 和性能约束](docs/context-recovery.md)
+- [PostgreSQL 本地部署](docs/postgres-local-deployment.md)
+- [PostgreSQL runtime readiness](docs/postgres-runtime-readiness.md)
 - [多主机 authority runbook：仅适用于显式启用的 PostgreSQL profile](docs/multi-host-authority-runbook.md)
 - [OpenSpec 规格：领域和变更的规范文档](openspec/specs/)

@@ -238,7 +238,7 @@ test("doctor and preview detect corrupt Artifact files without changing the cata
     const artifacts = new ArtifactContentStore(root, store); await artifacts.initialize();
     const engagement_id = uuidv7();
     const session_id = "session";
-    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id) }));
+    (await artifacts.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" }));
     const bytes = Buffer.from("verified");
     const content_hash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const upload = (await artifacts.begin({ engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));

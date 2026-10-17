@@ -25,7 +25,7 @@ class ReadOnlyProbe {
   statements = [];
   columns = runtimeColumns();
   schemaVersion = "1.0.0";
-  storageFormat = "authority-sql/2";
+  storageFormat = "authority-sql/3";
   authorityId = uuidv7();
   invalidLeaseCount = 0;
   unavailable = false;
@@ -86,7 +86,7 @@ test("passing evidence is accepted only when current schema, methods and lease h
   assert.equal((await store.runtimeReadiness(report)).runtime_state, "disabled");
   probe.schemaVersion = "1.0.0"; probe.storageFormat = "obsolete";
   assert.equal((await store.runtimeReadiness(report)).health.schema_valid, false);
-  probe.storageFormat = "authority-sql/2"; probe.invalidLeaseCount = 1;
+  probe.storageFormat = "authority-sql/3"; probe.invalidLeaseCount = 1;
   assert.equal((await store.runtimeReadiness(report)).health.fencing, false);
   probe.invalidLeaseCount = 0; probe.authorityId = "invalid";
   assert.equal((await store.runtimeReadiness(report)).runtime_state, "disabled");

@@ -1,8 +1,8 @@
 import { ADAPTER_CONTRACT_VERSION, TaricAdapterClient, type AdapterDescriptor, type PiExtensionApi } from "./adapter.js";
 import { API_CONTRACT_VERSION, type CoreService, type Principal } from "./service.js";
 
-/** Only capabilities with a concrete Pi 1.1.0 event mapping are advertised. */
-export const supportedPiCapabilities = ["session_lifecycle", "context_injection"] as const;
+/** Static upper bound; an instance advertises only callbacks/tools it binds. */
+export const supportedPiCapabilities = ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result"] as const;
 
 /** 首发唯一受支持的原生宿主。其版本与 commit 来自 compat manifest。 */
 export const SUPPORTED_PI_HOST = {
@@ -22,12 +22,19 @@ export function createPiDescriptor(version: string = SUPPORTED_PI_HOST.version):
   const supported = isSupportedPiVersion(version);
   return {
     host_id: "pi",
+    framework_package: SUPPORTED_PI_HOST.package,
+    distribution: "pi",
     version,
+    commit: supported ? SUPPORTED_PI_HOST.host_commit : undefined,
     host_commit: supported ? SUPPORTED_PI_HOST.host_commit : undefined,
     contract_version: ADAPTER_CONTRACT_VERSION,
     api_contract_version: API_CONTRACT_VERSION,
     capabilities: supported ? [...supportedPiCapabilities] : [],
     supported,
+    runtime_binding_required: true,
+    native_certified: supported,
+    certification_evidence: supported ? [{ framework_package: SUPPORTED_PI_HOST.package, distribution: "pi", version: SUPPORTED_PI_HOST.version, commit: SUPPORTED_PI_HOST.host_commit, state: "verified", ref: "packages/core/test/host-adapters.test.mjs" }] : [],
+    quality_release_state: "pending",
     unsupported_capabilities: supported ? [] : ["pi_native_adapter"],
   };
 }

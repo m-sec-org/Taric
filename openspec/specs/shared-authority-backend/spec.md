@@ -32,15 +32,19 @@ Taric SHALL 只有在 operator 明确选择 multi-host authority profile 时启�
 
 ### Requirement: Portable multi-host backup and recovery
 
-PostgreSQL snapshot/backup/restore/migration SHALL 带 schema version、source authority sequence、integrity metadata、Engagement identity、provenance 和 revision information。restore/import MUST 在临时目标完成验证后原子切换；失败不得部分修改 destination，并报告 recovered sequence、backup timestamp、verification 和 unresolved errors。
+PostgreSQL backup/restore SHALL remain an internal operator disaster-recovery and isolated backend-conformance capability, with schema version, source authority sequence, integrity metadata, Engagement identity, provenance, and revision information. Internal restore MUST validate the temporary target before switching; failure MUST NOT partially modify the destination and SHALL report recovered sequence, backup timestamp, verification, and unresolved errors. These internal guarantees MUST NOT expose a supported public snapshot import, host-state migration, or general event replay operation. Public service/CLI snapshot import SHALL return `unsupported_capability` before mutation; read-only export MUST NOT be described as a complete backup of Artifact payloads or audit history.
 
 #### Scenario: Valid restore
-- **WHEN** operator 将兼容 backup 恢复到空或明确目标 authority
-- **THEN** records、events、sequences、leases policy 和 revisions 等价于备份且报告 recovered sequence
+- **WHEN** an operator restores a compatible backup through isolated internal recovery tooling into an empty or explicitly selected target authority
+- **THEN** records, events, sequences, lease policy, and revisions match the backup and the tool reports the recovered sequence without exposing a public host import path
 
 #### Scenario: Invalid restore
-- **WHEN** backup integrity/schema/reference/conflict 检查失败
+- **WHEN** backup integrity, schema, reference, or conflict validation fails
 - **THEN** restore fails without destination mutation and reports repair action
+
+#### Scenario: Public import is requested
+- **WHEN** an operator or host requests snapshot import through a public service or CLI
+- **THEN** Taric returns `unsupported_capability` and does not invoke internal restore or alter destination state
 
 ### Requirement: Reject unsupported pseudo-multi-host deployments
 
@@ -61,3 +65,18 @@ PostgreSQL 与 SQLite SHALL 运行同一 storage conformance suite，覆盖 tran
 #### Scenario: Conditional release
 - **WHEN** operator 未启用 multi-host profile
 - **THEN** single-host release 可通过其自身 gates，并将 PostgreSQL Phase 5 标记 disabled
+
+### Requirement: Gate shared backend runtime activation
+PostgreSQL storage primitives SHALL be exposed through the same Core service facade and policy/governance contract as SQLite before the multi-host profile is enabled. The shared runtime SHALL cover proposals, reviews, L1/L2 admission, checkpoints, actions, Artifact catalog, leases, fencing, audit/outbox, pinned reads, and backup/restore semantics. A backend with only partial primitives SHALL report `runtime_state=disabled` and `implementation_state=available`; it SHALL not construct a partially capable service or silently fall back to SQLite.
+
+#### Scenario: Use a primitive-only PostgreSQL backend
+- **WHEN** an operator selects PostgreSQL before the full runtime conformance suite passes
+- **THEN** startup returns a stable blocked/disabled capability report and performs no authority mutation
+
+#### Scenario: Enable a conforming PostgreSQL runtime
+- **WHEN** PostgreSQL passes the shared SQLite conformance suite and health/lease checks
+- **THEN** the service facade enables the multi-host profile with equivalent externally visible operation and error semantics
+
+#### Scenario: Shared backend becomes unavailable
+- **WHEN** an enabled multi-host service loses its shared backend or fencing health
+- **THEN** new writes are blocked with an unavailable/blocked error and the runtime does not open an independent SQLite authority

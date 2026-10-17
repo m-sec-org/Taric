@@ -1,8 +1,22 @@
 # PostgreSQL runtime readiness
 
+The saved [2026-10-18 live report](benchmarks/postgres-runtime-v2.json) records PostgreSQL 17.11, all 12 shared Core scenarios passing, and an independent logical restore with 24 matching tables and audit sequence 107→107. The [overall report](benchmarks/capability-verification-v2.json) has `technical_passed=true` and `runtime_verified=true`, but `release_state=blocked` because human quality annotation/baseline evidence is pending. These are saved results, not a probe of the currently running deployment; activation still requires a matching report and current health. See [the release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md).
+
+> Last reviewed: 2026-10-18
+
 SQLite and PostgreSQL now execute one asynchronous Core authority implementation. The two SQL drivers own connections, transactions, dialect expressions and clocks; proposal/review, L1/L2 admission, checkpoints, actions, Artifact catalog/publication, leases/fencing, audit/outbox, fixed reads and logical snapshot restore use the same Core governance paths. PostgreSQL leases use server time and each write transaction keeps one checked-out client under a schema-scoped transaction lock. SQLite access is queued per database file. Nested calls reuse the transaction context.
 
 `PostgresAuthorityStore.runtimeReadiness(report?)` is a read-only probe. It opens a repeatable-read transaction, checks the selected schema's tables, columns, storage format, authority identity, sequence watermarks and active lease/Attempt bindings. It neither runs migrations nor inserts authority state. Unknown database errors produce `postgresql_unavailable` without exception text. With no complete passing runtime report it remains `runtime_state=disabled`. It reports `enabled` and `evidence_state=verified` only when all twelve scenario outcomes and the current schema/health checks pass. A healthy table layout alone cannot enable runtime.
+
+The readiness result has three separate dimensions:
+
+| Field | Meaning |
+|---|---|
+| `implementation_state` | The compiled PostgreSQL implementation and required backend methods are present |
+| `runtime_state` | The selected deployment may serve traffic; it is `enabled` only after evidence and live health pass |
+| `evidence_state` | The supplied conformance evidence is complete and matches the current implementation; otherwise it is `pending` or `failed` |
+
+`runtimeReadiness()` is safe to use for diagnostics and monitoring. It does not migrate a schema, run conformance fixtures, create a cursor key, or open SQLite. `PostgresAuthorityStore.health()` may apply the normal schema readiness path, but process-facing activation still requires the saved, digest-bound report consumed by `openRuntimeService`.
 
 ```ts
 import { PostgresAuthorityStore } from "@taric/core";
@@ -34,6 +48,8 @@ All persistence methods and Core service operations return promises. Use `await 
 
 The same executable scenarios run against isolated SQLite files and live PostgreSQL schemas. The harness requires explicit isolation, a persistence restart hook and real audit-failure injection. Production startup consumes saved evidence rather than creating test records. `openRuntimeService` is shared by CLI and MCP; it checks the compiled Core implementation, schema and policy digests, then checks deployed schema/lease health before service construction and subsequent operations. An absent, failed or mismatched report blocks activation and never opens SQLite.
 
+The activation report is invalidated by changes to the compiled Core JavaScript, `@taric/schemas`, policy digest, PostgreSQL schema/storage format, or the tested deployment assumptions. Generate a new report after rebuilding or migrating. Keep one report per release candidate and authority deployment; do not overwrite an incident's evidence with a later run.
+
 Validation commands:
 
 ```sh
@@ -43,9 +59,9 @@ TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/tari
   node --test packages/core/test/runtime-conformance.test.mjs packages/core/test/postgres-live.test.mjs
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
   TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-  node scripts/verify-postgres-runtime.mjs --output docs/benchmarks/postgres-runtime-v1.json
+  node scripts/verify-postgres-runtime.mjs --output docs/benchmarks/postgres-runtime-v2.json
 ```
 
-The live URL must point to a disposable development/test database. The driver is installed with the workspace; a skipped live test remains missing evidence. See [local deployment and activation](postgres-local-deployment.md) for OrbStack commands. The saved [live report](benchmarks/postgres-runtime-v1.json) contains the exact twelve outcomes, server version, read-only health and independent restore release evidence. With the container flag, `database_backup` also verifies a custom-format `pg_dump` of the authority schema, restores it into a newly created database, compares every table and checks audit/authority integrity. It drops only that temporary database. This is a logical database dump, not a physical base backup or WAL recovery test; payload bytes are excluded.
+The live URL must point to a disposable development/test database. The driver is installed with the workspace; a skipped live test remains missing evidence. See [local deployment and activation](postgres-local-deployment.md) for OrbStack commands. The saved [live report](benchmarks/postgres-runtime-v2.json) contains the exact twelve outcomes, server version, read-only health and independent restore release evidence. With the container flag, `database_backup` also verifies a custom-format `pg_dump` of the authority schema, restores it into a newly created database, compares every table and checks audit/authority integrity. It drops only that temporary database. This is a logical database dump, not a physical base backup or WAL recovery test; payload bytes are excluded.
 
-Native JSON snapshots are logical, sanitized Engagement exports. They preserve canonical identity, display aliases and record versions, and import starts a new audited history. The result reports `source_sequence` and `target_sequence` separately; `recovered_sequence` is the target import event sequence. The import audit binds the source sequence and snapshot hash. This format does not preserve arbitrary historical events, leases, task-session payloads or all prior record versions. Full PostgreSQL disaster recovery uses a database backup such as `pg_dump`/`pg_restore`, coordinated with each host's spool backup, before traffic is switched and leases are reissued. Logical migration evidence does not claim a physical database restore.
+Public `snapshot.import` is unsupported; only the isolated backend restore/conformance path uses the import behavior below. Native JSON snapshots are logical, sanitized Engagement exports. They preserve canonical identity, display aliases and record versions, and import starts a new audited history. The result reports `source_sequence` and `target_sequence` separately; `recovered_sequence` is the target import event sequence. The import audit binds the source sequence and snapshot hash. This format does not preserve arbitrary historical events, leases, task-session payloads or all prior record versions. Full PostgreSQL disaster recovery uses a database backup such as `pg_dump`/`pg_restore`, coordinated with each host's spool backup, before traffic is switched and leases are reissued. Logical migration evidence does not claim a physical database restore.

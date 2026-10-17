@@ -108,6 +108,7 @@ test("cursor binding includes principal, Engagement, filters, ordering, budget, 
     (await invalid({ workerRole: "other-role" }));
     (await invalid({ policyVersion: "policy/3" }));
     (await invalid({ includeCandidates: false }));
+    (await invalid({ scanBudget: 3 }));
     const parts = first.cursor.split(".");
     parts[2] = `${parts[2][0] === "A" ? "B" : "A"}${parts[2].slice(1)}`;
     (await invalid({ cursor: parts.join(".") }));

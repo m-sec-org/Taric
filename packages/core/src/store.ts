@@ -1,5 +1,6 @@
 import { SqliteAuthorityDriver, type AuthoritySqlDriver } from "./sql-driver.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { performance } from "node:perf_hooks";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
@@ -77,6 +78,8 @@ export interface GovernanceWriteOptions extends Partial<IdempotencyContext> {
     idempotencyKey?: string;
     /** Run-scoped proposals and observations must arrive from the active Attempt. */
     workRunId?: string;
+    attemptId?: string;
+    sessionId?: string;
     generation?: number;
     principalRole?: string;
 }
@@ -342,6 +345,29 @@ export class AuthorityStore {
             return reader({ read_seq: committed, committed_seq: committed, projected_seq: (await this.projectedSequence()) });
         }));
     }
+    async hostStateView(engagementId: string, limit = 100): Promise<Awaited<Record<string, unknown>>> {
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ContractValidationError("validation_error", "host state limit must be between 1 and 1000");
+        return (await this.readTransaction(async () => {
+            const readTime = await this.sql.now();
+            const expiresAt = this.sql.jsonValue("body", "expires_at");
+            const reviewAfter = this.sql.jsonValue("body", "review_after");
+            const recordSample = await this.sql.all<{ id: string; trust_level: string; kind: string; expires_at?: string; review_after?: string }>(`SELECT id,trust_level,kind,${expiresAt} AS expires_at,${reviewAfter} AS review_after FROM records WHERE engagement_id=? ORDER BY id LIMIT ?`, engagementId, limit + 1);
+            const sampledRecords = recordSample.slice(0, limit);
+            const l1 = await this.sql.all<{ id: string }>("SELECT id FROM records WHERE engagement_id=? AND trust_level='L1' AND kind NOT IN ('conflict','impact_event') ORDER BY kind,id LIMIT ?", engagementId, limit + 1);
+            const freshnessDue = sampledRecords.filter((record) => [record.expires_at, record.review_after].some((deadline) => typeof deadline === "string" && Number.isFinite(Date.parse(deadline)) && Date.parse(deadline) <= Date.parse(readTime)));
+            const conflicts = await this.sql.all<{ id: string }>("SELECT id FROM records WHERE engagement_id=? AND kind='conflict' ORDER BY id LIMIT ?", engagementId, limit + 1);
+            const impacts = await this.sql.all<{ id: string }>("SELECT id FROM records WHERE engagement_id=? AND kind='impact_event' ORDER BY id LIMIT ?", engagementId, limit + 1);
+            const unknown = await this.sql.all<{ action_id: string }>("SELECT a.action_id FROM work_runs w JOIN action_intents a ON a.run_id=w.run_id WHERE w.engagement_id=? AND a.status='unknown' ORDER BY w.run_id,a.action_id LIMIT ?", engagementId, limit + 1);
+            const expired = await this.sql.all<{ run_id: string }>("SELECT run_id FROM work_runs WHERE engagement_id=? AND lease_expires_at<=? AND status IN ('claimed','running','checkpointed','blocked') ORDER BY status,lease_expires_at,run_id LIMIT ?", engagementId, readTime, limit + 1);
+            const scopedSequence = await this.sql.get<{ latest_seq: number }>("SELECT COALESCE(MAX(commit_seq),0) AS latest_seq FROM record_versions WHERE engagement_id=?", engagementId);
+            const count = (rows: readonly unknown[]) => Math.min(rows.length, limit);
+            const complete = (rows: readonly unknown[]) => rows.length <= limit;
+            const aggregate = { l1_pending: count(l1), conflicts: count(conflicts), impacts: count(impacts), unknown_actions: count(unknown), expired_leases: count(expired), freshness_due: count(freshnessDue) };
+            const completeness = { l1_pending: complete(l1), conflicts: complete(conflicts), impacts: complete(impacts), unknown_actions: complete(unknown), expired_leases: complete(expired), freshness_due: recordSample.length <= limit };
+            const scopeWatermark = hash(json({ engagement_id: engagementId, latest_record_sequence: Number(scopedSequence?.latest_seq ?? 0), aggregates: aggregate, completeness }));
+            return { engagement_id: engagementId, read_time: readTime, freshness: { evaluated_at: readTime, due_records_at_read: aggregate.freshness_due, due_record_count_complete: completeness.freshness_due, lease_expired_at_read: aggregate.expired_leases > 0, expired_lease_count_complete: completeness.expired_leases }, watermark: { scope: scopeWatermark }, bounded: true, limit, aggregates: aggregate, aggregate_completeness: completeness };
+        }));
+    }
     private listCursorKey(create: boolean, contentRoot?: string): Buffer {
         return this.#filename === ":memory:" && !contentRoot ? this.#memoryListKey : loadAuthorityCursorKey(contentRoot ?? join(dirname(this.#filename), "content"), this.authorityId, create);
     }
@@ -391,12 +417,22 @@ export class AuthorityStore {
         root: string;
         binding_id: string;
         created_at: string;
-    }>>> { const filter = this.artifactScope(scope); return (await this.sql.all(`SELECT engagement_id,session_id,root,binding_id,created_at FROM artifact_sessions${filter.where}`, ...filter.values)) as Array<{
+        mode: "host-session" | "run-bound";
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        owner_host?: string;
+    }>>> { const filter = this.artifactScope(scope); return (await this.sql.all(`SELECT engagement_id,session_id,root,binding_id,created_at,mode,work_run_id,attempt_id,generation,owner_host FROM artifact_sessions${filter.where}`, ...filter.values)) as Array<{
         engagement_id: string;
         session_id: string;
         root: string;
         binding_id: string;
         created_at: string;
+        mode: "host-session" | "run-bound";
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        owner_host?: string;
     }>; }
     async recordsPage(input: {
         engagement_id: string;
@@ -453,6 +489,146 @@ export class AuthorityStore {
             const last = selected.at(-1);
             const projected = (await this.projectedSequence());
             return { records: selected, next_cursor: hasMore && last ? encodeListCursor({ v: 1, list: "records", principal_id: input.principal_id ?? "local", engagement_id: input.engagement_id, page_size: limit, read_seq: readSeq, read_time: asOfTime, trust_level: input.trust_level ?? null, include_candidates: Boolean(input.include_candidates), kind: input.kind ?? null, after_id: last.id }, this.listCursorKey(true, input.cursor_key_root)) : undefined, read_seq: readSeq, committed_seq: current, projected_seq: Math.min(projected, readSeq) };
+        }));
+    }
+    /**
+     * Bounded Context candidate read. The query intentionally returns only a
+     * keyset page of the fixed record-version view; callers must carry the
+     * returned after-id into the next request instead of hydrating a snapshot.
+     */
+    async contextRecordsPage(input: {
+        engagement_id: string;
+        after_id?: string;
+        after_priority?: number;
+        after_time?: string;
+        page_size?: number;
+        as_of?: number;
+        read_time?: string;
+        include_candidates?: boolean;
+        reviewer_mode?: boolean;
+        work_item_id?: string;
+        delta_ids?: string[];
+        filters?: Record<string, unknown>;
+        kind?: string;
+    }): Promise<Awaited<{
+        records: CanonicalRecord[];
+        next_after_id?: string;
+        next_after_priority?: number;
+        next_after_time?: string;
+        read_seq: number;
+        committed_seq: number;
+        read_time: string;
+        has_more: boolean;
+        scanned_rows: number;
+        returned_rows: number;
+    }>> {
+        const limit = input.page_size ?? 256;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+            throw new ContractValidationError("validation_error", "context page_size must be an integer between 1 and 1000");
+        return (await this.readTransaction(async () => {
+            const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as { seq: number }).seq);
+            const readSeq = input.as_of ?? current;
+            if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current)
+                throw new ContractValidationError("conflict", `unsupported authority sequence: ${readSeq}`);
+            const readTime = input.read_time ?? (input.as_of === undefined
+                ? await this.sql.now()
+                : String(((await this.sql.get("SELECT created_at FROM events WHERE commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", readSeq)) as { created_at?: string } | undefined)?.created_at ?? "1970-01-01T00:00:00.000Z"));
+            if (!Number.isFinite(Date.parse(readTime))) throw new ContractValidationError("validation_error", "context read time is invalid");
+            const status = this.sql.jsonValue("rv.body", "status");
+            const kind = this.sql.jsonValue("rv.body", "kind");
+            const staleReason = this.sql.jsonValue("rv.body", "stale_reason");
+            const coverageStatus = this.sql.jsonValue("rv.body", "coverage_status");
+            const coverageGap = this.sql.jsonValue("rv.body", "coverage_gap", "boolean");
+            const excluded = this.sql.jsonValue("rv.body", "recall_excluded", "boolean");
+            const expires = this.sql.jsonValue("rv.body", "expires_at");
+            const review = this.sql.jsonValue("rv.body", "review_after");
+            const checkpointTime = `COALESCE(${this.sql.jsonValue("rv.body", "updated_at")},${this.sql.jsonValue("rv.body", "created_at")},'')`;
+            const sortTime = `CASE WHEN ${kind}='checkpoint' THEN ${checkpointTime} ELSE '' END`;
+            const deltaIds = input.delta_ids ?? [];
+            if (deltaIds.length > 500) throw new ContractValidationError("validation_error", "context delta priority exceeds 500 subjects");
+            const deltaClause = deltaIds.length ? ` OR rv.id IN (${deltaIds.map(() => "?").join(",")})` : "";
+            const workItemId = input.work_item_id ?? null;
+            const sortPriority = `CASE
+                WHEN ${kind} IN ('engagement','scope','rule_of_engagement') THEN 0
+                WHEN (? IS NOT NULL AND rv.id=?) THEN 1
+                WHEN ${kind}='checkpoint' THEN 2
+                WHEN ${status}='stale' OR ${staleReason} IS NOT NULL OR ${coverageStatus}='gap' OR ${coverageGap}=1 OR ${kind} IN ('conflict','impact_event','coverage_gap','delta') OR (${kind}='coverage' AND ${status} IN ('not_tested','queued','in_progress','tested_no_observation','inconclusive','blocked','blocked_by_control'))${deltaClause} THEN 3
+                WHEN ${kind} IN ('work_item','workitem','observation','evidence','coverage','control_observation','access_decision_observation','finding','claim','resource') THEN 4
+                ELSE 5 END`;
+            const staleExcluded = `${status} IN ('retracted','superseded','archived','expired','inconclusive','contradicted')`;
+            const predicates = [
+                "rv.engagement_id=?", "rv.commit_seq<=?", "NOT EXISTS (SELECT 1 FROM record_versions newer WHERE newer.id=rv.id AND newer.commit_seq<=? AND newer.commit_seq>rv.commit_seq)",
+                input.include_candidates ? "rv.trust_level IN ('L1','L2')" : "rv.trust_level='L2'",
+                `(${status}='stale' OR ((${status} IS NULL OR NOT ${staleExcluded}) AND COALESCE(${excluded},0)<>1 AND (${expires} IS NULL OR ${this.sql.dateValue(expires)}>${this.sql.dateValue("?")}) AND (${review} IS NULL OR ${this.sql.dateValue(review)}>${this.sql.dateValue("?")})))`
+            ];
+            if (input.reviewer_mode) predicates.push(`${kind}<>'review'`);
+            if (input.kind) predicates.push(`${kind}=?`);
+            const filters = input.filters ?? {};
+            const filterValues: unknown[] = [];
+            for (const [field, value] of Object.entries(filters)) {
+                if (!/^[a-z_][a-z0-9_]*$/i.test(field) || field === "__proto__") throw new ContractValidationError("validation_error", `unsupported context filter: ${field}`);
+                if (value !== null && typeof value === "object") throw new ContractValidationError("validation_error", `context filter ${field} must be scalar`);
+                if (value === null) predicates.push(`${this.sql.jsonValue("rv.body", field)} IS NULL`);
+                else if (typeof value === "boolean") { predicates.push(`${this.sql.jsonValue("rv.body", field, "boolean")}=?`); filterValues.push(value ? 1 : 0); }
+                else if (typeof value === "number") { predicates.push(`${this.sql.jsonValue("rv.body", field, "number")}=?`); filterValues.push(value); }
+                else { predicates.push(`${this.sql.jsonValue("rv.body", field)}=?`); filterValues.push(value); }
+            }
+            const afterPriority = input.after_priority ?? -1;
+            const afterTime = input.after_time ?? "";
+            const afterId = input.after_id ?? "";
+            const seek = "sort_priority>? OR (sort_priority=? AND ((sort_priority=2 AND (sort_time<? OR (sort_time=? AND id>?))) OR (sort_priority<>2 AND id>?)))";
+            const rows = (await this.sql.all<{ id: string; body: string; sort_priority: number; sort_time: string }>(`WITH candidates AS (
+                SELECT rv.id,rv.body,${sortPriority} AS sort_priority,${sortTime} AS sort_time
+                FROM record_versions rv WHERE ${predicates.join(" AND ")}
+            ) SELECT id,body,sort_priority,sort_time FROM candidates WHERE ${seek}
+            ORDER BY sort_priority,CASE WHEN sort_priority=2 THEN sort_time END DESC,id LIMIT ?`,
+            workItemId, workItemId, ...deltaIds,
+            input.engagement_id, readSeq, readSeq, readTime, readTime,
+            ...(input.kind ? [input.kind] : []), ...filterValues,
+            afterPriority, afterPriority, afterTime, afterTime, afterId, afterId, limit + 1));
+            const hasMore = rows.length > limit;
+            const selected = rows.slice(0, limit).map((row) => JSON.parse(row.body) as CanonicalRecord);
+            const lastRow = rows[limit - 1];
+            return { records: selected, next_after_id: hasMore ? lastRow?.id : undefined, next_after_priority: hasMore ? Number(lastRow?.sort_priority) : undefined, next_after_time: hasMore ? String(lastRow?.sort_time ?? "") : undefined, read_seq: readSeq, committed_seq: current, read_time: readTime, has_more: hasMore, scanned_rows: rows.length, returned_rows: selected.length };
+        }));
+    }
+    /** Return changed subjects in a bounded sequence range for resume deltas. */
+    async changedRecordSubjects(input: {
+        engagement_id: string;
+        from_read_seq: number;
+        to_read_seq: number;
+        limit?: number;
+    }): Promise<Awaited<{ ids: string[]; has_more: boolean; scanned_rows: number }>> {
+        const limit = input.limit ?? 1000;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5000 || !Number.isSafeInteger(input.from_read_seq) || input.from_read_seq < 0 || !Number.isSafeInteger(input.to_read_seq) || input.to_read_seq < input.from_read_seq)
+            throw new ContractValidationError("validation_error", "invalid bounded resume subject range");
+        return (await this.readTransaction(async () => {
+            const rows = (await this.sql.all<{ id: string }>("SELECT id FROM record_versions WHERE engagement_id=? AND commit_seq>? AND commit_seq<=? ORDER BY commit_seq,id LIMIT ?", input.engagement_id, input.from_read_seq, input.to_read_seq, limit + 1));
+            return { ids: [...new Set(rows.slice(0, limit).map((row) => row.id))], has_more: rows.length > limit, scanned_rows: rows.length };
+        }));
+    }
+    /** Read audit events for an already bounded subject set and sequence range. */
+    async eventsForSubjects(input: {
+        engagement_id: string;
+        from_read_seq: number;
+        to_read_seq: number;
+        subject_ids: string[];
+        include_candidates?: boolean;
+        limit?: number;
+    }): Promise<Awaited<{ events: AuditEvent[]; has_more: boolean; scanned_rows: number }>> {
+        const limit = input.limit ?? 2000;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5000 || !Number.isSafeInteger(input.from_read_seq) || input.from_read_seq < 0 || !Number.isSafeInteger(input.to_read_seq) || input.to_read_seq < input.from_read_seq)
+            throw new ContractValidationError("validation_error", "invalid bounded event range");
+        if (input.subject_ids.length === 0) return { events: [], has_more: false, scanned_rows: 0 };
+        return (await this.readTransaction(async () => {
+            const placeholders = input.subject_ids.map(() => "?").join(",");
+            const trust = input.include_candidates ? "('L1','L2')" : "('L2')";
+            const rows = (await this.sql.all<{ commit_seq: number; event_id: string; event_type: string; subject_id: string | null; payload: string; prev_hash: string | null; hash: string; created_at: string }>(`SELECT e.commit_seq,e.event_id,e.event_type,e.subject_id,e.payload,e.prev_hash,e.hash,e.created_at FROM events e
+                WHERE e.commit_seq>? AND e.commit_seq<=? AND e.subject_id IN (${placeholders})
+                AND EXISTS (SELECT 1 FROM record_versions rv WHERE rv.id=e.subject_id AND rv.engagement_id=? AND rv.commit_seq<=? AND rv.trust_level IN ${trust})
+                ORDER BY e.commit_seq LIMIT ?`, input.from_read_seq, input.to_read_seq, ...input.subject_ids, input.engagement_id, input.to_read_seq, limit + 1));
+            const selected = rows.slice(0, limit).map((row) => ({ commit_seq: row.commit_seq, event_id: row.event_id, event_type: row.event_type, subject_id: row.subject_id ?? undefined, payload: JSON.parse(row.payload) as Record<string, unknown>, prev_hash: row.prev_hash, hash: row.hash, created_at: row.created_at }));
+            return { events: selected, has_more: rows.length > limit, scanned_rows: rows.length };
         }));
     }
     async executionCatalogRows(input: {
@@ -587,7 +763,29 @@ export class AuthorityStore {
         root: string;
         binding_id: string;
         created_at: string;
-    }): Promise<Awaited<void>> { (await this.transaction(async () => { const roots = (await this.sql.all("SELECT engagement_id,session_id,root FROM artifact_sessions WHERE NOT (engagement_id=? AND session_id=?)", binding.engagement_id, binding.session_id)) as Array<{
+        mode: "host-session" | "run-bound";
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        owner_host?: string;
+    }): Promise<Awaited<void>> { (await this.transaction(async () => {
+        if (binding.mode !== "host-session" && binding.mode !== "run-bound") throw new ContractValidationError("validation_error", "session binding mode is required");
+        if (binding.mode === "run-bound") {
+            if (!binding.work_run_id || !binding.attempt_id || !Number.isSafeInteger(binding.generation) || !binding.owner_host) throw new ContractValidationError("validation_error", "run-bound session requires complete run attribution");
+            const run = await this.sql.get<{ engagement_id: string; generation: number; owner_host: string; lease_expires_at: string; status: string; body: string }>("SELECT engagement_id,generation,owner_host,lease_expires_at,status,body FROM work_runs WHERE run_id=?", binding.work_run_id);
+            const attempt = await this.sql.get<{ engagement_id: string; generation: number; owner_host: string; lease_expires_at: string; status: string; body: string }>("SELECT engagement_id,generation,owner_host,lease_expires_at,status,body FROM attempts WHERE attempt_id=? AND run_id=?", binding.attempt_id, binding.work_run_id);
+            const runBody = run ? JSON.parse(run.body) as Record<string, unknown> : {};
+            const attemptBody = attempt ? JSON.parse(attempt.body) as Record<string, unknown> : {};
+            const now = await this.sql.now();
+            if (!run || !attempt || run.engagement_id !== binding.engagement_id || attempt.engagement_id !== binding.engagement_id || Number(run.generation) !== binding.generation || Number(attempt.generation) !== binding.generation || run.owner_host !== binding.owner_host || attempt.owner_host !== binding.owner_host || run.lease_expires_at !== attempt.lease_expires_at || run.lease_expires_at <= now || !["claimed", "running", "checkpointed", "blocked"].includes(run.status) || !["claimed", "running", "checkpointed", "blocked"].includes(attempt.status) || runBody.attempt_ref !== binding.attempt_id || attemptBody.task_session_ref !== undefined && attemptBody.task_session_ref !== binding.session_id || runBody.task_session_ref !== undefined && runBody.task_session_ref !== binding.session_id) throw new ContractValidationError("stale_version", "run-bound session requires the current active WorkRun and Attempt");
+            runBody.task_session_ref = binding.session_id;
+            attemptBody.task_session_ref = binding.session_id;
+            await this.sql.run("UPDATE work_runs SET body=?,updated_at=? WHERE run_id=? AND engagement_id=? AND generation=? AND owner_host=? AND lease_expires_at>?", json(runBody), now, binding.work_run_id, binding.engagement_id, binding.generation, binding.owner_host, now);
+            await this.sql.run("UPDATE attempts SET body=?,updated_at=? WHERE attempt_id=? AND run_id=? AND engagement_id=? AND generation=? AND owner_host=? AND lease_expires_at>?", json(attemptBody), now, binding.attempt_id, binding.work_run_id, binding.engagement_id, binding.generation, binding.owner_host, now);
+        } else if (binding.work_run_id !== undefined || binding.attempt_id !== undefined || binding.generation !== undefined || binding.owner_host !== undefined) {
+            throw new ContractValidationError("validation_error", "host-session binding cannot include run attribution");
+        }
+        const roots = (await this.sql.all("SELECT engagement_id,session_id,root FROM artifact_sessions WHERE NOT (engagement_id=? AND session_id=?)", binding.engagement_id, binding.session_id)) as Array<{
         engagement_id: string;
         session_id: string;
         root: string;
@@ -596,10 +794,15 @@ export class AuthorityStore {
         engagement_id: string;
         session_id: string;
     } | undefined; if (owner && (owner.engagement_id !== binding.engagement_id || owner.session_id !== binding.session_id))
-        throw new ContractValidationError("authorization_error", "session root is already bound"); (await this.sql.run("INSERT INTO artifact_sessions(engagement_id,session_id,root,binding_id,created_at) VALUES(?,?,?,?,?) ON CONFLICT(engagement_id,session_id) DO UPDATE SET binding_id=artifact_sessions.binding_id,created_at=artifact_sessions.created_at WHERE artifact_sessions.root=excluded.root", binding.engagement_id, binding.session_id, binding.root, binding.binding_id, binding.created_at)); const row = (await this.sql.get("SELECT root FROM artifact_sessions WHERE engagement_id=? AND session_id=?", binding.engagement_id, binding.session_id)) as {
+        throw new ContractValidationError("authorization_error", "session root is already bound"); (await this.sql.run("INSERT INTO artifact_sessions(engagement_id,session_id,root,binding_id,created_at,mode,work_run_id,attempt_id,generation,owner_host) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(engagement_id,session_id) DO UPDATE SET binding_id=artifact_sessions.binding_id,created_at=artifact_sessions.created_at WHERE artifact_sessions.root=excluded.root AND artifact_sessions.mode=excluded.mode AND artifact_sessions.work_run_id IS NOT DISTINCT FROM excluded.work_run_id AND artifact_sessions.attempt_id IS NOT DISTINCT FROM excluded.attempt_id AND artifact_sessions.generation IS NOT DISTINCT FROM excluded.generation AND artifact_sessions.owner_host IS NOT DISTINCT FROM excluded.owner_host", binding.engagement_id, binding.session_id, binding.root, binding.binding_id, binding.created_at, binding.mode, binding.work_run_id ?? null, binding.attempt_id ?? null, binding.generation ?? null, binding.owner_host ?? null)); const row = (await this.sql.get("SELECT root,mode,work_run_id,attempt_id,generation,owner_host FROM artifact_sessions WHERE engagement_id=? AND session_id=?", binding.engagement_id, binding.session_id)) as {
         root?: string;
-    } | undefined; if (!row || row.root !== binding.root)
-        throw new ContractValidationError("conflict", "task session is already bound to another root"); })); }
+        mode?: string;
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        owner_host?: string;
+    } | undefined; if (!row || row.root !== binding.root || row.mode !== binding.mode || (row.work_run_id ?? undefined) !== binding.work_run_id || (row.attempt_id ?? undefined) !== binding.attempt_id || (row.generation ?? undefined) !== binding.generation || (row.owner_host ?? undefined) !== binding.owner_host)
+        throw new ContractValidationError("conflict", "task session is already bound with different authority"); })); }
     async artifactCatalogRows(scope?: { engagement_id?: string; session_id?: string }): Promise<Awaited<Array<Record<string, unknown>>>> { const filter = this.artifactScope(scope); return ((await this.sql.all(`SELECT body FROM artifact_catalog${filter.where} ORDER BY stored_at,content_ref`, ...filter.values)) as Array<{
         body: string;
     }>).map((row) => JSON.parse(row.body) as Record<string, unknown>); }
@@ -1378,6 +1581,7 @@ export class AuthorityStore {
         includeCandidates?: boolean;
         asOf?: number;
         readTime?: string;
+        diagnostics?: (stage: "snapshot_hydration" | "snapshot_filter" | "snapshot_sort", elapsedMs: number) => void;
     } = {}): Promise<Awaited<ReadSnapshot>> {
         return (await this.readTransaction(async () => {
             const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as {
@@ -1396,9 +1600,28 @@ export class AuthorityStore {
             const asOfTime = Date.parse(readTime);
             if (!Number.isFinite(asOfTime))
                 throw new ContractValidationError("validation_error", "snapshot read time is invalid");
-            const seen = new Set<string>();
-            const records = rows.filter((row) => { const body = JSON.parse(row.body) as CanonicalRecord; if (seen.has(body.id))
-                return false; seen.add(body.id); const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime); return row.trust_level !== "L0" && !recalled && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel); }).map((row) => JSON.parse(row.body) as CanonicalRecord).sort((a, b) => a.id.localeCompare(b.id));
+            let records: CanonicalRecord[];
+            if (options.diagnostics) {
+                const hydrationStarted = performance.now();
+                const hydrated = rows.map((row) => ({ row, body: JSON.parse(row.body) as CanonicalRecord }));
+                options.diagnostics("snapshot_hydration", performance.now() - hydrationStarted);
+                const filterStarted = performance.now();
+                const seen = new Set<string>();
+                records = hydrated.filter(({ row, body }) => {
+                    if (seen.has(body.id)) return false;
+                    seen.add(body.id);
+                    const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime);
+                    return row.trust_level !== "L0" && !recalled && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel);
+                }).map(({ body }) => body);
+                options.diagnostics("snapshot_filter", performance.now() - filterStarted);
+                const sortStarted = performance.now();
+                records.sort((a, b) => a.id.localeCompare(b.id));
+                options.diagnostics("snapshot_sort", performance.now() - sortStarted);
+            } else {
+                const seen = new Set<string>();
+                records = rows.filter((row) => { const body = JSON.parse(row.body) as CanonicalRecord; if (seen.has(body.id))
+                    return false; seen.add(body.id); const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime); return row.trust_level !== "L0" && !recalled && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel); }).map((row) => JSON.parse(row.body) as CanonicalRecord).sort((a, b) => a.id.localeCompare(b.id));
+            }
             const projected = (await this.projectedSequence());
             return { read_seq: seq, committed_seq: current, projected_seq: Math.min(projected, seq), read_time: readTime, records };
         }));
@@ -2037,9 +2260,16 @@ export class AuthorityStore {
                 provenance: { host_id: String(inputProvenance?.host_id ?? options.principal ?? "taric-core"), producer_id: String(inputProvenance?.producer_id ?? options.principal ?? "taric-core"), source_kind: String(inputProvenance?.source_kind ?? "host"), ...inputProvenance },
                 ...proposal.content,
             } as ProposalCandidate;
+            const runId = options.workRunId ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined);
+            const generation = options.generation ?? (typeof content.generation === "number" ? content.generation : undefined);
+            const attemptId = options.attemptId ?? (typeof content.attempt_ref === "string" ? content.attempt_ref : undefined);
+            const sessionId = options.sessionId;
+            const runAttribution = runId && attemptId && Number.isSafeInteger(generation)
+                ? { work_run_id: runId, attempt_id: attemptId, generation, ...(sessionId ? { session_id: sessionId } : {}) }
+                : undefined;
             const content_hash = hash(json(stablePayload(content)));
-            const result: Proposal = JSON.parse(json({ ...proposal, id, proposal_id: id, target_id: proposal.target_id ?? proposal.subject_ref, content, content_hash, status: "pending" })) as Proposal;
-            const requestHash = hash(json(stablePayload({ ...proposal, content })));
+            const result: Proposal = JSON.parse(json({ ...proposal, id, proposal_id: id, target_id: proposal.target_id ?? proposal.subject_ref, content, ...(runAttribution ? { run_attribution: runAttribution } : {}), content_hash, status: "pending" })) as Proposal;
+            const requestHash = hash(json(stablePayload({ ...proposal, content, ...(runAttribution ? { run_attribution: runAttribution } : { work_run_id: runId, attempt_id: attemptId, generation, session_id: sessionId }) })));
             if (options.idempotencyKey) {
                 const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", options.idempotencyKey)) as any;
                 if (prior) {
@@ -2053,12 +2283,10 @@ export class AuthorityStore {
             validateProposalCandidate(proposal.subject_type, content);
             (await this.validateProposalTarget(proposal));
             validateAuthorityReferences(content, (await this.referenceIndex(content, proposal.engagement_id)), proposal.engagement_id);
-            const runId = options.workRunId ?? (typeof content.work_run_ref === "string" ? content.work_run_ref : undefined);
-            const generation = options.generation ?? (typeof content.generation === "number" ? content.generation : undefined);
-            const hasRunAttribution = runId !== undefined || generation !== undefined || content.attempt_ref !== undefined;
+            const hasRunAttribution = runId !== undefined || generation !== undefined || attemptId !== undefined;
             let staleAttemptReason: string | undefined;
             if (hasRunAttribution) {
-                if (!runId || !Number.isInteger(generation) || typeof proposal.content.attempt_ref !== "string") {
+                if (!runId || !Number.isInteger(generation) || !attemptId) {
                     staleAttemptReason = "run-scoped proposal requires WorkRun, Attempt, and generation attribution";
                 }
                 else {
@@ -2069,7 +2297,13 @@ export class AuthorityStore {
                         : options.principalRole === "model"
                             ? run?.owner_agent === options.principal
                             : !options.principalRole && (run?.owner_host === options.principal || run?.owner_agent === options.principal);
-                    if (!run || run.engagement_id !== proposal.engagement_id || Number(run.generation) !== generation || run.lease_expires_at <= (await this.sql.now()) || ["completed", "failed", "cancelled", "lost"].includes(String(run.status)) || runBody?.attempt_ref !== content.attempt_ref || !actorMatches) {
+                    const attempt = run
+                        ? await this.sql.get<{ attempt_id: string; engagement_id: string; generation: number; status: string; owner_host: string; owner_agent: string; lease_expires_at: string; body: string }>("SELECT attempt_id,engagement_id,generation,status,owner_host,owner_agent,lease_expires_at,body FROM attempts WHERE attempt_id=? AND run_id=?", attemptId, runId)
+                        : undefined;
+                    const attemptBody = attempt?.body ? JSON.parse(attempt.body) as Record<string, unknown> : undefined;
+                    const activeStatuses = ["claimed", "running", "checkpointed", "blocked"];
+                    const now = await this.sql.now();
+                    if (!run || run.engagement_id !== proposal.engagement_id || Number(run.generation) !== generation || run.lease_expires_at <= now || !activeStatuses.includes(String(run.status)) || runBody?.attempt_ref !== attemptId || !actorMatches || !attempt || attempt.engagement_id !== proposal.engagement_id || Number(attempt.generation) !== generation || !activeStatuses.includes(attempt.status) || attempt.owner_host !== run.owner_host || attempt.owner_agent !== run.owner_agent || attempt.lease_expires_at !== run.lease_expires_at || attempt.lease_expires_at <= now || attemptBody?.task_session_ref !== runBody?.task_session_ref) {
                         staleAttemptReason = "proposal is not bound to the active WorkRun Attempt and owner";
                     }
                 }
@@ -2078,13 +2312,13 @@ export class AuthorityStore {
             if (staleAttemptReason) {
                 const quarantined: Proposal = { ...result, status: "rejected" };
                 (await this.sql.run("INSERT INTO proposals(id,engagement_id,subject_type,expected_version,target_id,client_request_id,status,content_hash,body,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", id, proposal.engagement_id, proposal.subject_type, proposal.expected_version, result.target_id ?? null, proposal.client_request_id ?? null, quarantined.status, content_hash, json(content), now));
-                (await this.nextEvent("proposal.stale_attempt_quarantine", { input_hash: content_hash, work_run_id: runId, attempt_ref: content.attempt_ref, generation, actor_id: options.principal, reason: staleAttemptReason }, id));
+                (await this.nextEvent("proposal.stale_attempt_quarantine", { input_hash: content_hash, work_run_id: runId, attempt_ref: attemptId, generation, session_id: sessionId, actor_id: options.principal, reason: staleAttemptReason }, id));
                 if (options.idempotencyKey)
                     (await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", options.idempotencyKey, options.operation ?? "proposal.submit", options.principal ?? "core", proposal.engagement_id, requestHash, json(quarantined)));
                 return quarantined;
             }
             (await this.sql.run("INSERT INTO proposals(id,engagement_id,subject_type,expected_version,target_id,client_request_id,status,content_hash,body,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", id, proposal.engagement_id, proposal.subject_type, proposal.expected_version, result.target_id ?? null, proposal.client_request_id ?? null, result.status, content_hash, json(content), now));
-            (await this.nextEvent("proposal.submit", { input_hash: content_hash, subject_type: proposal.subject_type, actor_id: options.principal ?? "core", idempotency_key: options.idempotencyKey }, id));
+            (await this.nextEvent("proposal.submit", { input_hash: content_hash, subject_type: proposal.subject_type, run_attribution: runAttribution, actor_id: options.principal ?? "core", idempotency_key: options.idempotencyKey }, id));
             if (options.idempotencyKey)
                 (await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", options.idempotencyKey, options.operation ?? "proposal.submit", options.principal ?? "core", proposal.engagement_id, requestHash, json(result)));
             return result;

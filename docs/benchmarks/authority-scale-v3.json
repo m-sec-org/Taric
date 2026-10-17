@@ -1,0 +1,2770 @@
+{
+  "version": "authority-scale/2",
+  "measured_at": "2026-10-17T04:53:01.479Z",
+  "source_commit": "c3db857e937c04293eb08e258ca98c8e24a2b897",
+  "source_digest": "sha256:f5c20f926daefa1e74d22d0d2e278b9d4c99adb2bda1f62227b7b884293ad134",
+  "configuration": {
+    "node": "v22.21.1",
+    "platform": "darwin",
+    "arch": "x64",
+    "cpu_model": "Intel(R) Core(TM) i5-7287U CPU @ 3.30GHz",
+    "cpu_count": 4,
+    "total_memory_bytes": 17179869184,
+    "sqlite": "node:sqlite/WAL",
+    "fixture": "authority-scale-v1",
+    "admission_fixture": "admission-scale-v1",
+    "mutation_sample_count": 100,
+    "high_churn_history_revisions": 25,
+    "engagement_count": 4,
+    "secondary_records_per_engagement": 22,
+    "page_size": 1000,
+    "context_character_budget": 64000,
+    "context_scan_budget": 256,
+    "context_read_stats": "reported and asserted within scan_budget for first and continuation pages",
+    "sample_statistics": "p50/p95 use nearest-rank; singleton measurements report p50=p95; context continuation timing also reports an aggregate over measured pages",
+    "memory_scope": "peak_process_rss_bytes includes worker startup validation; phases execute in separate processes",
+    "event_loop_scope": "monitorEventLoopDelay during phase plus a 5 ms timer observation; sample_count zero means no timer tick was observed",
+    "wal_scope": "SQLite -wal file size before and after each phase; not checkpointed bytes or disk I/O",
+    "context_continuation_cost": "bounded keyset reads pinned to read_seq; each page reports scanned/returned rows and no full snapshot hydration"
+  },
+  "samples": [
+    {
+      "fixture_count": 10000,
+      "mutation": {
+        "engagement_id": "01a14831-13cc-7c38-8c0c-01f959ac4f68",
+        "read_seq": 10494,
+        "fixture_count": 10000,
+        "engagement_count": 4,
+        "secondary_engagements": [
+          {
+            "engagement_id": "01a14831-80f7-7b3c-95eb-4738675ea18f",
+            "record_count": 22
+          },
+          {
+            "engagement_id": "01a14831-81c0-7d68-84bc-8fd2f6978a5f",
+            "record_count": 22
+          },
+          {
+            "engagement_id": "01a14831-8207-7e3d-aced-7a050003c19f",
+            "record_count": 22
+          }
+        ],
+        "high_churn_record_id": "01a14831-13ce-7888-bc57-5f5c384a8fd1",
+        "high_churn_revision_count": 25,
+        "direct_mutation_count": 100,
+        "admission_count": 100,
+        "fixture_import": {
+          "elapsed_ms": 27632.364726,
+          "rss_before_bytes": 79572992,
+          "rss_after_bytes": 114089984,
+          "peak_process_rss_bytes": 123953152,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 27632.364726,
+            "p95_ms": 27632.364726
+          },
+          "sql": {
+            "statements": 100044,
+            "rows_returned": 30016,
+            "rows_affected": 60016,
+            "queue_wait_ms": 0.09454700000014782,
+            "sql_elapsed_ms": 20175.098533000364
+          },
+          "application_processing_ms": 7457.171645999635,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 35497952,
+          "event_loop_delay_ms": {
+            "sample_count": 3,
+            "mean": 1.3300053333333333,
+            "p95": 1.533951,
+            "max": 1.533951
+          },
+          "read_seq": 10003,
+          "record_count": 10002,
+          "method": "validated_snapshot_import"
+        },
+        "commit": {
+          "elapsed_ms": 728.1303589999989,
+          "rss_before_bytes": 112738304,
+          "rss_after_bytes": 112738304,
+          "peak_process_rss_bytes": 123953152,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 728.1303589999989,
+            "p95_ms": 728.1303589999989
+          },
+          "sql": {
+            "statements": 1600,
+            "rows_returned": 800,
+            "rows_affected": 700,
+            "queue_wait_ms": 0.3076359999977285,
+            "sql_elapsed_ms": 318.5565039999201
+          },
+          "application_processing_ms": 409.26621900008104,
+          "wal_before_bytes": 35497952,
+          "wal_after_bytes": 35497952,
+          "event_loop_delay_ms": {
+            "sample_count": 3,
+            "mean": 1.3599573333333332,
+            "p95": 2.355199,
+            "max": 2.355199
+          },
+          "sample_count": 100,
+          "p50_ms": 3.8701470000014524,
+          "p95_ms": 27.24462399999902
+        },
+        "proposal_to_l1": {
+          "elapsed_ms": 1328.8025609999968,
+          "rss_before_bytes": 113266688,
+          "rss_after_bytes": 113471488,
+          "peak_process_rss_bytes": 123953152,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 1328.8025609999968,
+            "p95_ms": 1328.8025609999968
+          },
+          "sql": {
+            "statements": 4000,
+            "rows_returned": 2100,
+            "rows_affected": 1700,
+            "queue_wait_ms": 0.5920189999887953,
+            "sql_elapsed_ms": 475.4759369999483
+          },
+          "application_processing_ms": 852.7346050000597,
+          "wal_before_bytes": 35497952,
+          "wal_after_bytes": 35497952,
+          "event_loop_delay_ms": {
+            "sample_count": 4,
+            "mean": 0.784896,
+            "p95": 1.294335,
+            "max": 1.294335
+          },
+          "sample_count": 100,
+          "p50_ms": 6.913958000001003,
+          "p95_ms": 48.00227299999824
+        }
+      },
+      "list": {
+        "read_seq": 10494,
+        "record_count": 10200,
+        "first_page": {
+          "elapsed_ms": 26.765540999999985,
+          "rss_before_bytes": 70385664,
+          "rss_after_bytes": 71294976,
+          "peak_process_rss_bytes": 71294976,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 26.765540999999985,
+            "p95_ms": 26.765540999999985
+          },
+          "sql": {
+            "statements": 6,
+            "rows_returned": 1006,
+            "rows_affected": 0,
+            "queue_wait_ms": 0.34153700000001663,
+            "sql_elapsed_ms": 14.596094000000221
+          },
+          "application_processing_ms": 11.827909999999747,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 0,
+          "event_loop_delay_ms": {
+            "sample_count": 3,
+            "mean": 1.416704,
+            "p95": 1.756159,
+            "max": 1.756159
+          },
+          "serialization": {
+            "elapsed_ms": 1.4936210000000756,
+            "bytes": 423429
+          }
+        },
+        "continuation": {
+          "sample_count": 10,
+          "p50_ms": 14.379222000000027,
+          "p95_ms": 76.92148499999985,
+          "page_count": 10,
+          "peak_process_rss_bytes": 75382784,
+          "samples": [
+            {
+              "elapsed_ms": 14.379222000000027,
+              "rss_before_bytes": 71868416,
+              "rss_after_bytes": 72318976,
+              "peak_process_rss_bytes": 72318976,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 14.379222000000027,
+                "p95_ms": 14.379222000000027
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.017123999999967054,
+                "sql_elapsed_ms": 10.418284000000085
+              },
+              "application_processing_ms": 3.943813999999975,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.964288,
+                "p95": 1.333247,
+                "max": 1.333247
+              },
+              "serialization": {
+                "elapsed_ms": 1.5216290000000754,
+                "bytes": 424517
+              }
+            },
+            {
+              "elapsed_ms": 74.13670400000001,
+              "rss_before_bytes": 73236480,
+              "rss_after_bytes": 73584640,
+              "peak_process_rss_bytes": 73662464,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 74.13670400000001,
+                "p95_ms": 74.13670400000001
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006668999999874359,
+                "sql_elapsed_ms": 8.81975099999977
+              },
+              "application_processing_ms": 65.31028400000037,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.3121669999998176,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 11.917087999999922,
+              "rss_before_bytes": 74018816,
+              "rss_after_bytes": 74104832,
+              "peak_process_rss_bytes": 74448896,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 11.917087999999922,
+                "p95_ms": 11.917087999999922
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.00695699999982935,
+                "sql_elapsed_ms": 8.241212999999789
+              },
+              "application_processing_ms": 3.6689180000003034,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.3357226666666668,
+                "p95": 2.244607,
+                "max": 2.244607
+              },
+              "serialization": {
+                "elapsed_ms": 1.4337520000001405,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 43.263418,
+              "rss_before_bytes": 74108928,
+              "rss_after_bytes": 74121216,
+              "peak_process_rss_bytes": 74539008,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 43.263418,
+                "p95_ms": 43.263418
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0066520000000309665,
+                "sql_elapsed_ms": 33.349614000000656
+              },
+              "application_processing_ms": 9.907151999999314,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.232128,
+                "p95": 1.965055,
+                "max": 1.965055
+              },
+              "serialization": {
+                "elapsed_ms": 1.2173170000000937,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 12.151644000000033,
+              "rss_before_bytes": 74387456,
+              "rss_after_bytes": 74387456,
+              "peak_process_rss_bytes": 74817536,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 12.151644000000033,
+                "p95_ms": 12.151644000000033
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007399000000077649,
+                "sql_elapsed_ms": 8.751737999999477
+              },
+              "application_processing_ms": 3.392507000000478,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.4477653333333333,
+                "p95": 1.557503,
+                "max": 1.557503
+              },
+              "serialization": {
+                "elapsed_ms": 1.1501090000001568,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 11.576770000000124,
+              "rss_before_bytes": 74387456,
+              "rss_after_bytes": 74387456,
+              "peak_process_rss_bytes": 74817536,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 11.576770000000124,
+                "p95_ms": 11.576770000000124
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006986000000324566,
+                "sql_elapsed_ms": 8.055373000000145
+              },
+              "application_processing_ms": 3.5144109999996545,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.322496,
+                "p95": 1.452031,
+                "max": 1.452031
+              },
+              "serialization": {
+                "elapsed_ms": 1.2298699999996643,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 76.92148499999985,
+              "rss_before_bytes": 74428416,
+              "rss_after_bytes": 74457088,
+              "peak_process_rss_bytes": 74858496,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 76.92148499999985,
+                "p95_ms": 76.92148499999985
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.010581999999885738,
+                "sql_elapsed_ms": 72.40233099999978
+              },
+              "application_processing_ms": 4.508572000000186,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 2.453504,
+                "p95": 2.535423,
+                "max": 2.535423
+              },
+              "serialization": {
+                "elapsed_ms": 1.4500899999998182,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 32.526468999999906,
+              "rss_before_bytes": 74469376,
+              "rss_after_bytes": 74469376,
+              "peak_process_rss_bytes": 74899456,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 32.526468999999906,
+                "p95_ms": 32.526468999999906
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.7448400000002948,
+                "sql_elapsed_ms": 26.739162000000306
+              },
+              "application_processing_ms": 5.042466999999306,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.295234000000164,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 25.16288799999984,
+              "rss_before_bytes": 74645504,
+              "rss_after_bytes": 74645504,
+              "peak_process_rss_bytes": 75247616,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 25.16288799999984,
+                "p95_ms": 25.16288799999984
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.008989999999812426,
+                "sql_elapsed_ms": 20.885195000000294
+              },
+              "application_processing_ms": 4.268702999999732,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.07648,
+                "p95": 1.865727,
+                "max": 1.865727
+              },
+              "serialization": {
+                "elapsed_ms": 1.4130230000000665,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 10.903729999999996,
+              "rss_before_bytes": 74907648,
+              "rss_after_bytes": 74932224,
+              "peak_process_rss_bytes": 75337728,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 10.903729999999996,
+                "p95_ms": 10.903729999999996
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 204,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005773999999746593,
+                "sql_elapsed_ms": 8.971003999999994
+              },
+              "application_processing_ms": 1.9269520000002558,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.016512,
+                "p95": 1.390591,
+                "max": 1.390591
+              },
+              "serialization": {
+                "elapsed_ms": 0.24977099999978236,
+                "bytes": 101250
+              }
+            }
+          ]
+        }
+      },
+      "snapshot": {
+        "elapsed_ms": 172.84394099999986,
+        "rss_before_bytes": 71524352,
+        "rss_after_bytes": 78745600,
+        "peak_process_rss_bytes": 78745600,
+        "timing": {
+          "sample_count": 1,
+          "p50_ms": 172.84394099999986,
+          "p95_ms": 172.84394099999986
+        },
+        "sql": {
+          "statements": 6,
+          "rows_returned": 10232,
+          "rows_affected": 0,
+          "queue_wait_ms": 0.07293799999979456,
+          "sql_elapsed_ms": 118.58448100000032
+        },
+        "application_processing_ms": 54.18652199999974,
+        "wal_before_bytes": 0,
+        "wal_after_bytes": 0,
+        "event_loop_delay_ms": {
+          "sample_count": 1,
+          "mean": 11.137024,
+          "p95": 11.141119,
+          "max": 11.141119
+        },
+        "read_seq": 10494,
+        "record_count": 10202,
+        "stages": {
+          "snapshot_hydration": {
+            "sample_count": 1,
+            "p50_ms": 34.571390000000065,
+            "p95_ms": 34.571390000000065
+          },
+          "snapshot_filter": {
+            "sample_count": 1,
+            "p50_ms": 9.648690999999872,
+            "p95_ms": 9.648690999999872
+          },
+          "snapshot_sort": {
+            "sample_count": 1,
+            "p50_ms": 6.110863999999992,
+            "p95_ms": 6.110863999999992
+          }
+        },
+        "serialization": {
+          "elapsed_ms": 66.00882700000011,
+          "bytes": 4341066
+        }
+      },
+      "export": {
+        "elapsed_ms": 1029.8634540000003,
+        "rss_before_bytes": 70758400,
+        "rss_after_bytes": 118759424,
+        "peak_process_rss_bytes": 118816768,
+        "timing": {
+          "sample_count": 1,
+          "p50_ms": 1029.8634540000003,
+          "p95_ms": 1029.8634540000003
+        },
+        "sql": {
+          "statements": 5,
+          "rows_returned": 10206,
+          "rows_affected": 0,
+          "queue_wait_ms": 0.08454799999981333,
+          "sql_elapsed_ms": 156.59341300000006
+        },
+        "application_processing_ms": 873.1854930000004,
+        "wal_before_bytes": 0,
+        "wal_after_bytes": 0,
+        "event_loop_delay_ms": {
+          "sample_count": 1,
+          "mean": 3.72224,
+          "p95": 3.723263,
+          "max": 3.723263
+        },
+        "read_seq": 10494,
+        "record_count": 10202,
+        "serialization": {
+          "elapsed_ms": 15.502747,
+          "bytes": 4341240
+        },
+        "integrity_hash": "sha256:531cd8de5a7af7978cb11452ba80999de38d964c0584429b7c553b639cb12eed"
+      },
+      "context": {
+        "read_seq": 10494,
+        "first_page": {
+          "elapsed_ms": 525.113906,
+          "rss_before_bytes": 70234112,
+          "rss_after_bytes": 73097216,
+          "peak_process_rss_bytes": 73097216,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 525.113906,
+            "p95_ms": 525.113906
+          },
+          "sql": {
+            "statements": 3,
+            "rows_returned": 258,
+            "rows_affected": 0,
+            "queue_wait_ms": 0.05459700000005796,
+            "sql_elapsed_ms": 491.984334
+          },
+          "application_processing_ms": 33.074974999999995,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 0,
+          "event_loop_delay_ms": {
+            "sample_count": 3,
+            "mean": 2.0196693333333333,
+            "p95": 3.110911,
+            "max": 3.110911
+          },
+          "record_count": 161,
+          "cursor_bytes": 1039,
+          "read_stats": {
+            "scanned_rows": 256,
+            "returned_rows": 255,
+            "scan_budget": 256,
+            "continuation": true
+          },
+          "serialization": {
+            "elapsed_ms": 0.6837839999998323,
+            "bytes": 120478
+          }
+        },
+        "stages": {
+          "snapshot": {
+            "sample_count": 4,
+            "p50_ms": 731.522406,
+            "p95_ms": 1327.525098
+          },
+          "record_projection": {
+            "sample_count": 4,
+            "p50_ms": 12.055615000000216,
+            "p95_ms": 21.68304999999964
+          },
+          "ordering": {
+            "sample_count": 4,
+            "p50_ms": 0,
+            "p95_ms": 0
+          },
+          "cursor_encoding": {
+            "sample_count": 4,
+            "p50_ms": 0.7762039999997796,
+            "p95_ms": 10.481257000000369
+          },
+          "page_projection": {
+            "sample_count": 4,
+            "p50_ms": 2.8961950000002616,
+            "p95_ms": 13.345668999999816
+          }
+        },
+        "continuation_sample_count": 3,
+        "continuation_timing": {
+          "sample_count": 3,
+          "p50_ms": 832.620445,
+          "p95_ms": 1343.4318560000002
+        },
+        "continuations": [
+          {
+            "elapsed_ms": 1343.4318560000002,
+            "rss_before_bytes": 73601024,
+            "rss_after_bytes": 74174464,
+            "peak_process_rss_bytes": 74407936,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 1343.4318560000002,
+              "p95_ms": 1343.4318560000002
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.010384000000158267,
+              "sql_elapsed_ms": 1326.547849
+            },
+            "application_processing_ms": 16.873622999999952,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 2,
+              "mean": 1.929088,
+              "p95": 3.198975,
+              "max": 3.198975
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.4013270000000375,
+              "bytes": 120571
+            }
+          },
+          {
+            "elapsed_ms": 832.620445,
+            "rss_before_bytes": 74514432,
+            "rss_after_bytes": 74604544,
+            "peak_process_rss_bytes": 75116544,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 832.620445,
+              "p95_ms": 832.620445
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.006323000000065804,
+              "sql_elapsed_ms": 809.5659530000005
+            },
+            "application_processing_ms": 23.04816899999946,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 0,
+              "mean": null,
+              "p95": null,
+              "max": null
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.35881400000016583,
+              "bytes": 120571
+            }
+          },
+          {
+            "elapsed_ms": 756.7148740000002,
+            "rss_before_bytes": 74854400,
+            "rss_after_bytes": 75190272,
+            "peak_process_rss_bytes": 75456512,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 756.7148740000002,
+              "p95_ms": 756.7148740000002
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.006589999999960128,
+              "sql_elapsed_ms": 730.682965
+            },
+            "application_processing_ms": 26.02531900000031,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 1,
+              "mean": 3.576832,
+              "p95": 3.577855,
+              "max": 3.577855
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.3342419999999038,
+              "bytes": 120571
+            }
+          }
+        ]
+      }
+    },
+    {
+      "fixture_count": 50000,
+      "mutation": {
+        "engagement_id": "01a14831-c5fd-71c8-b8f5-58317971e1f0",
+        "read_seq": 50494,
+        "fixture_count": 50000,
+        "engagement_count": 4,
+        "secondary_engagements": [
+          {
+            "engagement_id": "01a14834-3ab6-7f82-86ca-e23ed832a1bb",
+            "record_count": 22
+          },
+          {
+            "engagement_id": "01a14834-3b72-7ca0-9179-7bb1ee13ab8b",
+            "record_count": 22
+          },
+          {
+            "engagement_id": "01a14834-3c14-7f46-b837-5b6536988600",
+            "record_count": 22
+          }
+        ],
+        "high_churn_record_id": "01a14831-c607-79f3-9082-64693d9fd256",
+        "high_churn_revision_count": 25,
+        "direct_mutation_count": 100,
+        "admission_count": 100,
+        "fixture_import": {
+          "elapsed_ms": 159221.516815,
+          "rss_before_bytes": 119930880,
+          "rss_after_bytes": 101122048,
+          "peak_process_rss_bytes": 253804544,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 159221.516815,
+            "p95_ms": 159221.516815
+          },
+          "sql": {
+            "statements": 500044,
+            "rows_returned": 150016,
+            "rows_affected": 300016,
+            "queue_wait_ms": 0.08191900000019814,
+            "sql_elapsed_ms": 122781.7334329989
+          },
+          "application_processing_ms": 36439.70146300111,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 176401952,
+          "event_loop_delay_ms": {
+            "sample_count": 2,
+            "mean": 1.709056,
+            "p95": 1.727487,
+            "max": 1.727487
+          },
+          "read_seq": 50003,
+          "record_count": 50002,
+          "method": "validated_snapshot_import"
+        },
+        "commit": {
+          "elapsed_ms": 580.4984689999837,
+          "rss_before_bytes": 127827968,
+          "rss_after_bytes": 128487424,
+          "peak_process_rss_bytes": 253804544,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 580.4984689999837,
+            "p95_ms": 580.4984689999837
+          },
+          "sql": {
+            "statements": 1600,
+            "rows_returned": 800,
+            "rows_affected": 700,
+            "queue_wait_ms": 0.7052879999100696,
+            "sql_elapsed_ms": 240.1125889996183
+          },
+          "application_processing_ms": 339.68059200045536,
+          "wal_before_bytes": 176401952,
+          "wal_after_bytes": 176401952,
+          "event_loop_delay_ms": {
+            "sample_count": 2,
+            "mean": 2.180864,
+            "p95": 2.920447,
+            "max": 2.920447
+          },
+          "sample_count": 100,
+          "p50_ms": 3.3717969999997877,
+          "p95_ms": 17.186845999996876
+        },
+        "proposal_to_l1": {
+          "elapsed_ms": 824.5397280000034,
+          "rss_before_bytes": 132354048,
+          "rss_after_bytes": 133492736,
+          "peak_process_rss_bytes": 253804544,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 824.5397280000034,
+            "p95_ms": 824.5397280000034
+          },
+          "sql": {
+            "statements": 4000,
+            "rows_returned": 2100,
+            "rows_affected": 1700,
+            "queue_wait_ms": 1.215168999740854,
+            "sql_elapsed_ms": 305.38655300068785
+          },
+          "application_processing_ms": 517.9380059995747,
+          "wal_before_bytes": 176401952,
+          "wal_after_bytes": 176401952,
+          "event_loop_delay_ms": {
+            "sample_count": 3,
+            "mean": 1.051904,
+            "p95": 1.700863,
+            "max": 1.700863
+          },
+          "sample_count": 100,
+          "p50_ms": 6.581831999996211,
+          "p95_ms": 16.853983000008157
+        }
+      },
+      "list": {
+        "read_seq": 50494,
+        "record_count": 50200,
+        "first_page": {
+          "elapsed_ms": 76.67793199999983,
+          "rss_before_bytes": 70762496,
+          "rss_after_bytes": 71651328,
+          "peak_process_rss_bytes": 71651328,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 76.67793199999983,
+            "p95_ms": 76.67793199999983
+          },
+          "sql": {
+            "statements": 6,
+            "rows_returned": 1006,
+            "rows_affected": 0,
+            "queue_wait_ms": 0.07368700000006356,
+            "sql_elapsed_ms": 42.73053600000003
+          },
+          "application_processing_ms": 33.873708999999735,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 0,
+          "event_loop_delay_ms": {
+            "sample_count": 1,
+            "mean": 3.79392,
+            "p95": 3.794943,
+            "max": 3.794943
+          },
+          "serialization": {
+            "elapsed_ms": 1.5022740000003978,
+            "bytes": 423438
+          }
+        },
+        "continuation": {
+          "sample_count": 50,
+          "p50_ms": 57.00753199999963,
+          "p95_ms": 575.7549900000013,
+          "page_count": 50,
+          "peak_process_rss_bytes": 84918272,
+          "samples": [
+            {
+              "elapsed_ms": 40.244347999999945,
+              "rss_before_bytes": 72802304,
+              "rss_after_bytes": 73375744,
+              "peak_process_rss_bytes": 73375744,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 40.244347999999945,
+                "p95_ms": 40.244347999999945
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.019480000000157816,
+                "sql_elapsed_ms": 35.34761800000024
+              },
+              "application_processing_ms": 4.877249999999549,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 1,
+                "mean": 3.073024,
+                "p95": 3.074047,
+                "max": 3.074047
+              },
+              "serialization": {
+                "elapsed_ms": 1.6856159999999818,
+                "bytes": 424508
+              }
+            },
+            {
+              "elapsed_ms": 20.901640999999927,
+              "rss_before_bytes": 74268672,
+              "rss_after_bytes": 74289152,
+              "peak_process_rss_bytes": 74694656,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 20.901640999999927,
+                "p95_ms": 20.901640999999927
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007632000000057815,
+                "sql_elapsed_ms": 17.355894000000262
+              },
+              "application_processing_ms": 3.538114999999607,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 4.004032,
+                "p95": 13.262847,
+                "max": 13.262847
+              },
+              "serialization": {
+                "elapsed_ms": 1.4856770000001234,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 26.064531999999872,
+              "rss_before_bytes": 74874880,
+              "rss_after_bytes": 75067392,
+              "peak_process_rss_bytes": 75304960,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 26.064531999999872,
+                "p95_ms": 26.064531999999872
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007004999999935535,
+                "sql_elapsed_ms": 21.67944300000022
+              },
+              "application_processing_ms": 4.378083999999717,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.92608,
+                "p95": 1.554431,
+                "max": 1.554431
+              },
+              "serialization": {
+                "elapsed_ms": 1.419540999999981,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 19.451692999999977,
+              "rss_before_bytes": 75132928,
+              "rss_after_bytes": 75169792,
+              "peak_process_rss_bytes": 75563008,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 19.451692999999977,
+                "p95_ms": 19.451692999999977
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007017999999789026,
+                "sql_elapsed_ms": 15.966306999999915
+              },
+              "application_processing_ms": 3.4783680000002732,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.1521706666666667,
+                "p95": 1.163263,
+                "max": 1.163263
+              },
+              "serialization": {
+                "elapsed_ms": 1.5222289999999248,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 38.63699500000007,
+              "rss_before_bytes": 75431936,
+              "rss_after_bytes": 75431936,
+              "peak_process_rss_bytes": 75862016,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 38.63699500000007,
+                "p95_ms": 38.63699500000007
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.008329000000003361,
+                "sql_elapsed_ms": 22.741248999999925
+              },
+              "application_processing_ms": 15.887417000000141,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 6.494976,
+                "p95": 11.149311,
+                "max": 11.149311
+              },
+              "serialization": {
+                "elapsed_ms": 1.473694999999907,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 27.157404999999926,
+              "rss_before_bytes": 75431936,
+              "rss_after_bytes": 75431936,
+              "peak_process_rss_bytes": 75862016,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 27.157404999999926,
+                "p95_ms": 27.157404999999926
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.018422000000100525,
+                "sql_elapsed_ms": 22.150256999999783
+              },
+              "application_processing_ms": 4.988726000000042,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.066944,
+                "p95": 1.678335,
+                "max": 1.678335
+              },
+              "serialization": {
+                "elapsed_ms": 1.85397799999987,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 34.96470699999986,
+              "rss_before_bytes": 75472896,
+              "rss_after_bytes": 75472896,
+              "peak_process_rss_bytes": 75902976,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 34.96470699999986,
+                "p95_ms": 34.96470699999986
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.015243000000054963,
+                "sql_elapsed_ms": 30.747323999999935
+              },
+              "application_processing_ms": 4.202139999999872,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 2.6516599999999926,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 50.76128399999993,
+              "rss_before_bytes": 75476992,
+              "rss_after_bytes": 75501568,
+              "peak_process_rss_bytes": 75907072,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 50.76128399999993,
+                "p95_ms": 50.76128399999993
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.1271959999999126,
+                "sql_elapsed_ms": 46.97321299999999
+              },
+              "application_processing_ms": 3.6608750000000327,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.2477010000000064,
+                "bytes": 424520
+              }
+            },
+            {
+              "elapsed_ms": 19.582234999999855,
+              "rss_before_bytes": 75665408,
+              "rss_after_bytes": 75669504,
+              "peak_process_rss_bytes": 76267520,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 19.582234999999855,
+                "p95_ms": 19.582234999999855
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.008830999999872802,
+                "sql_elapsed_ms": 16.199070999999776
+              },
+              "application_processing_ms": 3.374333000000206,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.250816,
+                "p95": 1.436671,
+                "max": 1.436671
+              },
+              "serialization": {
+                "elapsed_ms": 1.2047609999999622,
+                "bytes": 424532
+              }
+            },
+            {
+              "elapsed_ms": 25.07892099999981,
+              "rss_before_bytes": 75677696,
+              "rss_after_bytes": 75677696,
+              "peak_process_rss_bytes": 76267520,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 25.07892099999981,
+                "p95_ms": 25.07892099999981
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.00557200000002922,
+                "sql_elapsed_ms": 21.038685999999643
+              },
+              "application_processing_ms": 4.034663000000137,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 5.099904,
+                "p95": 9.478143,
+                "max": 9.478143
+              },
+              "serialization": {
+                "elapsed_ms": 3.687300999999934,
+                "bytes": 425508
+              }
+            },
+            {
+              "elapsed_ms": 89.08535200000006,
+              "rss_before_bytes": 75927552,
+              "rss_after_bytes": 75952128,
+              "peak_process_rss_bytes": 76357632,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 89.08535200000006,
+                "p95_ms": 89.08535200000006
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006628000000091561,
+                "sql_elapsed_ms": 83.5397989999999
+              },
+              "application_processing_ms": 5.538925000000063,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.9712,
+                "p95": 1.353727,
+                "max": 1.353727
+              },
+              "serialization": {
+                "elapsed_ms": 1.2424110000001747,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 96.65811099999996,
+              "rss_before_bytes": 76234752,
+              "rss_after_bytes": 76263424,
+              "peak_process_rss_bytes": 76664832,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 96.65811099999996,
+                "p95_ms": 96.65811099999996
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005349999999907595,
+                "sql_elapsed_ms": 78.792146
+              },
+              "application_processing_ms": 17.860615000000053,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 1,
+                "mean": 0.594688,
+                "p95": 0.594943,
+                "max": 0.594943
+              },
+              "serialization": {
+                "elapsed_ms": 2.074700000000121,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 26.54458300000033,
+              "rss_before_bytes": 76509184,
+              "rss_after_bytes": 76537856,
+              "peak_process_rss_bytes": 76939264,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 26.54458300000033,
+                "p95_ms": 26.54458300000033
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.019638999999642692,
+                "sql_elapsed_ms": 21.61516999999958
+              },
+              "application_processing_ms": 4.909774000001107,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.2730026666666667,
+                "p95": 1.410047,
+                "max": 1.410047
+              },
+              "serialization": {
+                "elapsed_ms": 2.086351999999806,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 111.8857979999998,
+              "rss_before_bytes": 77303808,
+              "rss_after_bytes": 77332480,
+              "peak_process_rss_bytes": 77733888,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 111.8857979999998,
+                "p95_ms": 111.8857979999998
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006365000000187138,
+                "sql_elapsed_ms": 107.73334600000044
+              },
+              "application_processing_ms": 4.14608699999917,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 2.055424,
+                "p95": 2.723839,
+                "max": 2.723839
+              },
+              "serialization": {
+                "elapsed_ms": 12.454772999999932,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 26.10555199999999,
+              "rss_before_bytes": 77594624,
+              "rss_after_bytes": 77623296,
+              "peak_process_rss_bytes": 78024704,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 26.10555199999999,
+                "p95_ms": 26.10555199999999
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.00651800000014191,
+                "sql_elapsed_ms": 22.060001000000284
+              },
+              "application_processing_ms": 4.039032999999563,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.89248,
+                "p95": 1.269759,
+                "max": 1.269759
+              },
+              "serialization": {
+                "elapsed_ms": 1.314618999999766,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 31.94147699999985,
+              "rss_before_bytes": 77864960,
+              "rss_after_bytes": 77893632,
+              "peak_process_rss_bytes": 78295040,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 31.94147699999985,
+                "p95_ms": 31.94147699999985
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005987999999888416,
+                "sql_elapsed_ms": 25.985659000000396
+              },
+              "application_processing_ms": 5.949829999999565,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.3791573333333333,
+                "p95": 1.760255,
+                "max": 1.760255
+              },
+              "serialization": {
+                "elapsed_ms": 1.171795000000202,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 79.62983299999996,
+              "rss_before_bytes": 78467072,
+              "rss_after_bytes": 78495744,
+              "peak_process_rss_bytes": 79233024,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 79.62983299999996,
+                "p95_ms": 79.62983299999996
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006962999999814201,
+                "sql_elapsed_ms": 76.30068399999982
+              },
+              "application_processing_ms": 3.322186000000329,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 1.193472,
+                "p95": 1.291263,
+                "max": 1.291263
+              },
+              "serialization": {
+                "elapsed_ms": 1.2526110000003428,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 219.60268399999995,
+              "rss_before_bytes": 78741504,
+              "rss_after_bytes": 78786560,
+              "peak_process_rss_bytes": 79233024,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 219.60268399999995,
+                "p95_ms": 219.60268399999995
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005548000000089814,
+                "sql_elapsed_ms": 215.68884800000023
+              },
+              "application_processing_ms": 3.9082879999996294,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.3677660000003016,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 21.6282140000003,
+              "rss_before_bytes": 79032320,
+              "rss_after_bytes": 79056896,
+              "peak_process_rss_bytes": 79462400,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 21.6282140000003,
+                "p95_ms": 21.6282140000003
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0060090000001764565,
+                "sql_elapsed_ms": 17.79500199999984
+              },
+              "application_processing_ms": 3.8272030000002815,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.865856,
+                "p95": 1.127423,
+                "max": 1.127423
+              },
+              "serialization": {
+                "elapsed_ms": 1.3607269999997698,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 57.00753199999963,
+              "rss_before_bytes": 79298560,
+              "rss_after_bytes": 79327232,
+              "peak_process_rss_bytes": 79728640,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 57.00753199999963,
+                "p95_ms": 57.00753199999963
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005702999999812164,
+                "sql_elapsed_ms": 53.57881600000019
+              },
+              "application_processing_ms": 3.423012999999628,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.9083999999998014,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 20.641047999999955,
+              "rss_before_bytes": 79572992,
+              "rss_after_bytes": 79601664,
+              "peak_process_rss_bytes": 80003072,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 20.641047999999955,
+                "p95_ms": 20.641047999999955
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005674999999882857,
+                "sql_elapsed_ms": 17.306916999999885
+              },
+              "application_processing_ms": 3.3284560000001875,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.188608,
+                "p95": 1.255423,
+                "max": 1.255423
+              },
+              "serialization": {
+                "elapsed_ms": 1.298855999999887,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 58.130077000000256,
+              "rss_before_bytes": 79847424,
+              "rss_after_bytes": 79876096,
+              "peak_process_rss_bytes": 80277504,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 58.130077000000256,
+                "p95_ms": 58.130077000000256
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005756999999903201,
+                "sql_elapsed_ms": 53.24126000000024
+              },
+              "application_processing_ms": 4.883060000000114,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 1.95456,
+                "p95": 2.445311,
+                "max": 2.445311
+              },
+              "serialization": {
+                "elapsed_ms": 1.225170000000162,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 19.402113999999983,
+              "rss_before_bytes": 80125952,
+              "rss_after_bytes": 80199680,
+              "peak_process_rss_bytes": 80556032,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 19.402113999999983,
+                "p95_ms": 19.402113999999983
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005799999999908323,
+                "sql_elapsed_ms": 15.642465999999786
+              },
+              "application_processing_ms": 3.753848000000289,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.193216,
+                "p95": 1.255423,
+                "max": 1.255423
+              },
+              "serialization": {
+                "elapsed_ms": 1.4731470000001536,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 20.01508899999999,
+              "rss_before_bytes": 80445440,
+              "rss_after_bytes": 80474112,
+              "peak_process_rss_bytes": 80875520,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 20.01508899999999,
+                "p95_ms": 20.01508899999999
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005736000000069907,
+                "sql_elapsed_ms": 16.762347999999747
+              },
+              "application_processing_ms": 3.247005000000172,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.2013226666666668,
+                "p95": 1.275903,
+                "max": 1.275903
+              },
+              "serialization": {
+                "elapsed_ms": 1.2661049999996976,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 26.43823399999974,
+              "rss_before_bytes": 80715776,
+              "rss_after_bytes": 80744448,
+              "peak_process_rss_bytes": 81145856,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 26.43823399999974,
+                "p95_ms": 26.43823399999974
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006432000000131666,
+                "sql_elapsed_ms": 18.987411999999495
+              },
+              "application_processing_ms": 7.444390000000112,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.334784,
+                "p95": 1.415167,
+                "max": 1.415167
+              },
+              "serialization": {
+                "elapsed_ms": 1.1932440000000497,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 23.76236999999992,
+              "rss_before_bytes": 80986112,
+              "rss_after_bytes": 81014784,
+              "peak_process_rss_bytes": 81416192,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 23.76236999999992,
+                "p95_ms": 23.76236999999992
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006119000000126107,
+                "sql_elapsed_ms": 19.12335400000029
+              },
+              "application_processing_ms": 4.632896999999502,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.148928,
+                "p95": 1.174527,
+                "max": 1.174527
+              },
+              "serialization": {
+                "elapsed_ms": 1.258350000000064,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 270.8113309999999,
+              "rss_before_bytes": 81260544,
+              "rss_after_bytes": 81289216,
+              "peak_process_rss_bytes": 81690624,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 270.8113309999999,
+                "p95_ms": 270.8113309999999
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005897000000004482,
+                "sql_elapsed_ms": 255.43893900000012
+              },
+              "application_processing_ms": 15.366494999999759,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.2594346666666667,
+                "p95": 1.882111,
+                "max": 1.882111
+              },
+              "serialization": {
+                "elapsed_ms": 2.241203999999925,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 37.05344200000036,
+              "rss_before_bytes": 81530880,
+              "rss_after_bytes": 81559552,
+              "peak_process_rss_bytes": 81960960,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 37.05344200000036,
+                "p95_ms": 37.05344200000036
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007098000000041793,
+                "sql_elapsed_ms": 30.401938999999857
+              },
+              "application_processing_ms": 6.644405000000461,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.157312,
+                "p95": 1.645567,
+                "max": 1.645567
+              },
+              "serialization": {
+                "elapsed_ms": 1.7307550000000447,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 50.51181899999983,
+              "rss_before_bytes": 81801216,
+              "rss_after_bytes": 81829888,
+              "peak_process_rss_bytes": 82231296,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 50.51181899999983,
+                "p95_ms": 50.51181899999983
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0077599999999620195,
+                "sql_elapsed_ms": 43.43359499999997
+              },
+              "application_processing_ms": 7.070463999999902,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 1,
+                "mean": 1.742336,
+                "p95": 1.742847,
+                "max": 1.742847
+              },
+              "serialization": {
+                "elapsed_ms": 1.436862999999903,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 23.01391199999989,
+              "rss_before_bytes": 82075648,
+              "rss_after_bytes": 82104320,
+              "peak_process_rss_bytes": 82505728,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 23.01391199999989,
+                "p95_ms": 23.01391199999989
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006859000000076776,
+                "sql_elapsed_ms": 17.67848099999992
+              },
+              "application_processing_ms": 5.328571999999895,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 2.426624,
+                "p95": 3.477503,
+                "max": 3.477503
+              },
+              "serialization": {
+                "elapsed_ms": 1.3093629999998484,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 34.73142300000018,
+              "rss_before_bytes": 82354176,
+              "rss_after_bytes": 82653184,
+              "peak_process_rss_bytes": 82784256,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 34.73142300000018,
+                "p95_ms": 34.73142300000018
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005970000000161235,
+                "sql_elapsed_ms": 31.10133399999995
+              },
+              "application_processing_ms": 3.6241190000000643,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.530368,
+                "p95": 2.068479,
+                "max": 2.068479
+              },
+              "serialization": {
+                "elapsed_ms": 2.325140999999803,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 127.63136799999984,
+              "rss_before_bytes": 82903040,
+              "rss_after_bytes": 82927616,
+              "peak_process_rss_bytes": 83333120,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 127.63136799999984,
+                "p95_ms": 127.63136799999984
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006697999999687454,
+                "sql_elapsed_ms": 112.78786499999978
+              },
+              "application_processing_ms": 14.836805000000368,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.4096213333333332,
+                "p95": 2.646015,
+                "max": 2.646015
+              },
+              "serialization": {
+                "elapsed_ms": 4.106484999999793,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 102.30612800000017,
+              "rss_before_bytes": 83824640,
+              "rss_after_bytes": 83853312,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 102.30612800000017,
+                "p95_ms": 102.30612800000017
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0061529999998128915,
+                "sql_elapsed_ms": 92.98645299999953
+              },
+              "application_processing_ms": 9.31352200000083,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.960064,
+                "p95": 1.346559,
+                "max": 1.346559
+              },
+              "serialization": {
+                "elapsed_ms": 1.3544580000007045,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 2260.9616540000006,
+              "rss_before_bytes": 84103168,
+              "rss_after_bytes": 72175616,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 2260.9616540000006,
+                "p95_ms": 2260.9616540000006
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006609000000025844,
+                "sql_elapsed_ms": 2246.120870999999
+              },
+              "application_processing_ms": 14.83417400000144,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 4.9414569999999,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 353.20315499999924,
+              "rss_before_bytes": 72757248,
+              "rss_after_bytes": 72970240,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 353.20315499999924,
+                "p95_ms": 353.20315499999924
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006236000000171771,
+                "sql_elapsed_ms": 347.906555999999
+              },
+              "application_processing_ms": 5.29036300000007,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.4518613333333332,
+                "p95": 1.898495,
+                "max": 1.898495
+              },
+              "serialization": {
+                "elapsed_ms": 1.2571790000001783,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 283.9270059999999,
+              "rss_before_bytes": 73285632,
+              "rss_after_bytes": 73424896,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 283.9270059999999,
+                "p95_ms": 283.9270059999999
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006186999999954423,
+                "sql_elapsed_ms": 274.0319100000006
+              },
+              "application_processing_ms": 9.88890899999933,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 3.286272,
+                "p95": 5.119999,
+                "max": 5.119999
+              },
+              "serialization": {
+                "elapsed_ms": 2.804247999999461,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 454.03218800000013,
+              "rss_before_bytes": 73670656,
+              "rss_after_bytes": 73850880,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 454.03218800000013,
+                "p95_ms": 454.03218800000013
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006217000000106054,
+                "sql_elapsed_ms": 445.5966890000009
+              },
+              "application_processing_ms": 8.429281999999148,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.971712,
+                "p95": 1.319935,
+                "max": 1.319935
+              },
+              "serialization": {
+                "elapsed_ms": 1.177466999999524,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 272.9993169999998,
+              "rss_before_bytes": 74350592,
+              "rss_after_bytes": 74559488,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 272.9993169999998,
+                "p95_ms": 272.9993169999998
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005265000000690634,
+                "sql_elapsed_ms": 260.7040370000004
+              },
+              "application_processing_ms": 12.290014999998675,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 2,
+                "mean": 2.04672,
+                "p95": 2.729983,
+                "max": 2.729983
+              },
+              "serialization": {
+                "elapsed_ms": 2.2607289999996283,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 395.4058190000005,
+              "rss_before_bytes": 74874880,
+              "rss_after_bytes": 75075584,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 395.4058190000005,
+                "p95_ms": 395.4058190000005
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007458999999471416,
+                "sql_elapsed_ms": 385.0113829999982
+              },
+              "application_processing_ms": 10.386977000002844,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.0371413333333335,
+                "p95": 2.715647,
+                "max": 2.715647
+              },
+              "serialization": {
+                "elapsed_ms": 2.9899349999996048,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 440.3312079999996,
+              "rss_before_bytes": 75386880,
+              "rss_after_bytes": 75603968,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 440.3312079999996,
+                "p95_ms": 440.3312079999996
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0063159999990602955,
+                "sql_elapsed_ms": 434.7677449999992
+              },
+              "application_processing_ms": 5.5571470000013505,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.2941653333333332,
+                "p95": 1.337343,
+                "max": 1.337343
+              },
+              "serialization": {
+                "elapsed_ms": 1.1916450000007899,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 145.77929500000027,
+              "rss_before_bytes": 75911168,
+              "rss_after_bytes": 76169216,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 145.77929500000027,
+                "p95_ms": 145.77929500000027
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005687000000762055,
+                "sql_elapsed_ms": 141.42876900000192
+              },
+              "application_processing_ms": 4.344838999997592,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.253888,
+                "p95": 1.300479,
+                "max": 1.300479
+              },
+              "serialization": {
+                "elapsed_ms": 4.0877719999989495,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 575.7549900000013,
+              "rss_before_bytes": 76480512,
+              "rss_after_bytes": 76693504,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 575.7549900000013,
+                "p95_ms": 575.7549900000013
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.1505719999986468,
+                "sql_elapsed_ms": 570.6950280000019
+              },
+              "application_processing_ms": 4.9093900000007125,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.7616,
+                "p95": 1.572863,
+                "max": 1.572863
+              },
+              "serialization": {
+                "elapsed_ms": 2.0458490000000893,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 618.4056309999996,
+              "rss_before_bytes": 77004800,
+              "rss_after_bytes": 77189120,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 618.4056309999996,
+                "p95_ms": 618.4056309999996
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006161999999676482,
+                "sql_elapsed_ms": 612.1492000000017
+              },
+              "application_processing_ms": 6.250268999998298,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.789632,
+                "p95": 1.488895,
+                "max": 1.488895
+              },
+              "serialization": {
+                "elapsed_ms": 1.2496780000001309,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 496.45065799999975,
+              "rss_before_bytes": 77443072,
+              "rss_after_bytes": 77651968,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 496.45065799999975,
+                "p95_ms": 496.45065799999975
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.007573999999294756,
+                "sql_elapsed_ms": 488.2921310000038
+              },
+              "application_processing_ms": 8.150952999996662,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.029184,
+                "p95": 1.601535,
+                "max": 1.601535
+              },
+              "serialization": {
+                "elapsed_ms": 1.1779150000002119,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 314.26423199999954,
+              "rss_before_bytes": 77971456,
+              "rss_after_bytes": 78028800,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 314.26423199999954,
+                "p95_ms": 314.26423199999954
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.006025000000590808,
+                "sql_elapsed_ms": 310.03313400000206
+              },
+              "application_processing_ms": 4.225072999996883,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 1.064,
+                "p95": 1.681407,
+                "max": 1.681407
+              },
+              "serialization": {
+                "elapsed_ms": 2.6073100000012346,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 346.3837510000012,
+              "rss_before_bytes": 78643200,
+              "rss_after_bytes": 78848000,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 346.3837510000012,
+                "p95_ms": 346.3837510000012
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005369000000428059,
+                "sql_elapsed_ms": 342.4931260000012
+              },
+              "application_processing_ms": 3.885255999999572,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 0,
+                "mean": null,
+                "p95": null,
+                "max": null
+              },
+              "serialization": {
+                "elapsed_ms": 1.5855400000000373,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 124.66457400000036,
+              "rss_before_bytes": 79151104,
+              "rss_after_bytes": 79364096,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 124.66457400000036,
+                "p95_ms": 124.66457400000036
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005673999999999069,
+                "sql_elapsed_ms": 120.96123800000169
+              },
+              "application_processing_ms": 3.6976619999986724,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.274368,
+                "p95": 1.334271,
+                "max": 1.334271
+              },
+              "serialization": {
+                "elapsed_ms": 1.8642490000001999,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 245.98312700000133,
+              "rss_before_bytes": 79671296,
+              "rss_after_bytes": 79732736,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 245.98312700000133,
+                "p95_ms": 245.98312700000133
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.005662999999913154,
+                "sql_elapsed_ms": 242.16095900000073
+              },
+              "application_processing_ms": 3.8165050000006886,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 2.141184,
+                "p95": 3.235839,
+                "max": 3.235839
+              },
+              "serialization": {
+                "elapsed_ms": 1.227324999999837,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 191.15573799999947,
+              "rss_before_bytes": 80019456,
+              "rss_after_bytes": 80236544,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 191.15573799999947,
+                "p95_ms": 191.15573799999947
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 1005,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0061569999998027924,
+                "sql_elapsed_ms": 182.13117700000112
+              },
+              "application_processing_ms": 9.018403999998554,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 4,
+                "mean": 0.998336,
+                "p95": 1.207295,
+                "max": 1.207295
+              },
+              "serialization": {
+                "elapsed_ms": 1.444112999999561,
+                "bytes": 425520
+              }
+            },
+            {
+              "elapsed_ms": 18.45197200000075,
+              "rss_before_bytes": 80547840,
+              "rss_after_bytes": 80572416,
+              "peak_process_rss_bytes": 84918272,
+              "timing": {
+                "sample_count": 1,
+                "p50_ms": 18.45197200000075,
+                "p95_ms": 18.45197200000075
+              },
+              "sql": {
+                "statements": 5,
+                "rows_returned": 204,
+                "rows_affected": 0,
+                "queue_wait_ms": 0.0052639999994426034,
+                "sql_elapsed_ms": 17.16009099999974
+              },
+              "application_processing_ms": 1.28661700000157,
+              "wal_before_bytes": 0,
+              "wal_after_bytes": 0,
+              "event_loop_delay_ms": {
+                "sample_count": 3,
+                "mean": 1.2965546666666667,
+                "p95": 1.623039,
+                "max": 1.623039
+              },
+              "serialization": {
+                "elapsed_ms": 0.2340749999984837,
+                "bytes": 101250
+              }
+            }
+          ]
+        }
+      },
+      "snapshot": {
+        "elapsed_ms": 2120.195504,
+        "rss_before_bytes": 71892992,
+        "rss_after_bytes": 141287424,
+        "peak_process_rss_bytes": 141287424,
+        "timing": {
+          "sample_count": 1,
+          "p50_ms": 2120.195504,
+          "p95_ms": 2120.195504
+        },
+        "sql": {
+          "statements": 6,
+          "rows_returned": 50232,
+          "rows_affected": 0,
+          "queue_wait_ms": 0.07734600000003411,
+          "sql_elapsed_ms": 1193.4492899999996
+        },
+        "application_processing_ms": 926.6688680000002,
+        "wal_before_bytes": 0,
+        "wal_after_bytes": 0,
+        "event_loop_delay_ms": {
+          "sample_count": 1,
+          "mean": 15.167488,
+          "p95": 15.171583,
+          "max": 15.171583
+        },
+        "read_seq": 50494,
+        "record_count": 50202,
+        "stages": {
+          "snapshot_hydration": {
+            "sample_count": 1,
+            "p50_ms": 662.3853020000001,
+            "p95_ms": 662.3853020000001
+          },
+          "snapshot_filter": {
+            "sample_count": 1,
+            "p50_ms": 111.09565399999974,
+            "p95_ms": 111.09565399999974
+          },
+          "snapshot_sort": {
+            "sample_count": 1,
+            "p50_ms": 145.7188430000001,
+            "p95_ms": 145.7188430000001
+          }
+        },
+        "serialization": {
+          "elapsed_ms": 487.98493800000006,
+          "bytes": 21341066
+        }
+      },
+      "export": {
+        "elapsed_ms": 2346.251937,
+        "rss_before_bytes": 70266880,
+        "rss_after_bytes": 245555200,
+        "peak_process_rss_bytes": 245817344,
+        "timing": {
+          "sample_count": 1,
+          "p50_ms": 2346.251937,
+          "p95_ms": 2346.251937
+        },
+        "sql": {
+          "statements": 5,
+          "rows_returned": 50206,
+          "rows_affected": 0,
+          "queue_wait_ms": 0.11670000000003711,
+          "sql_elapsed_ms": 560.5629509999999
+        },
+        "application_processing_ms": 1785.572286,
+        "wal_before_bytes": 0,
+        "wal_after_bytes": 0,
+        "event_loop_delay_ms": {
+          "sample_count": 3,
+          "mean": 1.3218133333333333,
+          "p95": 1.432575,
+          "max": 1.432575
+        },
+        "read_seq": 50494,
+        "record_count": 50202,
+        "serialization": {
+          "elapsed_ms": 185.42482599999994,
+          "bytes": 21341240
+        },
+        "integrity_hash": "sha256:9563fce7831ff710785ed61658de0204c9e142e5354218a880d144dda1cc0611"
+      },
+      "context": {
+        "read_seq": 50494,
+        "first_page": {
+          "elapsed_ms": 3081.4138970000004,
+          "rss_before_bytes": 70823936,
+          "rss_after_bytes": 72617984,
+          "peak_process_rss_bytes": 72617984,
+          "timing": {
+            "sample_count": 1,
+            "p50_ms": 3081.4138970000004,
+            "p95_ms": 3081.4138970000004
+          },
+          "sql": {
+            "statements": 3,
+            "rows_returned": 258,
+            "rows_affected": 0,
+            "queue_wait_ms": 0.060294999999996435,
+            "sql_elapsed_ms": 3044.6079799999998
+          },
+          "application_processing_ms": 36.745622000000594,
+          "wal_before_bytes": 0,
+          "wal_after_bytes": 0,
+          "event_loop_delay_ms": {
+            "sample_count": 2,
+            "mean": 2.543616,
+            "p95": 2.918399,
+            "max": 2.918399
+          },
+          "record_count": 161,
+          "cursor_bytes": 1039,
+          "read_stats": {
+            "scanned_rows": 256,
+            "returned_rows": 255,
+            "scan_budget": 256,
+            "continuation": true
+          },
+          "serialization": {
+            "elapsed_ms": 2.955705999998827,
+            "bytes": 120478
+          }
+        },
+        "stages": {
+          "snapshot": {
+            "sample_count": 4,
+            "p50_ms": 2573.3895840000005,
+            "p95_ms": 3049.2016839999997
+          },
+          "record_projection": {
+            "sample_count": 4,
+            "p50_ms": 5.960683000000245,
+            "p95_ms": 28.06864300000052
+          },
+          "ordering": {
+            "sample_count": 4,
+            "p50_ms": 0,
+            "p95_ms": 0
+          },
+          "cursor_encoding": {
+            "sample_count": 4,
+            "p50_ms": 1.1154370000003837,
+            "p95_ms": 6.875711000000592
+          },
+          "page_projection": {
+            "sample_count": 4,
+            "p50_ms": 7.3964679999999134,
+            "p95_ms": 10.854088000000047
+          }
+        },
+        "continuation_sample_count": 3,
+        "continuation_timing": {
+          "sample_count": 3,
+          "p50_ms": 2613.558557999999,
+          "p95_ms": 2775.592235
+        },
+        "continuations": [
+          {
+            "elapsed_ms": 2775.592235,
+            "rss_before_bytes": 73469952,
+            "rss_after_bytes": 74047488,
+            "peak_process_rss_bytes": 74268672,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 2775.592235,
+              "p95_ms": 2775.592235
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.00947699999960605,
+              "sql_elapsed_ms": 2759.5985170000004
+            },
+            "application_processing_ms": 15.984241000000111,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 3,
+              "mean": 1.2002133333333334,
+              "p95": 2.054143,
+              "max": 2.054143
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.5420080000003509,
+              "bytes": 120571
+            }
+          },
+          {
+            "elapsed_ms": 2256.326870000001,
+            "rss_before_bytes": 74412032,
+            "rss_after_bytes": 75280384,
+            "peak_process_rss_bytes": 75280384,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 2256.326870000001,
+              "p95_ms": 2256.326870000001
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.008896999999706168,
+              "sql_elapsed_ms": 2247.3175839999994
+            },
+            "application_processing_ms": 9.000389000001633,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 1,
+              "mean": 1.147392,
+              "p95": 1.147903,
+              "max": 1.147903
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.34004299999833165,
+              "bytes": 120571
+            }
+          },
+          {
+            "elapsed_ms": 2613.558557999999,
+            "rss_before_bytes": 75530240,
+            "rss_after_bytes": 75911168,
+            "peak_process_rss_bytes": 76132352,
+            "timing": {
+              "sample_count": 1,
+              "p50_ms": 2613.558557999999,
+              "p95_ms": 2613.558557999999
+            },
+            "sql": {
+              "statements": 2,
+              "rows_returned": 257,
+              "rows_affected": 0,
+              "queue_wait_ms": 0.007329000000027008,
+              "sql_elapsed_ms": 2567.808219999999
+            },
+            "application_processing_ms": 45.7430089999998,
+            "wal_before_bytes": 0,
+            "wal_after_bytes": 0,
+            "event_loop_delay_ms": {
+              "sample_count": 4,
+              "mean": 0.9088,
+              "p95": 1.379327,
+              "max": 1.379327
+            },
+            "record_count": 161,
+            "cursor_bytes": 1039,
+            "read_stats": {
+              "scanned_rows": 256,
+              "returned_rows": 255,
+              "scan_budget": 256,
+              "continuation": true
+            },
+            "serialization": {
+              "elapsed_ms": 0.36148900000080175,
+              "bytes": 120571
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

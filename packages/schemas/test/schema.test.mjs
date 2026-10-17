@@ -30,6 +30,8 @@ test("contract registry covers every supported operation with request, response,
   const names = operationContracts.map((c) => c.operation);
   assert.deepEqual(names, [...new Set(names)], "operations are unique");
   assert.ok(names.includes("query"), "single-word operations such as `query` are supported names");
+  assert.equal(names.includes("snapshot.import"), false, "snapshot.import is not a supported operation");
+  assert.ok(contractRegistry.unsupported.some((entry) => entry.capability === "snapshot.import"));
 });
 
 test("every unsupported capability has a follow-up owner or is a permanent non-goal", () => {

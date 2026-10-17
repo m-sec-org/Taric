@@ -1,0 +1,72 @@
+{
+  "version": "maintenance-concurrency/1",
+  "measured_at": "2026-10-17T03:52:37.667Z",
+  "runtime": {
+    "node": "v22.21.1",
+    "platform": "darwin",
+    "arch": "x64"
+  },
+  "fixture": {
+    "engagement_id": "01a147fd-75fc-77f8-95b9-cc510ca30eaa",
+    "initial_records": 203,
+    "concurrent_writes": 25,
+    "concurrent_heartbeats": 10,
+    "maintenance_operations": [
+      "audit.verify",
+      "audit.doctor",
+      "audit.reconcile",
+      "snapshot.export"
+    ]
+  },
+  "elapsed_ms": 2061.1437770000002,
+  "writes": {
+    "latency": {
+      "sample_count": 25,
+      "p50_ms": 156.21680100000003,
+      "p95_ms": 222.14879100000007
+    }
+  },
+  "maintenance": {
+    "latency": {
+      "sample_count": 14,
+      "p50_ms": 235.37282000000005,
+      "p95_ms": 246.01560900000004
+    },
+    "fixed_watermarks": {
+      "committed_seq": 204,
+      "projected_seq": 0
+    },
+    "read_seq": 204,
+    "readonly_history_before": 204,
+    "readonly_history_after": 204
+  },
+  "sql": {
+    "statements": 620,
+    "rows_returned": 3591,
+    "rows_affected": 235,
+    "queue_wait_ms": 6249.819778000002,
+    "sql_elapsed_ms": 87.15260800001033
+  },
+  "wal": {
+    "before_bytes": 4227152,
+    "after_bytes": 4227152
+  },
+  "event_loop_delay_ms": {
+    "sample_count": 0,
+    "mean": null,
+    "p95": 0.000511,
+    "max": 0
+  },
+  "authorization": {
+    "model_reconcile_replay": "authorization_error"
+  },
+  "conclusion": {
+    "read_only_maintenance_separated_from_repair": true,
+    "no_background_worker": true
+  },
+  "limitations": [
+    "single-host SQLite fixture",
+    "one concurrent batch",
+    "does not establish a production SLA"
+  ]
+}
