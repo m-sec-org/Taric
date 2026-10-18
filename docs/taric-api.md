@@ -1,7 +1,5 @@
 # Taric API Boundary v1
 
-> Source review: 2026-10-18. API/Schema `1.0.0`, Adapter `1.0`; package version `0.1.0` is separate. This document describes the current source contract, including differences between Core helpers, public dispatch, CLI, MCP and host RPC.
-
 Core owns authority writes and governance. Hosts own model calls, workers, target tools, action authorization, reviewer identity, credentials, Artifact policy and retention. An accepted proposal/capture is not a verified Finding.
 
 ## Runtime startup and authority profiles
@@ -44,7 +42,7 @@ The trusted host session association is a snapshot registered on the principal, 
 
 ## Operation inventory
 
-The current registry contains 50 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. `engagement.status` currently returns installation-wide counts and sequence after the scoped authorization check; it is not an Engagement-safe aggregate. Use `host.state` for scoped host status.
+The current registry contains 50 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. Despite its name, `engagement.status` is a contract probe: after the scoped authorization check it returns only `schema_version` and `schema_supported`, with no Engagement counts or sequence. Use `host.state` for scoped host status.
 
 | Operation | Allowed roles | Capability | Writes authority/state |
 |---|---|---|---|
@@ -105,7 +103,7 @@ The unsupported declarations are `snapshot.import`, `migration`, `backup.restore
 
 ## Model-facing operations
 
-MCP exposes only `initialize`, `tools/list`, `tools/call`, negotiates `2024-11-05`, and advertises `{ "tools": {} }`. Tool results contain a JSON-serialized Core envelope in `content[0].text` and `isError:!response.ok`. No resources, subscription, Tasks, arbitrary dispatch or raw Artifact operation is exposed.
+MCP exposes only `initialize`, `tools/list`, `tools/call`, negotiates `2024-11-05`, and advertises `{ "tools": {} }`. Tool results contain a JSON-serialized Core envelope in `content[0].text` and `isError:!response.ok`. No resources, subscription, Tasks, arbitrary dispatch or raw Artifact operation is exposed. Model-facing reads return allowlisted metadata and host-approved references; the model surface does not return Artifact bodies or credentials.
 
 | Tool | Required arguments | Other accepted tool arguments |
 |---|---|---|
@@ -142,7 +140,7 @@ A `proposal.submit` create uses `expected_version:0`; an update also supplies `t
 }
 ```
 
-`capture.observation` accepts `observation` (or `content`), optional subject_type/expected_version/target_id and host run attribution. It delegates to proposal submission; it does not prove the host tool ran or admit the result.
+`capture.observation` accepts `observation` (or `content`), optional subject_type/expected_version/target_id and host run attribution. The observation object must satisfy the domain `observation` schema (`resource_ref`, `observed_at`, `statement`, `artifact_refs`, optional `limitations`/`status`); it has no `conditions` or `evidence_refs` fields, so conditional or negative evidence belongs to the `negative_observation`, `control_observation` or `access_decision_observation` subject types. It delegates to proposal submission; it does not prove the host tool ran or admit the result.
 
 `admission.evaluate` takes engagement_id, proposal_id, expected_version, policy_digest and optional idempotency_key. It performs structural L0→L1 admission, returns the resulting record and remaining L2 conditions, and does not enforce full evidence/freshness/independence gates. Inspect `data.ok` before reading `data.record`.
 

@@ -1,7 +1,5 @@
 # Multi-host authority runbook
 
-> Last reviewed: 2026-10-18
-
 PostgreSQL and SQLite share the complete asynchronous Core governance implementation. The supported PostgreSQL capability has `implementation_state=available` and `evidence_state=verified`; it remains `runtime_state=disabled` in the default single-host configuration. Explicit multi-host activation requires matching live conformance evidence and current schema/lease health. The default `single_host_sqlite` profile does not load the PostgreSQL driver or contact a PostgreSQL service.
 
 An operator can inspect the deployed schema with `PostgresAuthorityStore.runtimeReadiness(report?)`. This read-only probe reports schema/sequence/lease health and the required runtime method/table/column inventory. It neither migrates the schema nor opens SQLite. Without full scenario evidence, or after any structural/health mismatch, it reports disabled. [PostgreSQL runtime readiness](postgres-runtime-readiness.md) describes the shared unit of work, verification commands and activation report.

@@ -1,7 +1,5 @@
 # Taric Runtime Integration
 
-> Source review: 2026-10-18. Use this guide to connect a trusted host to the implemented runtime. Operation authorization comes from [the registry](../packages/schemas/src/registry.ts) plus [Core service capability checks](../packages/core/src/service.ts); native support ceilings come from [compatibility.ts](../packages/core/src/compatibility.ts). Saved reports establish only their recorded build, fixture and topology.
-
 Taric adds durable Engagement memory, governed candidates/Findings, execution recovery metadata and optional opaque Artifact storage. The host provides model calls, worker scheduling, target tools, identity, approval, credentials and content policy. Taric does not execute a target action or grant authorization.
 
 ## Supported Profile
@@ -261,6 +259,6 @@ Use Taric when durable scoped memory, governed Findings, lease-aware recovery or
 
 Record actual integration effort, failed attempts, Core calls, reviewer waits, retries, proxy restarts, CPU/RSS/latency, fixture/version and commands. The proxy report supplies synthetic local calls/timing, not engineering labor-hours, production reviewer time or ROI. Host observations can still be false, discovery incomplete and external action outcomes unknown; Taric checks its state/identity/governance contracts rather than proving target-system truth.
 
-The saved [clean-build report](benchmarks/capability-verification-v2.json) records 339 tests passed, zero failures/skips, technical_passed/runtime_verified true and release_state blocked. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records 12 scenarios and a 24-table logical restore with audit 107→107. The [release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md) indexes T01–T14. Human annotation/baseline sample count is zero, so quality evidence stays pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
+The saved [clean-build report](benchmarks/capability-verification-v2.json) records 339 tests passed, zero failures/skips, technical_passed/runtime_verified true and release_state blocked at `base_commit` `c3db857`; its `source_digest` matches the current working tree, so the content it verified includes the `authority-sql/3` and host-integration changes committed as `2867b26`. Any further source edit invalidates that digest and requires a fresh run. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records 12 scenarios and a 24-table logical restore with audit 107→107. The [release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md) indexes T01–T14. Human annotation/baseline sample count is zero, so quality evidence stays pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
 
 Archived changes record implementation decisions. They do not automatically enable a runtime, certify a third-party deployment, or remove pending quality gates.

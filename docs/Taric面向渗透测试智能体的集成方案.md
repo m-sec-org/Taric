@@ -1,9 +1,5 @@
 # Taric 面向渗透测试智能体的集成方案
 
-更新日期：2026-10-18。能力提升已完成，[验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)与[综合报告](benchmarks/capability-verification-v2.json)记录技术实现及运行时验证通过，339 项测试零失败/跳过；人工标注/基线样本数仍为 0，质量发布状态为 `blocked`。以下内容区分当前合同、实测范围与宿主职责。
-
-> 版本：2026-10-18 · 依据当前工作区实现（API Contract 1.0.0 / Schema v1）。配套阅读：[代码设计](taric-code-design.md)、[API 边界](taric-api.md)、[接入指南](agent-integration.md)、[多主机运行手册](multi-host-authority-runbook.md)、[PostgreSQL 运行时验证](postgres-runtime-readiness.md)。本文描述可集成的能力与宿主实施要求，实际启用状态以部署诊断和匹配当前构建的验证证据为准。
-
 ## 目录
 
 1. [方案概述](#1-方案概述)
@@ -326,7 +322,8 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
 ```text
 1. operator: engagement.init        → 创建 Engagement + Scope（ROE、允许/禁止目标、窗口）
 2. operator: artifact.session.bind  → { engagement_id, session_id: "pentest-<engagement短id>",
-                                        root: "<TARIC_CONTENT_ROOT>/sessions/pentest-<短id>" }
+                                        root: "<TARIC_CONTENT_ROOT>/sessions/pentest-<短id>",
+                                        mode: "host-session" }   ← mode 必填
 3. operator: audit.doctor           → 确认 authority/sidecar 健康
 4. 宿主: 启动 N 个执行者 MCP 子进程 + planner/observer MCP 子进程（统一 TARIC_ENGAGEMENT_ID）
 ```
@@ -339,10 +336,12 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
 ① planner: context.query（省略 work_run_id，预算约 12000 字符）
    └─ Context Pack 固定 read_seq：Scope/ROE → 覆盖缺口 → L2 资源/关系 → 冲突/过期项 → 待办 WorkItem
 ② planner: proposal.submit（每任务一个，subject_type: "work_item"）
-   content = { kind: "work_item", title, goal, acceptance_criteria[], risk_budget,
-               target_resource_refs[], worker_role: "executor-网页|executor-主机|…",
-               constraints[]（如低噪音、限速、时间窗）, engagement_id }
-   （领域字段按 schema 提交；不传 content.id，canonical UUIDv7 由 Core 分配）
+   content = { schema_version, kind: "work_item", title, status: "queued",
+               goal, acceptance_criteria[], risk_budget, scope_ref?, depends_on?,
+               engagement_id }
+   （严格按 workItem schema 提交：不接受 target_resource_refs / worker_role /
+      constraints 等自由字段；任务角色与资源约束应写入 goal/acceptance_criteria，
+      或在宿主调度器中维护。不传 content.id，canonical UUIDv7 由 Core 分配）
 ③ 宿主（非 LLM）: admission.evaluate
    ├─ Core 校验结构、引用、归属、来源与版本；宿主另行检查验收、任务语义重复和调度约束
    ├─ 通过 → WorkItem 进入权威任务池（L1）
@@ -360,20 +359,23 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
 调度（宿主，非 LLM）:
   a. 从任务池选择 status=queued 且与在跑任务资源集不相交的 WorkItem
      （并发资源池：N 个执行者 → N 个并发 WorkRun；冲突判定见 §7）
-  b. work.claim { work_item_id: W-42, host_id: "pentest-host",
-                  agent_id: "executor-2", ttl_ms: 300000,
-                  task_session_ref: "pentest-<短id>" }
+  b. work.claim { engagement_id, work_item_id: W-42, host_id: "pentest-host",
+                  agent_id: "executor-2", ttl_ms: 300000 }
      → 返回 run_id、attempt_ref、generation、lease_expires_at、read_seq
-     （同一 WorkItem 的活跃租约唯一；重复 claim 被拒绝）
+     （task_session_ref 不来自请求体：它取自受认证 transport 注册的会话，
+       body 中携带会被拒绝；同一 WorkItem 的活跃租约唯一，重复 claim 被拒绝）
 
 执行循环（executor-2 经 MCP）:
-  c. context.query { work_run_id: <run_id> }
+  c. context.query { work_item_id: W-42 }
      → Pack 含 WorkItem 目标/验收/风险预算、R-api 当前版本、相关 L2 观察、
        最近 checkpoint、限制条件；不含未显式请求的 L0/L1 项
+     （MCP 工具 schema 虽接受 work_run_id，但 Core builder 不消费它，不会据此绑定运行；
+       任务定位请用 work_item_id，运行归属由宿主在 checkpoint/action 调用中携带）
   d. action.recommend { target: "https://target/api", method: "GET+FUZZ",
-                        rationale: "...", uncertainty: "...", mode: "llm_recommend",
+                        rationale: "...", uncertainty: "...",
                         evidence_refs: [...], work_run_id, generation }
-  e. 宿主策略: action.host-decision
+     （action.recommend 不接受 mode 字段；mode 由宿主在下一步的决定中给出）
+  e. 宿主策略: action.host-decision { ..., mode: "llm_recommend" 等 }
      ├─ 低风险预授权池 → status=authorized（authorized_autonomous），宿主执行工具
      ├─ 高风险 → host_hitl：宿主向审批人请求 → 回传 authorized/denied
      └─ 拒绝 → denied，执行者换路或标记 blocked
@@ -384,12 +386,15 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
           work_run_id, attempt_id, generation,          ← 三者必须齐备的 run 作用域 fence
           child_refs: [<req-artifact>, <resp-artifact>] }   ← 复合捕获：请求/响应各自独立
      （单个大输出：begin{payload_kind:"binary"} → append×N（≤64MiB/块）→ commit）
-  h. capture.observation { observation: { kind: "observation", resource_ref: R-api,
-          conditions: [...], evidence_refs: [<evidence-id>],
-          artifact_refs: [{ content_ref, content_status: "available",
-                            integrity_status: "verified", byte_length, content_hash }] },
+  h. capture.observation { observation: { schema_version: "1.0.0", engagement_id,
+          kind: "observation", resource_ref: R-api, observed_at,
+          statement: "...", artifact_refs: [{ content_ref, content_status: "available",
+                            integrity_status: "verified", byte_length, content_hash }],
+          limitations: [...] },                    ← 领域 schema 的必填/可选字段
           work_run_id, generation }
      → Observation 进入权威层（宿主写入，可信来源）
+     （普通 observation schema 不接受 conditions/evidence_refs；conditions 属于
+      negative/control/access observation 类型，需按对应 subject_type 单独提交）
 
 进度与恢复:
   i. executor-2: checkpoint.propose { completed_steps, next_steps,
@@ -426,7 +431,8 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
 ① observer: context.query（workerRole=observer）→ 发现 R-api 上 access_decision 频繁 "challenge"，
    且 W-静默验证 与 W-目录爆破 的资源集交叠
 ② observer: action.recommend { target: "W-目录爆破", method: "pause+reschedule",
-      rationale: "高频 403/429 已触发防护，干扰静默验证前提", mode: "host_hitl" }
+      rationale: "高频 403/429 已触发防护，干扰静默验证前提" }
+   （mode 不是 action.recommend 字段；宿主在执行决定时才选择 host_hitl）
 ③ 宿主: 审批后停止/暂停目录爆破工具并停止派发；需要转移 owner 时，等待租约过期后
    才可 work.reclaim → 旧 attempt lost、pending sidecar 封存（reclaim 不是即时取消接口）
 ④ observer: proposal.submit（将"R-api 未启用 WAF"旧 claim 标记 stale，附 access 证据）
@@ -463,7 +469,7 @@ operator 使用 `audit.doctor` 诊断 authority 与当前宿主 spool；`audit.r
 ### 7.1 并发资源池映射
 
 - 宿主的"并发资源池 N"直接映射为 **N 个并发 WorkRun**；每个执行者同一时刻至多持有一个活跃租约。
-- 任务分派的**无冲突判定在宿主调度器**完成：两个 WorkItem 的 `target_resource_refs` 及其依赖闭包（Relation 的 depends_on）不相交，才允许同时进入在跑集合。
+- 任务分派的**无冲突判定在宿主调度器**完成：WorkItem schema 本身没有 `target_resource_refs`；宿主应把目标资源写入任务内容或独立的调度元数据，并基于该映射与其依赖闭包（`depends_on` / Relation 的 depends_on）判断不相交，才允许同时进入在跑集合。
 - Taric 提供的并发原语在分派器失效时兜底：
 
 | 原语 | 保证 | 兜底场景 |
@@ -534,7 +540,7 @@ PostgreSQL 保存 task-session binding、上传状态、目录/chunk 元数据�
 | 智能 | Context Pack 配置 | 重点关注 |
 |---|---|---|
 | planner | 较大预算（如 12000 字符），workerRole=planner | Scope/ROE、覆盖缺口、L2 资源/关系、冲突/过期项、在跑 WorkRun、待办 WorkItem |
-| executor | 中预算（如 8000），绑定 work_run_id | 本任务目标/验收/风险预算、目标资源当前版本、相关 L2 观察、最近 checkpoint、限制（低噪音/时间窗） |
+| executor | 中预算（如 8000），绑定 work_item_id/workerRole=executor | 本任务目标/验收/风险预算、目标资源当前版本、相关 L2 观察、最近 checkpoint、限制（低噪音/时间窗）；运行归属由宿主另行携带 |
 | observer | 大预算（如 16000），workerRole=observer | 跨任务冲突、ImpactEvent、pending ActionIntent、denied/unknown 动作、心跳超期、Conflict 队列、覆盖回退 |
 
 共同保证：Pack 固定 read_seq、字段白名单最小投影、预算不足时强制信息优先并报 `minimum_budget_required`；cursor 绑定 principal 不可跨 agent 复用。
@@ -575,7 +581,7 @@ Taric 提供承载大量资产、长周期任务所需的持久记忆、治理�
 已消除的根因：
 
 - **CoverageCell 是持久权威状态，不是模型记忆**：资源版本 × 测试类别 × 身份 × 操作 × 条件独立成格，`not_tested` 在白名单投影/报告中**强制可见**（发布门槛）。第 30 天 planner 不需要"记得"测过什么——它查询覆盖矩阵。
-- **阴性结果有界保存**：未复现/被拦截都记录 method/baseline/conditions/identity/time/limitations，既不漏（当作没测）也不夸大（不声称普遍不存在）。
+- **阴性结果有界保存**：未复现/被拦截通过 `negative_observation`/`control_observation`/`access_decision_observation` 保存 method/baseline/conditions/identity/time/limitations，既不漏（当作没测）也不夸大（不声称普遍不存在）。
 - **planner 的 Pack 中覆盖缺口排在实体之前**：缺口是规划的第一输入。
 - **observer 独立查缺口**：与 planner 交叉验证，防单点注意力遗漏。
 
@@ -714,7 +720,7 @@ host      host-decision(authorized_autonomous) ─▶ 执行 curl ─▶ artifac
           ─▶ capture.observation(evidence→content_ref) ─▶ checkpoint.commit
 executor-2 同上（静态资产枚举，产出截图 binary Artifact + 阴性观察）
 observer  context.query ──▶ 发现 executor-2 触发 WAF challenge 干扰 executor-1 前提
-          ─▶ action.recommend(pause W-static, host_hitl) ─▶ review(needs_evidence, 可疑claim)
+          ─▶ action.recommend(pause W-static) ─▶ review(needs_evidence, 可疑claim)
 host      host-decision(deny→pause) ─▶ 停派/停止工具，过期后才可 reclaim ─▶ resource.impact(旧claim)
           ─▶ 重验 WorkItem 入池
 planner   下一轮 context.query 冲突/缺口 ──▶ 重排：低噪音方法、错峰窗口

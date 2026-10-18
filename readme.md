@@ -36,7 +36,7 @@ Taric 支持三种动作协作模式：
 - Taric 不扫描或脱敏宿主数据。
 - Taric 不发起目标系统请求。
 - Taric 不授权高风险动作。
-- 当前 Core 使用同步 SQLite API。长时间操作会阻塞调用进程。
+- 当前 SQLite 驱动仍是同步 `node:sqlite`。Core 方法返回 Promise，但底层 SQL 和部分文件阶段仍同步，长时间操作会阻塞调用进程。
 - 当前 Context Pack 预算使用序列化后的字符数估算。它不是模型 Token 计数。
 - `packages/mcp` 当前只实现模型工具：`context.query`、`resource.query`、`evidence.query`、`proposal.submit`、`checkpoint.propose`、`action.recommend`。
 - Pi 1.1.0 的 proposal/checkpoint/action/result/error hooks 在受测 native adapter contract 范围内已支持；实际可用能力取决于该 adapter 实例完成注册，其中 checkpoint 和 host result 还要求对应 callback 与有效 WorkRun binding。此合同测试不等于外部宿主进程或生产环境认证。DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 和 Hermes 0.19.0 仅在 compatibility manifest 声明的生命周期范围内支持，未覆盖的能力回退 CLI/MCP。

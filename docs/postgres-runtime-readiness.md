@@ -1,9 +1,5 @@
 # PostgreSQL runtime readiness
 
-The saved [2026-10-18 live report](benchmarks/postgres-runtime-v2.json) records PostgreSQL 17.11, all 12 shared Core scenarios passing, and an independent logical restore with 24 matching tables and audit sequence 107→107. The [overall report](benchmarks/capability-verification-v2.json) has `technical_passed=true` and `runtime_verified=true`, but `release_state=blocked` because human quality annotation/baseline evidence is pending. These are saved results, not a probe of the currently running deployment; activation still requires a matching report and current health. See [the release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md).
-
-> Last reviewed: 2026-10-18
-
 SQLite and PostgreSQL now execute one asynchronous Core authority implementation. The two SQL drivers own connections, transactions, dialect expressions and clocks; proposal/review, L1/L2 admission, checkpoints, actions, Artifact catalog/publication, leases/fencing, audit/outbox, fixed reads and logical snapshot restore use the same Core governance paths. PostgreSQL leases use server time and each write transaction keeps one checked-out client under a schema-scoped transaction lock. SQLite access is queued per database file. Nested calls reuse the transaction context.
 
 `PostgresAuthorityStore.runtimeReadiness(report?)` is a read-only probe. It opens a repeatable-read transaction, checks the selected schema's tables, columns, storage format, authority identity, sequence watermarks and active lease/Attempt bindings. It neither runs migrations nor inserts authority state. Unknown database errors produce `postgresql_unavailable` without exception text. With no complete passing runtime report it remains `runtime_state=disabled`. It reports `enabled` and `evidence_state=verified` only when all twelve scenario outcomes and the current schema/health checks pass. A healthy table layout alone cannot enable runtime.
@@ -31,7 +27,7 @@ const report = await backend.runtimeReadiness();
 console.log(JSON.stringify(report, null, 2));
 ```
 
-The report's `domains` entries list absent methods, tables and columns separately from executable scenario evidence. The versioned `authority-sql/2` layout stores JSON as text in both adapters. An old primitive-only PostgreSQL schema is rejected before writes; it is not silently reinterpreted. Each PostgreSQL authority has a persisted UUID identity, so cursor keys cannot be reused with a different database merely because its schema has the same name.
+The report's `domains` entries list absent methods, tables and columns separately from executable scenario evidence. The versioned `authority-sql/3` layout stores JSON as text in both adapters. An old primitive-only PostgreSQL schema is rejected before writes; it is not silently reinterpreted. Each PostgreSQL authority has a persisted UUID identity, so cursor keys cannot be reused with a different database merely because its schema has the same name.
 
 | Domain | Shared runtime verification |
 |---|---|
