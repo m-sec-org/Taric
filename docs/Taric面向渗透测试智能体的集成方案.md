@@ -15,6 +15,7 @@
 11. [实施路线（五阶段接入与多主机验收）](#11-实施路线五阶段接入与多主机验收)
 12. [边界与注意事项](#12-边界与注意事项)
 13. [端到端示例（浓缩时序）](#13-端到端示例浓缩时序)
+14. [BreachWeave 集成案例（真实宿主映射）](#14-breachweave-集成案例真实宿主映射)
 
 ## 1. 方案概述
 
@@ -221,7 +222,7 @@ try {
 
 ### 4.4 异构宿主的协作接入
 
-自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。锁定的 Pi 1.1.0 合同覆盖 session/context/proposal/checkpoint/action/result/error 生命周期；DeepSeek Harness 原生桥主要覆盖已验证的 session 事件；Hermes 覆盖上下文和 session/tool 观察钩子，不替换 MemoryProvider。使用后两者时，未覆盖的认领、续租、检查点、动作结果与恢复流程需由可信宿主经 CLI/host RPC 或内嵌 Core 补齐；模型 MCP 六工具不能替代这些 host-only 操作，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。
+自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。锁定的 Pi 1.1.0 合同覆盖 session/context/proposal/checkpoint/action/result/error 生命周期；DeepSeek Harness 原生桥主要覆盖已验证的 session 事件；Hermes 覆盖上下文和 session/tool 观察钩子，不替换 MemoryProvider。使用后两者时，未覆盖的认领、续租、检查点、动作结果与恢复流程需由可信宿主经 CLI/host RPC 或内嵌 Core 补齐；模型 MCP 六工具不能替代这些 host-only 操作，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。一个未参与 Taric 设计的真实 Bun 宿主的完整映射与改造清单见 §14。
 
 ## 5. 采用闭环、成本与保证边界
 
@@ -756,3 +757,222 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 ```
 
 此流程的共同记忆、任务归属和恢复依据由 Taric/PostgreSQL 提供；规划调度、跨机原文路由、工具执行与授权由宿主落实。只有通过 §11.1 的真实宿主验收后，才能声明对应部署具备完整的分布式协作能力。
+
+## 14. BreachWeave 集成案例（真实宿主映射）
+
+本节以 [BreachWeave](https://github.com/m-sec-org/BreachWeave) 作为**未参与 Taric 设计的第三方宿主**，把 §4～§11 的抽象契约落到具体文件、进程与数据结构上。它是集成参考实现的任务书，不是已完成验收的声明；任何“已接入”结论仍需按 §11.1 在真实部署上验收。
+
+### 14.1 推演基线与宿主画像
+
+| 项 | BreachWeave 现状（源码核验） | 对 Taric 集成的含义 |
+|---|---|---|
+| 运行时 | Bun monorepo；`bun run web` / `bun build --compile` 产出容器内 Linux 二进制 | Bun 无 `node:sqlite`，`@taric/core` **不能进程内嵌入**；必须走 Node 桥 |
+| 角色架构 | `Manager/Planner/Solver/Observer`；Solver 是 Docker 容器内的 `pi-coding-agent` 会话 | 规划者/执行者/观察者三类 LLM 天然对应 §1.1 |
+| Solver 通信 | 宿主机 ↔ 容器 stdin/stdout JSONL RPC（`runtime.ts:783-881`）；容器内还有一条 `host_bridge_request` 通道回宿主机（`host-bridge-client.ts:20-48`） | stdio 已被宿主自有协议占用，**MCP stdio 不能复用该流**；容器内需要独立进程 |
+| 共享记忆 | 项目级 `Memory`（`fact/evidence/failure/note/hint`）与 `Idea`（`pending/testing/verified/failed/skipped`），一条一 JSON 文件 + 目录锁 | 结构上接近 Taric 的 Observation/Evidence/Claim/TestHypothesis，但**无准入、无信任分级、无证据硬门** |
+| 资产状态 | `{ asset, asset_hash, scanned: boolean }`；报告提交即 `scanned = true`，全量 `scanned` 即项目完成（`store.ts:29-33`、`store.ts:479-483`、`manager.ts:1260-1281`） | 覆盖矩阵的最小映射对象；`scanned` 必须升级为 `CoverageCell` |
+| 并发控制 | 目录锁 + 60s 陈旧锁强删（`store.ts:139-172`） | 无租约、无 generation、无 CAS；由 Taric 补齐 |
+| 模型生态 | `@mariozechner/pi-coding-agent@^0.65`（与 Taric 锁定的 `@earendil-works/pi-coding-agent@1.1.0` 是不同命名空间） | **原生 Pi adapter 不可用**；只能走 MCP + host 通道 |
+| 容器基础镜像 | Kali + Node 20（`runtime/assets/Dockerfile:124-125`） | Node 20 不提供 `node:sqlite`；容器内 MCP 侧车需升级到 Node 22.21.1（Taric 验证版本） |
+
+基线提交：BreachWeave `6957a55`（`pentest` 分支，2026-10-09），Taric 当前 HEAD 工作区。
+
+### 14.2 拓扑选择：Node 桥，而不是 Bun 内嵌
+
+三种候选拓扑的可行性（均以当前源码为准）：
+
+| 拓扑 | 做法 | 结论 |
+|---|---|---|
+| A. Bun 进程内嵌 Core | `import { openRuntimeService } from "@taric/core"` | **不可行**：`sql-driver.ts:3` 硬依赖 `node:sqlite`，Bun 解析失败 |
+| B. Node 桥进程 + 本机受认证 socket（**推荐**） | 独立 Node 22.21.1 进程内嵌 Core，持有 host/operator/writer/reviewer principal；Bun 侧只发 RPC | 可行；可同时服务多个 solver、多个 principal，且不把 DB/凭据暴露给模型 |
+| C. `taric proxy` | CLI 代理固定单一 host principal（`proxy.ts:15-19`） | 可用但**不够**：单 principal 无法表达 reviewer/writer/operator 分离，也不能为每个 run 建立独立 run-bound 会话所有权 |
+
+推荐拓扑 B：
+
+```text
+┌─────────────────────── 宿主机（Bun）───────────────────────┐
+│ ChallengeManager / Planner 调度 / Web UI / Solver 容器管理   │
+│        │ 本机 Unix socket（JSON-RPC + token，动作白名单）    │
+│        ▼                                                    │
+│ ┌──────────────── taric-bridge（独立 Node 22.21.1 进程）──┐ │
+│ │ 内嵌 @taric/core（openRuntimeService）                  │ │
+│ │ principals: bw-host / bw-operator / bw-writer /         │ │
+│ │             bw-reviewer-N / bw-planner（每项目）         │ │
+│ │ 负责：work.claim / capture / artifact / checkpoint /    │ │
+│ │       admission / review / promote / coverage gate      │ │
+│ └───────────────┬─────────────────────────┬───────────────┘ │
+│                 │ SQLite WAL（单机）       │ Content spool   │
+└─────────────────┼─────────────────────────┼─────────────────┘
+                  │                         │
+      ┌───────────▼──────────┐   ┌──────────▼───────────┐
+      │ taric-mcp（Node）     │   │ 工具原始输出写入位置  │
+      │ 每 solver 一个进程    │   │ （HTTP/扫描器/截图）  │
+      │ model 身份，6 工具    │   └──────────────────────┘
+      └───────────┬──────────┘
+                  │ MCP stdio（容器内独立进程，不复用宿主 JSONL）
+                  ▼
+        Solver 容器（只拿 model principal + Engagement）
+```
+
+关键边界：
+
+- **bridge 持有全部非模型凭据**。host/operator/writer/reviewer 只存在于 bridge；Solver 容器里的 MCP 进程只有 model principal，它**能提交提案但不能晋升、不能捕获观察、不能落 Artifact**。
+- **原文由宿主写**。Solver 的工具输出已经通过 JSONL 回到宿主机（`runtime.ts:783-881`），bridge 依据真实字节写 Artifact；容器内不做 Artifact 上传，也不挂载 content root。
+- **每个 solver 一个 MCP 子进程**，principal 形如 `bw-solver-<solverId>`；这与 §4.1 的每实例独立身份一致。
+- **容器内 MCP 必须能打开同一 authority**：`proposal.submit`/`checkpoint.propose`/`action.recommend` 都是 authority 写入，`taric-mcp` 启动时会用 `TARIC_DB`（或配置文件）自行打开它（`server.ts:runMcpStdio` → `openRuntimeService`）。因此容器需要以可写方式访问该 SQLite 文件。这带来一个必须显式决策的边界：
+  - 方案 B1（简单）：把 authority SQLite 文件 bind mount 进容器（同一台机器上的本地文件系统，不是 NFS），bridge 与 MCP 共享同一 WAL。可用，但意味着模型进程能读写 DB 文件——Taric 的角色/能力检查仍在，但**文件级隔离消失**。
+  - 方案 B2（更严）：容器内只放一个 stdio MCP 转发器，把 JSON-RPC 行经宿主自有 RPC 转给宿主机上的 `taric-mcp`；authority 与 spool 从不进入容器。代价是 BreachWeave 需要实现一条 MCP 转发通道（§14.5 第 15 项）。
+  - 本文推荐 **B2**；若先做 B1，必须在验收记录中写明“模型容器可读 authority 文件”这一事实，不能宣称已隔离。
+- 单机用 SQLite WAL 时，bridge + N 个 MCP 进程会同时写同一 authority；Taric 支持该进程模型，但写入串行化，必须按 §10.4 前提 8 实测。**不要把该 SQLite 文件放到 NFS 或多台机器共享**（`deployment-guard.ts` 明确拒绝共享 SQLite authority）。
+
+### 14.3 角色与 principal 映射
+
+| BreachWeave 角色 | Taric principal | Role | 通道 | 只允许做什么 |
+|---|---|---|---|---|
+| Planner（全局调度 LLM） | `bw-planner`（或按项目 `bw-planner-<project>`） | model | MCP 或 bridge 注入 | 读 Context、提交 WorkItem/假设/纠偏提案；**不再直接启动容器** |
+| Solver 主会话 | `bw-solver-<solverId>` | model | MCP stdio（容器内） | `context.query`、`proposal.submit`、`checkpoint.propose`、`action.recommend` |
+| Observer sidecar（LLM） | `bw-observer` | model | MCP 或 bridge | 读全局状态、提交 memory/idea 提案（L0）、不能晋升 |
+| Observer 评审通道 | `bw-reviewer-1..N` | reviewer | bridge 内进程（需 attestation） | `review.submit`；与 observer 模型身份分离 |
+| ChallengeManager / Planner 工具执行 | `bw-host` | host | bridge | 认领/续租、观察捕获、Artifact 落盘、checkpoint.commit、动作决定/结果 |
+| 报告闸门 / L2 晋升 | `bw-writer` | writer | bridge | `admission.promote_l2`（仅 Finding） |
+| Web 运维面 / 初始化 | `bw-operator` | operator | bridge/CLI | `engagement.init`、admission、审计、导出 |
+
+约束与现状差异：
+
+- BreachWeave 的 Observer 当前通过 `challenge_memory_add` **直接写**项目共享记忆（`tools.ts:299-309` → `host-bridge-handler.ts:161-171` → `manager.ts:1345-1350`），宿主只做非空/枚举校验。接入 Taric 后这条路径必须改成**提案**：Observer 的结论是“对执行轨迹的判断”，不是工具字节，因此应提交 `claim` / `test_hypothesis` / `negative_observation` 提案，由 host admission 进入 L1；幻觉无法再直接进入共享层。
+- `reviewer` 的 attestation 只能由受信任传输在构造 principal 时提供（`adapter.ts:475-484`）；当前 CLI 入口固定传 `undefined`（`cli.ts:95`），因此 **reviewer 必须由 bridge 进程内创建**，不能靠 CLI 环境变量声明。
+- 多项目 Planner 的横切视图：Taric 的 `context.query` 按 Engagement 绑定且 principal 固定（`service.ts:1211`）。BreachWeave 的 Planner 一次看 3 个活跃项目，因此有两种落地方式，二选一：
+  1. **推荐**：bridge 以 operator 身份分别读取各 Engagement，拼成一份宿主侧快照注入 Planner；Planner 输出结构化 WorkItem 建议，由 bridge 写入对应 Engagement。代价是 Planner 不再是严格的 Taric model principal，但归属仍由宿主代写，审计真实。
+  2. 每项目一个 Planner model 进程，跨项目调度退回宿主的确定性调度器。
+
+### 14.4 数据模型映射
+
+| BreachWeave 对象 | Taric 实体 | 写入路径 | 说明 |
+|---|---|---|---|
+| Challenge 项目 | `Engagement` + `Scope` | operator `engagement.init` | 一个项目一个 Engagement，禁止跨项目共享 |
+| URL / IP 资产 | `Resource`（`asset_type: endpoint/host`）+ `ResourceRevision` | host `proposal.submit(resource)` → `admission.evaluate` | `asset_hash` 保留为 `identity` 的稳定字段，但不再是唯一真相 |
+| `scanned: boolean` | `CoverageCell.status` | host `proposal.submit(coverage)` → admission | `not_tested/positive/blocked/inconclusive/...` 替代布尔；项目完成改用覆盖闸门 |
+| `coverage_gaps`（标量 0–100） | 覆盖矩阵 + `evaluateCoverageGate` | bridge 读取 cells 后调用导出的 `evaluateCoverageGate`（`index.ts` 导出） | 不再折叠为分数；`not_tested`/`blocked` 强制可见 |
+| `MemoryEntry.kind = fact` | `Observation` / `Claim` | host `capture.observation`（工具字节）/ model `proposal.submit(claim)` | fact 必须区分“工具观察到”与“模型归纳” |
+| `kind = evidence` | `Evidence`（引用 content_ref） | host `proposal.submit(evidence)` | 必须挂 Artifact 引用，不接受裸字符串 |
+| `kind = failure` | `NegativeObservation` | host `proposal.submit(negative_observation)` → admission | 需 method/conditions/limitations/baseline 或 control，schema 强制 |
+| `kind = hint` | `Observation`（来源=外部 hint） | host capture | 记录来源与限制，不当作已验证事实 |
+| `kind = note` | `Claim`（`status: proposed`） | model proposal | 主观记录默认 L0/L1，不进普通召回 |
+| `Idea.status` | `TestHypothesis.status` | model `proposal.submit(test_hypothesis)` | `pending/testing→proposed`、`failed→contradicted`、`skipped→inconclusive`；**`verified` 不能映射为 `supported`**：`validateProposalCandidate` 直接拒绝 `supported/verified`（`validation.ts:64-65`）。`Idea.verified` 只能拆成“证据 + Claim”，经 L2 复核后由 Finding 承载 |
+| 报告提交（Markdown） | `Artifact`（report）+ `Claim` + `Finding(draft)` + `CoverageCell(positive)` | host artifact → model/host proposal → admission | 报告文本进 spool；Finding 至少引用一个 Claim（schema `claim_refs` minItems 1），Claim 再引用 Evidence；不能“提交即事实” |
+| Attempt 日志 | `WorkRun` / `Attempt` | host `work.claim` | `solver_id` → `agent_id`；一个 WorkItem 同时至多一个有效租约 |
+| Solver 会话 JSONL / 工具结果 | `Artifact` | host `artifact.store.begin/append/commit` | 大文件用 `storage_mode: external` + `host_ref`，Taric 只存元数据 |
+| Planner 上一轮摘要 | `Observation` 或 `Checkpoint` 附件 | host capture | 不能作为模型上下文直灌；下轮经 `context.query` 读取 |
+| 目录锁 | Taric 租约 + CAS + PatchSet | host/model | 删除 `withDirectoryLock` 路径，禁止两套并发语义并存 |
+
+注意两点 schema 事实：
+
+- 普通 `observation` **没有** `conditions` / `evidence_refs` 字段；未复现、被 WAF 拦截等必须用 `negative_observation` / `control_observation` / `access_decision_observation`（`taric-api.md` 同款约束）。
+- `CoverageCell` 的 `positive` 状态若无 `evidence_refs`，覆盖闸门会判为 `unverified_positive`（`coverage.ts:167-185`）；因此“报告提交”必须同时落 Artifact 与证据引用。
+
+### 14.5 BreachWeave 侧改造点（文件级）
+
+| # | 文件/位置 | 现状 | 改造 |
+|---|---|---|---|
+| 1 | `packages/core/src/runtime/runtime.ts:485-563` `launch()` | 只传 `TCH_CHALLENGE_ID` | 增加 `TARIC_PRINCIPAL_ID`、`TARIC_ENGAGEMENT_ID`、`TARIC_DB` 只读挂载；MCP 进程通过独立 `mcp.json` 启动 |
+| 2 | `runtime.ts:761-771` `buildSolverRpcCommand` | 用 `--env` 传 solver 环境 | 复用同一注入点；**不要**把 `TARIC_ADAPTER_TOKEN` 或 content root 传给容器 |
+| 3 | `runtime/assets/Dockerfile:124-125` | Node 20 | 升级到 Node 22.21.1（或不小于 Taric 验证版本），否则 `taric-mcp` 无法启动 |
+| 4 | `packages/core/src/config/index.ts:1040-1049` | 已支持每个 prompt 的 `mcps` 白名单 | 为 solver prompt 增加 `mcps: ["taric"]`；MCP 配置指向容器内 `taric-mcp` |
+| 5 | `challenge/host-bridge-handler.ts:112-195` | 项目状态/记忆/报告直写 | 新增 bridge action：`taric_context_query`、`taric_evidence_query`、`taric_proposal_submit`；旧 `challenge_memory_add` 改为“提案 → 宿主 admission” |
+| 6 | `challenge/manager.ts:1260-1281` `submitReport` | 提交即 `scanned=true` | 拆成：Artifact 落盘 → Evidence/Claim 提案 → Finding(draft) → CoverageCell(positive) 提案 → 覆盖闸门 |
+| 7 | `challenge/store.ts:479-483` `computeChallengeCompleted` | 全量 `scanned` 即完成 | 改为覆盖闸门结果；`scanned` 字段删除，不做兼容 |
+| 8 | `challenge/manager.ts:1345-1350` `appendMemory/addIdea` | 直接写共享层 + 广播 | 删除广播注入；Observer 输出改为提案，宿主 admission 后由 `context.query` 自然可见 |
+| 9 | `solver/extension/challenge-observer/tools.ts:299-309` | `publish_to_challenge` 走 `challenge_memory_add` | 改为提交 `claim/test_hypothesis/negative_observation` 提案；本地 board 可保留为草稿 |
+| 10 | `challenge/manager.ts:1666-1798` `planner_launch_solver` | Planner LLM 直接启动容器 | 改为 WorkItem 提案；容器启动改由宿主调度器在 `admission.evaluate` 后执行 |
+| 11 | `solver/extension/challenge-observer/observer-loop.ts:9-13` | 6 轮/`agent_end` 触发 LLM 复核 | 保留触发节奏；每轮结论提交提案，不再直接改共享层 |
+| 12 | `challenge/store.ts:139-172` | 目录锁 | 删除；并发交给 Taric 租约/CAS/PatchSet |
+| 13 | `runtime.ts:783-881` `readStream` | 解析 `AgentSessionEvent` | 在 `tool_execution_end` 处调用 bridge 写 Artifact；HTTP 请求/响应各一个子 Artifact |
+| 14 | 新增 `packages/taric-bridge/` | 无 | 独立 Node 进程：`openRuntimeService` + 本机 socket + 动作白名单 + principal 构造 |
+| 15 | 新增容器内 MCP 转发器（若选 B2） | 无 | stdio 与宿主 RPC 之间的 JSON-RPC 行转发；容器内不挂载 authority/spool |
+
+bridge 的最小动作集（对应 §5 的 A～E 路径）：
+
+```text
+读：context.query / resource.query / evidence.query / proposal.list
+写：proposal.submit / capture.observation / work.claim / work.renew /
+    work.reclaim / checkpoint.commit / action.host-decision / action.host-result
+原文：artifact.session.bind / artifact.store.begin|append|commit / artifact.content.read
+治理：admission.evaluate / review.submit / admission.promote_l2
+运维：audit.doctor / audit.reconcile / host.state
+```
+
+bridge 的 RPC 请求形如 `{action, principal, request}`，但 **principal 由 bridge 按调用方会话查表得出**，请求体不能自选身份；Bun 侧只能提交 `solverId`/`challengeId` 这类业务标识。
+
+### 14.6 端到端时序（BreachWeave 版）
+
+```text
+operator   engagement.init(scope = 项目允许/排除目标 + ROE 引用)
+operator   artifact.session.bind(host-session, root=<content>/<engagement>)
+host       资产导入：proposal.submit(resource) ×N → admission.evaluate → L1
+                       ↓
+planner    （bridge 注入各 Engagement 快照）→ proposal.submit(work_item) ×M
+host       admission.evaluate → 任务池 L1
+host       调度器选无冲突 WorkItem → work.claim(agent_id=solverId)
+           artifact.session.bind(run-bound, run/attempt/generation)   ← 每个 run 独立 session
+host       launch solver 容器（MCP stdio 独立进程，model principal）
+solver     context.query(work_item_id) → action.recommend(工具动作建议)
+host       策略/审批 → 执行工具 → tool_execution_end
+host       artifact.store.begin/append/commit（原始字节）
+           capture.observation(artifact_refs) → admission.evaluate
+host       coverage 提案（positive/blocked/not_tested）→ admission
+solver     checkpoint.propose → host checkpoint.commit（每个工具动作后）
+observer   读取轨迹 + evidence 元数据 → 可疑结论 review.submit(needs_evidence)
+           纠偏建议 → proposal.submit(claim/负向观察)
+solver     challenge_submit_report → 报告 Artifact + Finding(draft) 提案
+host       admission.evaluate → L1（默认不进普通召回）
+reviewer   review.submit(pass, 固定 input/evidence/policy)
+writer     admission.promote_l2 → L2 Finding
+host       覆盖闸门 evaluateCoverageGate → can_close 才结束项目
+operator   audit.verify / snapshot.export / 导出原文
+```
+
+与 §13.1 的差异只有三处：**报告不再翻转布尔**、**Observer 不再直写**、**Planner 不再直接启动容器**。这三点正是 Taric 结构性防护在真实宿主上的落点。
+
+### 14.7 阶段验收（对应 §11）
+
+| 阶段 | BreachWeave 验收动作 | 通过标准 |
+|---|---|---|
+| P1 只读黑板 | Planner/Observer 进程接 MCP，`context.query` 读取项目与覆盖 | Pack 只含本项目；无跨项目泄漏；`omitted` 可见 |
+| P2 提案闭环 | Observer `publish_to_challenge` 改为提案；Planner 输出 WorkItem 提案 | 共享层不再出现无证据直写；拒绝原因可查 |
+| P3 执行协作 | `work.claim` + run-bound bind + Artifact 三段上传 + checkpoint | 两个 solver 并发无冲突；reclaim 后旧代上传被 `stale_version` 拒绝 |
+| P4 观察纠偏 + 质量门槛 | 独立 reviewer + writer 晋升；覆盖闸门替换 `scanned` | 高危 Finding 无独立复核不进 L2；`can_close=false` 时项目不结束 |
+| P5 规模与韧性 | 多项目/多机 PG；故障注入 | 按 §10.4 八项前提与 §11.1 报告 |
+
+### 14.8 已核验的阻断项与边界
+
+以下均来自两侧源码走读，不是推测；集成前必须逐项处置。
+
+| # | 事实 | 影响与处置 |
+|---|---|---|
+| 1 | `packages/core/src/sql-driver.ts:3` 硬依赖 `node:sqlite`；Bun 无此内置模块 | 必须使用 Node bridge（§14.2 B）；不要在 Bun 内尝试 polyfill |
+| 2 | BreachWeave 镜像 Node 20（`Dockerfile:124-125`） | 容器内 `taric-mcp` 无法运行；升级镜像并重新验证 |
+| 3 | MCP `context.query` 接受 `work_run_id` 但 Core builder 不消费（`server.ts:6`） | 运行归属必须由宿主在 `checkpoint/action` 调用中携带；任务定位用 `work_item_id` |
+| 4 | MCP `action.recommend` 无 `generation` 字段（`server.ts:11`） | run 作用域的动作建议只能走 bridge/host 路径 |
+| 5 | CLI 构造 principal 时不传 reviewer attestation（`cli.ts:95`） | reviewer 身份只能由 bridge 进程内 `createPrincipal(..., attestation)` 提供 |
+| 6 | `admission.promote_l2` 仅接受 `subject_type=finding`（`store.ts:3399`） | 不要把 Claim/TestHypothesis 直接晋升；它们停留在 L1 |
+| 7 | 操作注册表无 WorkRun 状态迁移（`registry.ts:103-106` 只有 claim/renew/reclaim/resume） | WorkItem 完成走 `proposal.submit(work_item)` 更新 + `admission.evaluate`；WorkRun/Attempt 的终态迁移当前只能由持有 `AuthorityStore` 的受信任进程调用 `transitionWorkRun`（`store.ts:2937`），不是公开 dispatch 操作。bridge 若只持有 `CoreService`，应把“运行完成”表达为 WorkItem 状态与 checkpoint，而不是伪造 WorkRun 终态 |
+| 8 | run-bound 会话要求 claim 后绑定；已绑定的 host-session **不能**升级为 run-bound（`artifact-content-store.ts:190-219`，测试 `artifact-content.test.mjs:211-215`） | 每个 solver 用独立 session id；bridge 不要复用同一 session 跨 run |
+| 9 | 带 `TARIC_SESSION_ID` 的 proxy 在 claim 时会写 `task_session_ref`，而 claim 要求该 session 已注册（`store.ts:2479-2483`） | 推荐 bridge 不设全局 transport session，按 run 显式 bind；或用每 run 独立 principal |
+| 10 | `artifact.store.begin` 的 `summary` 字段拒绝 URL/token/secret 字样（`artifact-content-store.ts:242`） | 摘要只写分类与状态，不把目标 URL 放进 summary |
+| 11 | Artifact JSON-RPC 单行上限 1 MiB，普通 RPC 原文读 ≤512 KiB（`adapter-rpc.ts:11-13,198-207`） | 大文件用 `storage_mode: external` + `host_ref`，或 bridge 内直接调用 Core |
+| 12 | `evaluateCoverageGate` 是库函数而非 dispatch 操作（`coverage.ts:167`，`index.ts` 导出） | bridge 读取 cells 后本地计算，或后续单独扩展操作面 |
+| 13 | 现有 `computeChallengeCompleted` 与 `scanned` 是唯一完成判据 | 必须整体替换；新旧两套完成语义并存会产生“报告说完成、矩阵说未测”的矛盾 |
+
+另外三条不属于 Taric 缺陷、但集成时必须由 BreachWeave 承担的责任：
+
+1. **容器内 MCP 的进程与网络**：solver 容器需要能启动 Node 进程并访问 bridge/authority；若容器无网络或只读文件系统，只能改为“宿主代理 MCP”（§4.4 的 transport 边界）。
+2. **Artifact 脱敏与保留**：spool 可能含 Cookie/Token 字节；Taric 不脱敏、不扫描、不删除，BreachWeave 必须自行配置 ACL 与保留策略。
+3. **覆盖矩阵粒度**：资产 × 测试类别 × 身份 × 条件会组合爆炸；BreachWeave 需要先定义测试类别字典，否则矩阵会退化为噪声。
+
+### 14.9 不该做的事
+
+- **不要让 Solver 模型直接写 `challenge_memory_add`** 后再由宿主“补一个提案”：这会保留幻觉直写通道，等于放弃 Taric 的核心价值。
+- **不要把 `scanned` 与 `CoverageCell` 双写**：两套完成判据必然漂移；按 AGENTS.md 的“无向后兼容”原则直接替换。
+- **不要让 Observer 自审自己发起的提案**：independence 硬门会拒绝；需要独立 reviewer 身份。
+- **不要把 authority DB 或 adapter token 挂进 solver 容器**：模型侧只应拿到 model principal 与 Engagement。
+- **不要用 `snapshot.import` 迁移存量项目**：公开导入是 unsupported；存量资产/记忆应作为带 `observed_at` 与 `limitations` 的普通提案逐条进入治理链，且不得伪装成当前观察。
