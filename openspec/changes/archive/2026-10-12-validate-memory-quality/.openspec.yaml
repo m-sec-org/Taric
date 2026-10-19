@@ -1,3 +1,0 @@
-schema: spec-driven
-created: 2026-10-09
-goal: 让 finding、覆盖率和记忆生命周期拥有独立审核、反证、投毒评估与可重复发布证据。
