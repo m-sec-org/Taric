@@ -37,9 +37,9 @@ test("independent review binds immutable evidence snapshot and L2 promotion prer
   const digest = `sha256:${"a".repeat(64)}`;
   const l1 = (await store.admitProposal(proposal.id, digest, { expectedBaseVersion: 0 }));
   assert.equal(l1.ok, true);
-  const rejected = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: "sha256:policy", evidence_snapshot_hash: "sha256:wrong" }));
-  assert.equal(rejected.accepted, false);
-  const review = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest }));
+  const pack = await store.reviewPack(engagement_id, proposal.id);
+  await assert.rejects(store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, evidence_snapshot_hash: `sha256:${"0".repeat(64)}` }), /review evidence snapshot does not match/);
+  const review = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, evidence_snapshot_hash: pack.evidence_snapshot_hash }));
   assert.equal(review.accepted, true);
   const promoted = (await store.promoteFinding(proposal.id, { expectedBaseVersion: l1.record.version, policyDigest: digest, principal: "operator-a" }));
   assert.equal(promoted.ok, true);

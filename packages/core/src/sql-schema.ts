@@ -1,11 +1,12 @@
 import { SCHEMA_VERSION } from "@taric/schemas";
 
 /** Versioned authority layout shared by both SQL adapters; JSON is stored as text. */
-export const AUTHORITY_SQL_SCHEMA_VERSION = "authority-sql/3";
+export const AUTHORITY_SQL_SCHEMA_VERSION = "authority-sql/4";
 export const AUTHORITY_SQL_TABLES = `      CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, kind TEXT NOT NULL, trust_level TEXT NOT NULL, version INTEGER NOT NULL, display_id TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, subject_type TEXT NOT NULL, expected_version INTEGER NOT NULL, target_id TEXT, client_request_id TEXT, canonical_id TEXT, canonical_version INTEGER, status TEXT NOT NULL, content_hash TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS proposal_versions (id TEXT NOT NULL, engagement_id TEXT NOT NULL, commit_seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id,commit_seq));
+      CREATE TABLE IF NOT EXISTS admission_review_packs (proposal_id TEXT PRIMARY KEY, engagement_id TEXT NOT NULL, proposal_hash TEXT NOT NULL, canonical_id TEXT NOT NULL, policy_digest TEXT NOT NULL, evidence_snapshot_hash TEXT NOT NULL, admission_seq INTEGER NOT NULL, evidence_snapshot TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (commit_seq INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL, event_type TEXT NOT NULL, subject_id TEXT, payload TEXT NOT NULL, prev_hash TEXT, hash TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS idempotency (key TEXT PRIMARY KEY, operation TEXT NOT NULL DEFAULT '', principal TEXT NOT NULL DEFAULT '', engagement_id TEXT NOT NULL DEFAULT '', request_hash TEXT NOT NULL DEFAULT '', result TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS record_versions (id TEXT NOT NULL, commit_seq INTEGER NOT NULL, engagement_id TEXT NOT NULL, trust_level TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(id, commit_seq));

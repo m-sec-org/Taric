@@ -148,7 +148,9 @@ async function findingCase(filename = ":memory:", findingOverrides = {}) {
   assert.ok(admission.data.remaining_l2_requirements.includes("independent_review"));
   assert.equal("gates" in admission.data, false);
   const reviewer = createPrincipal("reviewer", "independent-reviewer", engagement_id);
-  const review = (await service.dispatch("review.submit", reviewer, { engagement_id, proposal_id: proposal.id, reviewer_id: reviewer.id, reviewer_kind: "reviewer", input_hash: proposal.content_hash, policy_digest: digest, verdict: "pass" }));
+  const reviewPack = (await service.dispatch("review.pack", operator, { engagement_id, proposal_id: proposal.id }));
+  assert.equal(reviewPack.ok, true);
+  const review = (await service.dispatch("review.submit", reviewer, { engagement_id, proposal_id: proposal.id, reviewer_id: reviewer.id, reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: reviewPack.data.evidence_snapshot_hash, policy_digest: digest, verdict: "pass" }));
   assert.equal(review.ok, true);
   const request = { engagement_id, proposal_id: proposal.id, target_id: admission.data.record.id, expected_version: admission.data.record.version, input_hash: proposal.content_hash, evidence_snapshot_hash: review.data.evidence_snapshot_hash, policy_digest: digest, review_refs: [review.data.id] };
   return { store, service, engagement_id, proposal, model, operator, reviewer, evidence, admission, request };
@@ -209,7 +211,7 @@ test("changed evidence and superseded L1 target cannot reuse a fixed review", as
 
 test("high-risk review independence uses immutable transport attestation and rejects caller claims", async () => {
   const f = (await findingCase(":memory:", { risk_class: "high" }));
-  const reviewInput = { engagement_id: f.engagement_id, proposal_id: f.proposal.id, reviewer_id: f.reviewer.id, reviewer_kind: "reviewer", input_hash: f.proposal.content_hash, policy_digest: digest, verdict: "pass" };
+  const reviewInput = { engagement_id: f.engagement_id, proposal_id: f.proposal.id, reviewer_id: f.reviewer.id, reviewer_kind: "reviewer", input_hash: f.proposal.content_hash, evidence_snapshot_hash: f.request.evidence_snapshot_hash, policy_digest: digest, verdict: "pass" };
   const before = (await state(f.store, f.engagement_id));
   for (const fields of [{ reviewer_capability: "human" }, { reviewer_model: "different-model" }, { prompt_digest: digest }, { ruleset_digest: digest }]) {
     assert.equal((await f.service.dispatch("review.submit", f.reviewer, { ...reviewInput, ...fields })).error.code, "authorization_error");

@@ -63,7 +63,8 @@ test("self-review, stale evidence and elapsed review_after all fail closed", asy
     const selfCase = (await build(store));
     const selfProposal = (await store.submitProposal({ engagement_id: selfCase.content.engagement_id, subject_type: "finding", expected_version: 0, content: selfCase.content }));
     assert.equal((await store.admitProposal(selfProposal.id, sha("b"))).ok, true);
-    assert.equal((await store.submitReview({ proposal_id: selfProposal.id, reviewer_id: "worker-a", reviewer_kind: "reviewer", input_hash: selfProposal.content_hash, verdict: "pass", policy_digest: sha("b") })).accepted, false, "the author cannot review their own proposal");
+    const selfPack = await store.reviewPack(selfCase.content.engagement_id, selfProposal.id);
+    assert.equal((await store.submitReview({ proposal_id: selfProposal.id, reviewer_id: "worker-a", reviewer_kind: "reviewer", input_hash: selfProposal.content_hash, evidence_snapshot_hash: selfPack.evidence_snapshot_hash, verdict: "pass", policy_digest: sha("b") })).accepted, false, "the author cannot review their own proposal");
     assert.equal((await store.promoteFinding(selfProposal.id, { expectedBaseVersion: 1, policyDigest: sha("b") })).ok, false);
 
     const staleCase = (await build(store));
@@ -87,9 +88,10 @@ test("L1 to L2 promotion requires a bound input hash, evidence snapshot and poli
     const { content } = (await build(store));
     const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
     assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
-    assert.equal((await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: sha("c"), verdict: "pass", policy_digest: sha("b") })).accepted, false, "a review bound to a different input hash is rejected");
-    assert.equal((await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass" })).accepted, false, "a reviewer verdict requires the policy digest that decided it");
-    const bound = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: sha("b"), reviewer_model: "model-a", prompt_digest: sha("d"), ruleset_digest: sha("e") }));
+    const pack = await store.reviewPack(content.engagement_id, proposal.id);
+    await assert.rejects(store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: sha("c"), evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass", policy_digest: sha("b") }), /review input hash/);
+    await assert.rejects(store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass" }), /policy digest/);
+    const bound = (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass", policy_digest: sha("b"), reviewer_model: "model-a", prompt_digest: sha("d"), ruleset_digest: sha("e") }));
     assert.equal(bound.accepted, true);
     const promoted = (await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: sha("b"), principal: "operator-a" }));
     assert.equal(promoted.ok, true);
@@ -110,13 +112,14 @@ test("high risk findings require heterogeneous review; identical model and promp
     const proposal = (await store.submitProposal({ engagement_id: content.engagement_id, subject_type: "finding", expected_version: 0, content }));
     assert.equal((await store.admitProposal(proposal.id, sha("b"))).ok, true);
     const digest = sha("b");
-    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
+    const pack = await store.reviewPack(content.engagement_id, proposal.id);
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
     assert.match((await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest })).reason, /requires 2 independent review/);
 
-    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-c", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-c", reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-a", prompt_digest: sha("1") }));
     assert.match((await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest })).reason, /identical model and prompt/);
 
-    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-d", reviewer_kind: "reviewer", input_hash: proposal.content_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-b", prompt_digest: sha("2") }));
+    (await store.submitReview({ proposal_id: proposal.id, reviewer_id: "reviewer-d", reviewer_kind: "reviewer", input_hash: proposal.content_hash, evidence_snapshot_hash: pack.evidence_snapshot_hash, verdict: "pass", policy_digest: digest, reviewer_model: "model-b", prompt_digest: sha("2") }));
     const heterogeneous = (await store.promoteFinding(proposal.id, { expectedBaseVersion: 1, policyDigest: digest }));
     assert.equal(heterogeneous.ok, true, "a heterogeneous second model satisfies strong independence");
     assert.equal(heterogeneous.record.risk_class, "high");

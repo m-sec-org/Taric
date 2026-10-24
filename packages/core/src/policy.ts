@@ -35,6 +35,8 @@ export interface AdmissionPolicy {
   version: string;
   risk_profiles: Readonly<Record<RiskClass, RiskProfile>>;
   hard_gates: readonly HardGateName[];
+  /** 归纳类 subject 的证据来源角色白名单（键为 subject kind）；缺省不启用，行为与 digest 均不变。 */
+  derived_subject_evidence_roles?: Partial<Record<string, ReadonlyArray<"host" | "operator">>>;
 }
 
 /** Review record bound to a proposal. Only `pass` records feed the independence gate. */
@@ -57,6 +59,8 @@ export interface PinnedEvidence {
   version: number;
   observed_at?: string;
   status?: string;
+  /** 被引记录的 provenance.source_kind；缺失在启用来源门时按不可信处理。 */
+  origin?: string;
 }
 
 export interface AdmissionSubject {
@@ -129,7 +133,14 @@ function canonical(value: unknown): string {
 
 /** Content digest of a policy. Rules upgrades are versioned by this digest. */
 export function policyDigest(policy: AdmissionPolicy = DEFAULT_ADMISSION_POLICY): string {
-  return `sha256:${createHash("sha256").update(canonical({ policy_id: policy.policy_id, version: policy.version, hard_gates: [...policy.hard_gates], risk_profiles: policy.risk_profiles })).digest("hex")}`;
+  // 新字段仅在显式配置时纳入 canonical 集：缺省时 digest 与历史基线逐字节一致。
+  return `sha256:${createHash("sha256").update(canonical({
+    policy_id: policy.policy_id,
+    version: policy.version,
+    hard_gates: [...policy.hard_gates],
+    risk_profiles: policy.risk_profiles,
+    ...(policy.derived_subject_evidence_roles ? { derived_subject_evidence_roles: policy.derived_subject_evidence_roles } : {}),
+  })).digest("hex")}`;
 }
 
 export function riskProfile(policy: AdmissionPolicy, risk: RiskClass | undefined): RiskProfile {
@@ -178,11 +189,19 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDecision {
   // evidence: referenced evidence must exist in the pinned snapshot and still be current.
   const evidence: string[] = [];
   const pinned = new Map(input.evidence.map((item) => [item.id, item]));
+  // 可选来源门：归纳类 subject 的证据必须来自允许的来源角色（fail closed）。
+  const allowedOrigins = policy.derived_subject_evidence_roles?.[subject.kind];
   for (const ref of stringList(subject.evidence_refs)) {
     const item = pinned.get(ref);
     if (!item) { evidence.push(`evidence is not part of the pinned snapshot: ${ref}`); continue; }
     const status = String(item.status ?? "active");
     if (NON_CURRENT_EVIDENCE.has(status)) evidence.push(`evidence is ${status} and cannot support a current claim: ${ref}`);
+    if (allowedOrigins) {
+      const origin = item.origin;
+      // host/operator 提交的捕获记录均记 source_kind "host"；白名单含 "operator" 即接受 host 捕获。
+      const trusted = origin !== undefined && (allowedOrigins.includes(origin as "host") || (origin === "host" && allowedOrigins.includes("operator")));
+      if (!trusted) evidence.push(`evidence_origin_untrusted: ${ref} has ${origin ?? "no recorded"} provenance origin`);
+    }
   }
   for (const ref of stringList(subject.counter_evidence_refs)) {
     if (!pinned.has(ref)) evidence.push(`counter evidence is not part of the pinned snapshot: ${ref}`);

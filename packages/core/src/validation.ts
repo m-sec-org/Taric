@@ -92,6 +92,7 @@ export const referenceKinds: Readonly<Record<string, readonly string[]>> = Objec
   tenant_ref: ["resource", "note", "endpoint", "service"],
   identity_ref: ["resource", "note", "endpoint", "service"],
   tested_resource_refs: ["resource", "endpoint", "service", "note"],
+  resource_refs: ["resource", "resource_revision", "service", "endpoint"],
   baseline_ref: ["resource", "observation", "claim", "endpoint", "service", "note"],
   from_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "observation", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "service", "endpoint"],
   to_ref: ["resource", "resource_revision", "relation", "claim", "test_hypothesis", "attack_path", "work_item", "evidence", "observation", "finding", "coverage", "protective_control", "protective_control_revision", "control_observation", "access_decision_observation", "service", "endpoint"],

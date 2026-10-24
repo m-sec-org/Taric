@@ -5,3 +5,7 @@ node_modules/
 **/.agents/
 **/reference/
 .DS_Store
+**/openspec/
+**/.claude/
+**/.pi-reference-1.1.0/
+**/.taric/

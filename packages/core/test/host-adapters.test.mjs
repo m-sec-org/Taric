@@ -57,10 +57,16 @@ test("Pi extension registers real lifecycle callbacks through the authenticated 
   assert.equal(typeof extension.handlers.get("session_start"), "function");
   assert.equal(typeof extension.handlers.get("before_agent_start"), "function");
   assert.equal(typeof extension.handlers.get("agent_before_settle"), "function");
-  const context = await extension.handlers.get("before_agent_start")({ type: "before_agent_start", prompt: "inspect", systemPrompt: "system" });
-  assert.equal(context.message.customType, "taric-context");
-  assert.equal(context.message.display, false);
-  assert.ok(JSON.parse(context.message.content).context_snapshot_id);
+  // Pi v1.2.0 起 before_agent_start 按 messageType 区分："user" 携带 prompt，
+  // "custom"（pi.sendMessage triggerTurn）携带 message 且无 prompt。
+  // 两种触发都必须注入同一 Taric Context Pack；handler 不读 prompt。
+  const userStart = await extension.handlers.get("before_agent_start")({ type: "before_agent_start", messageType: "user", prompt: "inspect", systemPrompt: "system" });
+  assert.equal(userStart.message.customType, "taric-context");
+  assert.equal(userStart.message.display, false);
+  assert.ok(JSON.parse(userStart.message.content).context_snapshot_id);
+  const customStart = await extension.handlers.get("before_agent_start")({ type: "before_agent_start", messageType: "custom", message: { role: "user", customType: "follow_up", content: "continue" } });
+  assert.equal(customStart.message.customType, "taric-context");
+  assert.ok(JSON.parse(customStart.message.content).context_snapshot_id);
   const transformed = await extension.handlers.get("context")({ type: "context", messages: [] });
   assert.equal(transformed.messages.length, 1);
   assert.equal(transformed.messages[0].customType, "taric-context");
@@ -165,7 +171,9 @@ test("resume packet reports conservative premise checks and stale checkpoint att
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
   (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
-  const first = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi-a", agent_id: "agent-a", ttl_ms: 50 }));
+  // 300ms 租约 + 350ms 强制过期：语义不变（checkpoint 在有效期内、reclaim 在过期后），
+  // 但给负载下的调度抖动留余量（原 50ms 在并发套件中偶发过期）。
+  const first = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi-a", agent_id: "agent-a", ttl_ms: 300 }));
   const checkpoint = {
     work_item_ref: work_item_id,
     work_run_ref: first.run_id,
@@ -193,7 +201,7 @@ test("resume packet reports conservative premise checks and stale checkpoint att
     context_manifest: { context_snapshot_id: uuidv7(), read_seq: first.read_seq, builder_version: "test" },
   };
   (await store.commitCheckpoint(first.run_id, first.generation, "pi-a", checkpoint));
-  await new Promise((resolve) => setTimeout(resolve, 70));
+  await new Promise((resolve) => setTimeout(resolve, 350));
   const second = (await store.reclaimWorkRun(first.run_id, "pi-b", "agent-b"));
   const packet = (await store.resumePacket(second.run_id, "pi-b"));
   assert.equal(packet.checkpoint_read_seq, first.read_seq);
@@ -237,4 +245,47 @@ test("DeepSeek Cordis adapter binds authenticated callbacks and memoizes duplica
   assert.equal(first, duplicate);
   assert.deepEqual(await first, { observed: true, type: "turn/start" });
   adapter.unload(); assert.equal(listeners.size, 0); (await store.close());
+});
+
+test("same-major uncertified Pi version runs the read-only safe subset without authority writes", async () => {
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  const work_item_id = uuidv7();
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
+  const host = createPrincipal("host", "pi-host", engagement_id);
+  const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" }));
+  // 未认证的同 major 版本：register 允许，能力收敛到只读安全子集。
+  const pi = createPiAdapter(service, host, "1.5.0");
+  assert.equal(pi.descriptor.certification_state, "not_certified");
+  const extension = richPiExtensionApi();
+  const loaded = await pi.register(extension, {
+    work_run_id: run.run_id,
+    generation: run.generation,
+    agent_id: "agent-a",
+    checkpoint: () => ({ work_item_ref: work_item_id, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: { actions: 1 }, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.read_seq, builder_version: "pi-test" } }),
+    resultForTool: () => ({ action_id: uuidv7(), mode: "host_hitl", status: "executed", result_ref: "result:1" }),
+  });
+  assert.deepEqual(loaded.available_capabilities, ["session_lifecycle", "context_injection"]);
+  assert.ok(!extension.tools.has("taric_proposal"), "proposal tool must not register for an uncertified version");
+  const status = pi.status();
+  assert.equal(status.certification_state, "not_certified");
+  assert.equal(status.supported, false);
+  assert.equal(status.evidence_state, "pending");
+  assert.deepEqual(status.capabilities, ["session_lifecycle", "context_injection"]);
+  assert.equal(status.capability_status.proposal_submission.reason, "capability requires a certified host version");
+  // 只读上下文注入仍工作；权威写入 hook（checkpoint/tool_result 错误上报）静默 no-op。
+  const injected = await extension.handlers.get("before_agent_start")[0]({ type: "before_agent_start", messageType: "user", prompt: "inspect" });
+  assert.ok(JSON.parse(injected.message.content).context_snapshot_id);
+  const beforeSettle = await extension.emit("agent_before_settle", { outcome: "ok" });
+  assert.deepEqual(beforeSettle, [undefined]);
+  const toolFailure = await extension.emit("tool_result", { toolCallId: "t1", toolName: "bash", isError: true });
+  assert.deepEqual(toolFailure, [undefined]);
+  const events = await store.events();
+  assert.ok(events.every((event) => event.event_type !== "host.error"), "uncertified versions must not write error reports");
+  // 更远版本：register 直接拒绝。
+  const far = createPiAdapter(service, createPrincipal("host", "pi-host-2", engagement_id), "0.74.2");
+  await assert.rejects(async () => far.register(richPiExtensionApi()), /unsupported_capability/);
+  assert.equal(far.status().certification_state, "unsupported");
+  (await store.close());
 });

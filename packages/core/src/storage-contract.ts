@@ -1,7 +1,7 @@
 import type { AuthorityStore, CanonicalRecord, DoctorReport, ReadSnapshot, TrustLevel, AuditEvent } from "./store.js";
 import type { PostgresAuthorityStore } from "./postgres.js";
 
-export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/2" as const;
+export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/3" as const;
 
 /** Observable guarantees all authority backends must implement; database-specific mechanics remain private. */
 export const AUTHORITY_STORAGE_INVARIANTS = [
@@ -12,6 +12,7 @@ export const AUTHORITY_STORAGE_INVARIANTS = [
   "pinned_snapshot_read_sequence_and_watermarks",
   "integrity_checked_snapshot_backup_and_atomic_restore",
   "lease_expiry_heartbeat_reclaim_and_fencing_generation",
+  "atomic_admission_bound_review_snapshot_and_policy_binding",
 ] as const;
 export type AuthorityStorageInvariant = typeof AUTHORITY_STORAGE_INVARIANTS[number];
 
@@ -37,15 +38,15 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Core's complete asynchronous persistence surface. Policy remains shared. */
 export const AUTHORITY_BACKEND_METHODS = [
   "close", "commit", "createRecord", "initializeEngagement", "get", "getAt", "list", "recordsPage", "compareAndSet", "snapshot", "exportSnapshot", "importSnapshot",
-  "submitProposal", "proposals", "proposalsPage", "submitReview", "admitProposal", "evaluateAdmission", "promoteFinding",
+  "submitProposal", "proposals", "proposalsPage", "submitReview", "reviewPack", "admitProposal", "evaluateAdmission", "promoteFinding",
   "createResourceRevision", "applyPatchSet", "addRelation", "impact",
-  "claimWorkRun", "renewWorkRun", "reclaimWorkRun", "getWorkRun", "commitCheckpoint", "resumePacket",
+  "claimWorkRun", "renewWorkRun", "reclaimWorkRun", "getWorkRun", "activeWorkRuns", "workItemsPage", "commitCheckpoint", "resumePacket",
   "recordActionIntent", "getActionIntent", "pendingActionIntents", "reconcileAction", "validateArtifactFence",
   "artifactSessions", "saveArtifactSession", "artifactCatalogRows", "artifactCatalogRow", "queryArtifactCatalog", "explainArtifactCatalog",
   "artifactCatalogWatermark", "artifactUploads", "saveArtifactUpload", "deleteArtifactUpload",
   "artifactPublications", "startArtifactPublication", "prepareArtifactPublication", "markArtifactPublication",
   "completeArtifactPublication", "failArtifactPublication", "updateArtifactCatalogRow", "saveArtifactCatalogRow",
-  "artifactIdempotencyResult", "saveArtifactIdempotency", "recordArtifactEvent", "executionCatalogPage", "artifactMutation",
+  "artifactIdempotencyResult", "saveArtifactIdempotency", "updateArtifactIdempotencyResult", "recordArtifactEvent", "executionCatalogPage", "artifactMutation",
   "transitionWorkRun", "recordHostError", "recordLateResult", "maintenanceRead",
   "events", "verifyAudit", "consumeOutbox", "doctor", "previewRecovery", "reconcileDerived", "operationMarkers", "markOperationFailed", "replayDerived", "rebuildDerived", "sealExecutionSidecars", "executionCatalogRows",
 ] as const satisfies readonly (keyof AuthorityStore)[];

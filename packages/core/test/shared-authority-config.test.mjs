@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   AUTHORITY_STORAGE_CONTRACT,
+  API_CONTRACT_VERSION,
   AuthorityConfigurationError,
   AuthorityStore,
   MULTI_HOST_AUTHORITY_PROFILE,
@@ -26,6 +27,7 @@ test("default config selects SQLite without PostgreSQL dependency or configurati
     lease_mode: "local",
   });
   assert.equal(SHARED_AUTHORITY_BACKEND_MANIFEST.profiles.single_host_sqlite.postgres_dependency, false);
+  assert.equal(SHARED_AUTHORITY_BACKEND_MANIFEST.api_version, API_CONTRACT_VERSION);
   assert.deepEqual(SHARED_AUTHORITY_BACKEND_MANIFEST.postgresql.supported_majors, POSTGRESQL_SUPPORTED_MAJOR_VERSIONS);
   assert.equal(authorityStartupDiagnostics(config).code, "ready");
 });
@@ -66,6 +68,7 @@ test("SQLite store structurally implements the published authority storage contr
     "pinned_snapshot_read_sequence_and_watermarks",
     "integrity_checked_snapshot_backup_and_atomic_restore",
     "lease_expiry_heartbeat_reclaim_and_fencing_generation",
+    "atomic_admission_bound_review_snapshot_and_policy_binding",
   ]);
   (await store.close());
 });

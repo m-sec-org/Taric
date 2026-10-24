@@ -1,4 +1,4 @@
-# Taric API Boundary v1
+# Taric API Boundary v1.1
 
 Core owns authority writes and governance. Hosts own model calls, workers, target tools, action authorization, reviewer identity, credentials, Artifact policy and retention. An accepted proposal/capture is not a verified Finding.
 
@@ -10,7 +10,7 @@ Core owns authority writes and governance. Hosts own model calls, workers, targe
 
 ## Transport and response contract
 
-Use `await service.dispatch(operation, principal, request)` for public calls. `request` must be an object; an optional `contract_version` must equal `1.0.0`. Principals are created by a trusted transport with `createPrincipal` or `registerTransportPrincipal`; object fields alone cannot register a caller. `init()` and `status()` are lower-level service methods without principal parameters, so do not expose the whole service object to untrusted callers.
+Use `await service.dispatch(operation, principal, request)` for public calls. `request` must be an object; an optional `contract_version` must equal `1.1.0`. Principals are created by a trusted transport with `createPrincipal` or `registerTransportPrincipal`; object fields alone cannot register a caller. `init()` and `status()` are lower-level service methods without principal parameters, so do not expose the whole service object to untrusted callers. Requests that declare the previous `1.0.0` API contract are rejected; deploy a matching host and Taric contract pair.
 
 ```json
 {"ok":true,"data":{}}
@@ -42,7 +42,7 @@ The trusted host session association is a snapshot registered on the principal, 
 
 ## Operation inventory
 
-The current registry contains 50 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. Despite its name, `engagement.status` is a contract probe: after the scoped authorization check it returns only `schema_version` and `schema_supported`, with no Engagement counts or sequence. Use `host.state` for scoped host status.
+The current registry contains 55 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. Despite its name, `engagement.status` is a contract probe: after the scoped authorization check it returns only `schema_version` and `schema_supported`, with no Engagement counts or sequence. Use `host.state` for scoped host status.
 
 | Operation | Allowed roles | Capability | Writes authority/state |
 |---|---|---|---|
@@ -61,6 +61,7 @@ The current registry contains 50 supported operations. Roles below are the exact
 | `proposal.submit` | model, host, operator | propose | yes |
 | `proposal.list` | model, host, operator | read | no |
 | `capture.observation` | host, operator | propose | yes |
+| `review.pack` | host, operator | read | no |
 | `review.submit` | reviewer | review | yes |
 | `admission.evaluate` | host, writer, operator | admit | yes |
 | `admission.commit` | host, writer, operator | admit | yes |
@@ -144,7 +145,9 @@ A `proposal.submit` create uses `expected_version:0`; an update also supplies `t
 
 `admission.evaluate` takes engagement_id, proposal_id, expected_version, policy_digest and optional idempotency_key. It performs structural L0→L1 admission, returns the resulting record and remaining L2 conditions, and does not enforce full evidence/freshness/independence gates. Inspect `data.ok` before reading `data.record`.
 
-`review.submit` takes engagement_id, proposal_id, reviewer_id (equal to principal.id), reviewer_kind (`reviewer`), input_hash, verdict and policy_digest; evidence_snapshot_hash, rubric_hash, limitations and idempotency_key are optional method inputs. Verdicts are pass/reject/needs_evidence/defer. Requests cannot supply reviewer_capability/reviewer_model/prompt_digest/ruleset_digest. Configure those via trusted registration:
+`review.pack` is a read-only host/operator operation available after a Finding is admitted. It returns the admission-bound proposal input, the complete immutable claim/evidence/scope snapshot, its evidence hash, the admission policy digest, and a deterministic pack hash. It does not resolve replacement records from live state and does not call a reviewer.
+
+`review.submit` takes engagement_id, proposal_id, reviewer_id (equal to principal.id), reviewer_kind (`reviewer`), input_hash, verdict and policy_digest. For an admitted Finding it also requires the exact `evidence_snapshot_hash` from `review.pack`; mismatched proposal, evidence, or policy bindings fail with `stale_version` before a review record or event is written. For other proposal states that field remains optional. `rubric_hash`, `limitations` and `idempotency_key` are optional method inputs. Verdicts are pass/reject/needs_evidence/defer. Requests cannot supply reviewer_capability/reviewer_model/prompt_digest/ruleset_digest. Configure those via trusted registration:
 
 ```js
 const reviewer = createPrincipal("reviewer", reviewerId, engagementId, [], {
@@ -155,7 +158,7 @@ const reviewer = createPrincipal("reviewer", reviewerId, engagementId, [], {
 });
 ```
 
-Missing attestation uses conservative model classification. Attestation asserts the host's configured identity; Taric does not independently establish human identity or a real external review.
+Missing attestation uses conservative model classification. Attestation asserts the host's configured identity; Taric does not independently establish human identity or a real external review. `taric review --proposal <id> --export` or `--input-hash <sha256>` renders the fixed pack; `--submit-result <path>` forwards an externally prepared verdict and bindings. The trusted host process supplies `TARIC_REVIEWER_ID` and `TARIC_REVIEWER_ATTESTATION`; the result file cannot assign identity or attestation. Provider/model/auto-verdict options are unsupported. Model calls, reviewer choice, human review, credentials, and verdict production remain with the host/operator.
 
 `admission.promote_l2` requires engagement_id, proposal_id, target_id, current canonical expected_version, input_hash, evidence_snapshot_hash, policy_digest and nonempty review_refs; idempotency_key is optional. Only writer/operator with writer capability may promote a Finding. Core recomputes schema/scope/evidence/freshness/independence against pinned inputs; stale/rejected inputs retain L1. Historical materials use ordinary proposals/evidence with original observed_at, references and limitations, without impersonating an import transport or current observation.
 
@@ -199,11 +202,15 @@ These host-session checks apply to host principals; other roles keep their own o
 
 ### Work, checkpoint and actions
 
+`work.query` accepts `engagement_id`, optional `resource_refs`/`status`, `include_active_runs`, `page_size` and a continuation `cursor`. It returns a bounded keyset page and pinned `read_seq`. A cursor is bound to the engagement, principal, filters, page size and read sequence. If a scan window contains matching rows that did not fit on the page, the cursor resumes after the last returned match; otherwise it advances after the last scanned row, including when the window contains no matches. Following the returned cursors therefore visits every match once without rescanning empty windows. Model principals receive only the explicit planning projection (`id`, `engagement_id`, `kind`, `version`, `status`, `title`, `scope_ref`, `target_version`, `acceptance_criteria`, `goal`, `acceptance`, `depends_on`, `resource_refs`, `risk_class`, `risk_budget`). Host-only run details and arbitrary WorkItem fields are omitted from the model view. `resource_refs` are scheduling hints, not target-resource locks; the host implements scheduling and any resource mutual exclusion. Querying never launches a worker or takes an action.
+
 `work.claim`: engagement_id, work_item_id, host_id, agent_id, ttl_ms?; host identity is overwritten from principal. `work.renew`: engagement_id, work_run_id, generation, ttl_ms?. `work.reclaim`: engagement_id, work_run_id, agent_id, ttl_ms?. Lease TTL defaults to 60000ms and must be a positive safe integer.
 
 `checkpoint.propose` takes engagement_id, work_run_id, generation, checkpoint and creates a candidate. `checkpoint.commit` additionally accepts host_id but uses principal identity; it requires the current owner/lease/Attempt and complete checkpoint contract. Checkpoint lists must be explicit even when empty. Hidden reasoning fields are recursively rejected, not silently removed.
 
 `work.resume` takes engagement_id, work_run_id, host_id; principal identity determines ownership. It returns run/checkpoint/pending_actions/task_session_ref/artifact_refs plus premise_checks, blocked, replan_required and resume_advice. It does not execute recovery or reissue a lease. Current resumePacket materializes the session's Artifact metadata, so it is not the bounded Context delta API.
+
+`coverage.gate` is host/operator-only. The library `coverageCloseGate(store, engagement_id)` and the dispatched operation return the same fields: `engagement_id`, `can_close`, `action_authorized:false`, gaps, an operator visibility summary, and one `read_seq` for the entire result. The decision, summary and watermark come from one maintenance read snapshot. The result reports state; it does not decide whether the host closes an Engagement or authorizes an action. `coverage.query` is a bounded, filtered cell read with model-safe field projection and pinned keyset cursor. Its cursor is bound to the engagement, principal, filters, page size and read sequence, and advances after the last returned match only when more matches remain in the scanned window; sparse and empty windows advance after their final scanned cell.
 
 `action.recommend` takes target, method, rationale and optional uncertainty/scope/constraints/limitations/memory_refs/evidence_refs. Without a run it creates a proposal; a run also requires generation and produces an advisory ActionIntent. Host decision/result operations take engagement_id, work_run_id, action_id, generation and mode. Decisions are authorized/denied; results executed/failed/unknown; modes llm_recommend/authorized_autonomous/host_hitl. `action.reconcile` takes a result_ref and executed/failed for an unknown result. Authorization and execution stay in the host.
 
@@ -240,15 +247,26 @@ while (!signal.aborted) {
 }
 ```
 
-`service`, hostPrincipal, engagementId, signal and handlers are supplied by the host. Reconnect/reopen a failed service before retrying. The [saved polling measurement](benchmarks/host-state-poll-v1.json) met its fixture's 1000ms discovery budget; it does not certify a 5s retry cap against that budget. Resources subscription remains disabled.
+`service`, hostPrincipal, engagementId, signal and handlers are supplied by the host. Reconnect/reopen a failed service before retrying. The [saved polling measurement](benchmarks/host-state-poll-v1.json) met its fixture's 1000ms discovery budget; it does not certify a 5s retry cap against that budget. Keep subscriptions disabled when polling meets the host's recorded cost and discovery budgets. MCP resource subscriptions remain disabled.
+
+### Optional host change hints
+
+Subscriptions are an opt-in host/operator extension. Measure the polling baseline first with `node scripts/benchmark-host-state-poll.mjs`; record the host's latency/cost budget before comparing results, and enable hints only when polling exceeds that budget. The repository's saved SQLite fixture reports 33ms cross-process discovery against a 1000ms deadline, so it does not establish that notifications are required for a production host.
+
+The in-process API accepts `service.subscribe(principal, { engagement_id, since_read_seq, topics, debounce_ms, l1_backlog_threshold }, onSignal)`. Topics are `delta`, `l1_backlog`, `impact_pending`, `lease_expiry`, and `artifact_integrity`. `since_read_seq` should be the host's last authoritative read watermark; Core checks again after registration and emits a `delta` hint when a commit crossed the registration boundary. `l1_backlog_threshold` is required only when subscribing to `l1_backlog`, must be an integer from 1 through 100000, and remains a host/operator choice. That topic signals threshold crossings. Other stateful topics signal state edges and do not repeat merely because an unrelated commit occurred. A separate 250ms bounded timer reevaluates `lease_expiry`, including when no commit arrives.
+
+Signals contain only `{ topic, engagement_id, read_seq, emitted_at }`. They never include entity content and never launch or schedule work, call tools, execute target actions, or authorize actions. The adapter RPC transport enters notification mode only after an authenticated `taric.subscribe` frame and leaves it on `taric.unsubscribe` or disconnect. It honors socket drain, caps queued notification bytes at 64 KiB, and disconnects a slow consumer at the cap. There is no persistent notification queue: after reconnect or any suspected missed/duplicate hint, poll `host.state` or reread the authoritative delta from the last confirmed watermark. Notifications do not replace host-side scheduling or authorization.
 
 ## Task-session Artifact content
 
 `artifact.session.bind` requires engagement_id, session_id, root, mode. Only host/operator may bind. host-session rejects work_run_id/attempt_id/generation/owner_host. run-bound requires all four, owner equal to principal.id, and a current authority fence. Root must be inside configured contentRoot, with no symlink escape/overlap/rebinding. Existing mode/run association cannot be changed. Artifact calls from a transport-bound host must name its registered session.
 
+`artifact.ingest_file` is optional. Its host/operator request must include `authorize_spool_access: true` for this call and a path within the bound session root. Core opens one stable descriptor, reads those bytes once while hashing, and publishes only after the staged content verifies. `delete_source: true` is a separate per-call instruction. Node/Bun currently lack atomic identity-conditional unlink, so Taric preserves the source and reports `source_deleted: false`; the host/operator can perform its own cleanup. External Artifact references remain the default zero-copy choice. Taric treats ingested bytes as opaque; credentials, redaction, retention, and general deletion policy stay with the host/operator.
+
 | Operation | Required request fields after Engagement/session | Important options/result |
 |---|---|---|
 | `artifact.store.begin` | payload_kind (text/binary/manifest), media_type | storage_mode, expected_bytes/hash, category, captured_at, host_ref, derivation/version refs, run attribution, idempotency_key; stored-upload result includes upload_id, artifact_id, version, next_ordinal, max_chunk_bytes and deployment_profile; external mode returns metadata directly |
+| `artifact.ingest_file` | local path, `authorize_spool_access:true`, payload_kind, media_type | bound session root, optional size/hash expectation, derivation/version refs, idempotency_key, explicit `delete_source`; one descriptor read, opaque bytes |
 | `artifact.store.append` | upload_id, ordinal, chunk_hash, data | canonical base64; optional encoding/offset/idempotency_key; decoded block ≤64 MiB |
 | `artifact.store.commit` | upload_id, total_bytes, content_hash | optional chunk_count/manifest_hash/idempotency_key; returns committed metadata/ref |
 | `artifact.metadata` | content_ref | metadata, no payload |

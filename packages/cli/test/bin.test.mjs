@@ -35,7 +35,7 @@ test("taric capability.status reports the shared compatibility manifest", async 
     const envelope = JSON.parse(stdout);
     assert.equal(envelope.ok, true);
     assert.equal(envelope.data.compatibility_manifest.profile, "single_host_taric_plugin_v1");
-    assert.equal(envelope.data.compatibility_manifest.hosts.pi.version, "1.1.0");
+    assert.equal(envelope.data.compatibility_manifest.hosts.pi.version, "1.4.0");
     assert.equal(envelope.data.compatibility_manifest.hosts.hermes.state, "supported");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

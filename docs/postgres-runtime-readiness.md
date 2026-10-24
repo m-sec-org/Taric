@@ -27,7 +27,7 @@ const report = await backend.runtimeReadiness();
 console.log(JSON.stringify(report, null, 2));
 ```
 
-The report's `domains` entries list absent methods, tables and columns separately from executable scenario evidence. The versioned `authority-sql/3` layout stores JSON as text in both adapters. An old primitive-only PostgreSQL schema is rejected before writes; it is not silently reinterpreted. Each PostgreSQL authority has a persisted UUID identity, so cursor keys cannot be reused with a different database merely because its schema has the same name.
+The report's `domains` entries list absent methods, tables and columns separately from executable scenario evidence. The versioned `authority-sql/4` layout stores JSON as text in both adapters and includes the admission-bound review snapshot table. An old primitive-only PostgreSQL schema is rejected before writes; it is not silently reinterpreted. Each PostgreSQL authority has a persisted UUID identity, so cursor keys cannot be reused with a different database merely because its schema has the same name.
 
 | Domain | Shared runtime verification |
 |---|---|

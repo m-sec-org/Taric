@@ -121,16 +121,20 @@ export function createAuthorityRuntimeScenarios(
     const admission = await invoke(ctx.service, "admission.evaluate", ctx.operator, { engagement_id: ctx.engagement_id,
       proposal_id: proposal.id, expected_version: 0, policy_digest: policyDigest,
     });
+    const reviewPack = await invoke(ctx.service, "review.pack", ctx.operator, { engagement_id: ctx.engagement_id, proposal_id: proposal.id });
+    assert.equal(proposal.content_hash, reviewPack.proposal_hash, "admission pack binds the submitted proposal input");
+    const storedPack = await authority.reviewPack(ctx.engagement_id, proposal.id);
+    assert.equal(reviewPack.proposal_hash, storedPack.proposal_hash, "service and store review pack hashes match");
     const review = await invoke(ctx.service, "review.submit", ctx.reviewer, { engagement_id: ctx.engagement_id,
-      proposal_id: proposal.id, reviewer_id: ctx.reviewer.id, reviewer_kind: "reviewer", input_hash: proposal.content_hash,
-      policy_digest: policyDigest, verdict: "pass",
+      proposal_id: proposal.id, reviewer_id: ctx.reviewer.id, reviewer_kind: "reviewer", input_hash: reviewPack.proposal_hash,
+      evidence_snapshot_hash: reviewPack.evidence_snapshot_hash, policy_digest: policyDigest, verdict: "pass",
     });
     assert.equal(review.accepted, true);
     const promotion = { engagement_id: ctx.engagement_id, proposal_id: proposal.id, target_id: admission.record.id,
-      expected_version: admission.record.version, input_hash: proposal.content_hash, evidence_snapshot_hash: review.evidence_snapshot_hash,
+      expected_version: admission.record.version, input_hash: reviewPack.proposal_hash, evidence_snapshot_hash: review.evidence_snapshot_hash,
       policy_digest: policyDigest, review_refs: [review.id],
     };
-    return { ...ctx, evidence, proposal, admission, review, promotion };
+    return { ...ctx, evidence, proposal, admission, reviewPack, review, promotion };
   };
 
   return {
@@ -170,14 +174,15 @@ export function createAuthorityRuntimeScenarios(
     async review() {
       const ctx = await findingFor("review");
       const input = { engagement_id: ctx.engagement_id, proposal_id: ctx.proposal.id, reviewer_id: ctx.reviewer.id,
-        reviewer_kind: "reviewer", input_hash: ctx.proposal.content_hash, policy_digest: policyDigest, verdict: "pass", idempotency_key: uuidv7(),
+        reviewer_kind: "reviewer", input_hash: ctx.reviewPack.proposal_hash, evidence_snapshot_hash: ctx.reviewPack.evidence_snapshot_hash, policy_digest: policyDigest, verdict: "pass", idempotency_key: uuidv7(),
       };
       const before = await state(ctx.engagement_id);
       failed(await ctx.service.dispatch("review.submit", { ...ctx.reviewer, id: "forged" }, input), "authorization_error");
       failed(await ctx.service.dispatch("review.submit", ctx.model, input), "authorization_error");
       assert.deepEqual(await state(ctx.engagement_id), before);
-      const wrong = await invoke(ctx.service, "review.submit", ctx.reviewer, { ...input, input_hash: sha256("different proposal"), idempotency_key: uuidv7() });
-      assert.equal(wrong.accepted, false);
+      const beforeWrongBinding = await state(ctx.engagement_id);
+      failed(await ctx.service.dispatch("review.submit", ctx.reviewer, { ...input, input_hash: sha256("different proposal"), idempotency_key: uuidv7() }), "stale_version");
+      assert.deepEqual(await state(ctx.engagement_id), beforeWrongBinding, "wrong proposal binding fails before mutation");
       const self = createPrincipal("reviewer", ctx.model.id, ctx.engagement_id);
       assert.equal((await invoke(ctx.service, "review.submit", self, { ...input, reviewer_id: self.id, idempotency_key: uuidv7() })).accepted, false);
       const review = await invoke(ctx.service, "review.submit", ctx.reviewer, input);

@@ -98,6 +98,12 @@ export interface ArtifactStoreBegin {
   idempotency_key?: string;
 }
 
+export interface ArtifactIngestFileRequest extends ArtifactStoreBegin {
+  path: string;
+  authorize_spool_access: true;
+  delete_source?: boolean;
+}
+
 export interface ArtifactStoreAppend {
   engagement_id: Uuid;
   session_id: string;
@@ -195,6 +201,25 @@ export interface PromotionL2 {
   evidence_snapshot_hash: Sha256;
   policy_digest: Sha256;
   review_refs: Uuid[];
+  idempotency_key?: string;
+}
+
+export interface ReviewPackRequest {
+  engagement_id: Uuid;
+  proposal_id: Uuid;
+}
+
+export interface ReviewSubmitRequest {
+  engagement_id: Uuid;
+  proposal_id: Uuid;
+  reviewer_id: string;
+  reviewer_kind: "reviewer";
+  input_hash: Sha256;
+  verdict: "pass" | "reject" | "needs_evidence" | "defer";
+  policy_digest: Sha256;
+  evidence_snapshot_hash?: Sha256;
+  rubric_hash?: Sha256;
+  limitations?: string[];
   idempotency_key?: string;
 }
 
@@ -448,6 +473,8 @@ export interface WorkItem extends RecordBase, CoreManagedFields {
   goal?: string;
   acceptance?: string[];
   depends_on?: Uuid[];
+  /** Scheduling hint metadata: target resources this work item touches. Never a target-resource lock. */
+  resource_refs?: Uuid[];
   risk_class?: "informational" | "finding" | "action";
   risk_budget?: Budget;
 }

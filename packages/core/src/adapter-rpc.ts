@@ -6,12 +6,21 @@ import { registerTransportPrincipal } from "./service.js";
 import { ContractValidationError } from "./validation.js";
 import { ARTIFACT_CHUNK_BYTES, ARTIFACT_DEPLOYMENT_PROFILE, type ArtifactBinaryAppendStreamInput } from "./artifact-content-store.js";
 
-export interface AdapterRpcOptions { socket_path: string; token: string; principal: Principal; }
+export interface AdapterRpcOptions {
+  socket_path: string;
+  token: string;
+  /** 单 principal 模式的 listener 身份；提供 resolvePrincipal 时可省略。 */
+  principal?: Principal;
+  /** 可选多 principal 解析：连接首帧声明身份，resolver 拥有 token↔身份映射的
+   * 全部校验；请求体永不自选身份。未提供时 listener 保持单 principal 行为。 */
+  resolvePrincipal?: (declared: { role: import("./service.js").PrincipalRole; principal_id: string; engagement_id?: string }, token: string) => Principal | Promise<Principal>;
+}
 export interface ArtifactBinaryRpcOptions extends AdapterRpcOptions { header_max_bytes?: number; queue_chunks?: number; }
 const RPC_LINE_MAX_BYTES = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_line_max_bytes;
 const RPC_ARTIFACT_READ_MAX_BYTES = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_artifact_read_max_decoded_bytes;
 const RPC_ARTIFACT_PAGE_ITEMS_MAX = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_artifact_page_items_max;
 const RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_page_content_max_decoded_bytes;
+const RPC_NOTIFICATION_MAX_QUEUED_BYTES = 64 * 1024;
 async function waitForSocket(path: string): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try { await access(path); return; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
@@ -21,12 +30,12 @@ async function waitForSocket(path: string): Promise<void> {
 /** Authenticated line-delimited JSON-RPC transport for out-of-process adapters. */
 export async function listenAdapterRpc(service: CoreService, options: AdapterRpcOptions): Promise<{ server: Server; close(): Promise<void> }> {
   if (!options.token || options.token.length < 32) throw new ContractValidationError("validation_error", "adapter RPC token must contain at least 32 characters");
-  if (options.principal.role !== "host" || !options.principal.engagement_id) throw new ContractValidationError("authorization_error", "adapter RPC requires an engagement-scoped host principal");
-  const principal = registerTransportPrincipal({ ...options.principal, transport_verified: true as const });
+  if (!options.resolvePrincipal && (!options.principal || options.principal.role !== "host" || !options.principal.engagement_id)) throw new ContractValidationError("authorization_error", "adapter RPC requires an engagement-scoped host principal or a principal resolver");
+  const principal = options.principal ? registerTransportPrincipal({ ...options.principal, transport_verified: true as const }) : undefined;
   await mkdir(dirname(options.socket_path), { recursive: true, mode: 0o700 });
   await unlink(options.socket_path).catch((cause: NodeJS.ErrnoException) => { if (cause.code !== "ENOENT") throw cause; });
   const sockets = new Set<Socket>();
-  const server = createServer((socket) => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); handleSocket(socket, service, principal, options.token); });
+  const server = createServer((socket) => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); handleSocket(socket, service, principal, options.token, options.resolvePrincipal); });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(options.socket_path, () => { server.off("error", reject); resolve(); }); });
   await waitForSocket(options.socket_path);
   await chmod(options.socket_path, 0o600);
@@ -40,7 +49,7 @@ export async function listenAdapterRpc(service: CoreService, options: AdapterRpc
  */
 export async function listenArtifactBinaryRpc(service: CoreService, options: ArtifactBinaryRpcOptions): Promise<{ server: Server; close(): Promise<void> }> {
   if (!options.token || options.token.length < 32) throw new ContractValidationError("validation_error", "Artifact RPC token must contain at least 32 characters");
-  if (options.principal.role !== "host" || !options.principal.engagement_id) throw new ContractValidationError("authorization_error", "Artifact RPC requires an engagement-scoped host principal");
+  if (!options.principal || options.principal.role !== "host" || !options.principal.engagement_id) throw new ContractValidationError("authorization_error", "Artifact RPC requires an engagement-scoped host principal");
   const principal = registerTransportPrincipal({ ...options.principal, transport_verified: true as const });
   const headerMax = options.header_max_bytes ?? ARTIFACT_DEPLOYMENT_PROFILE.binary_transport_header_max_bytes;
   const queueChunks = options.queue_chunks ?? ARTIFACT_DEPLOYMENT_PROFILE.receive_queue_chunks;
@@ -100,6 +109,17 @@ async function writeRpcLine(socket: Socket, line: string): Promise<void> {
     const done = () => { socket.off("drain", done); socket.off("close", done); socket.off("error", done); resolve(); };
     socket.once("drain", done); socket.once("close", done); socket.once("error", done);
   });
+}
+export function writeRpcNotification(socket: Socket, signal: { topic: string; engagement_id: string; read_seq: number; emitted_at: string }): void {
+  if (socket.destroyed) return;
+  const line = `${JSON.stringify({ jsonrpc: "2.0", method: "taric.notification", params: signal })}\n`;
+  if (socket.writableLength + Buffer.byteLength(line, "utf8") > RPC_NOTIFICATION_MAX_QUEUED_BYTES) {
+    // Socket writable buffering is the only notification queue. Stop a slow peer
+    // before it can turn best-effort hints into unbounded process memory.
+    socket.destroy();
+    return;
+  }
+  void writeRpcLine(socket, line).catch(() => socket.destroy());
 }
 
 function handleArtifactBinarySocket(socket: Socket, service: CoreService, principal: Principal, token: string, headerMax: number, queueChunks: number): void {
@@ -168,8 +188,16 @@ function handleArtifactBinarySocket(socket: Socket, service: CoreService, princi
   });
   socket.resume();
 }
-function handleSocket(socket: Socket, service: CoreService, principal: Principal, token: string) {
+function handleSocket(socket: Socket, service: CoreService, principal: Principal | undefined, token: string, resolvePrincipal?: AdapterRpcOptions["resolvePrincipal"]) {
   socket.setEncoding("utf8"); let buffer = "";
+  // 多 principal 模式：resolver 存在时连接必须先 taric.identify 且身份随后冻结；
+  // 单 principal 模式行为不变（listener principal 即连接身份）。
+  let connectionPrincipal: Principal | undefined = resolvePrincipal ? undefined : principal;
+  let identified = false;
+  let identifiedToken: string | undefined;
+  // 连接级订阅：句柄与连接绑定，关闭即退订；未订阅连接的协议行为不变。
+  let socketSubscription: { unsubscribe(): void } | undefined;
+  socket.once("close", () => socketSubscription?.unsubscribe());
   let draining = false;
   socket.on("error", () => socket.destroy());
   const drain = async () => {
@@ -191,7 +219,65 @@ function handleSocket(socket: Socket, service: CoreService, principal: Principal
       try {
         if (!input || typeof input !== "object" || Array.isArray(input)) { await writeRpcLine(socket, `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request" } })}\n`); continue; }
         const params = input.params;
-        if (input.method !== "taric.dispatch" || !params || params.token !== token || typeof params.operation !== "string" || !params.request || typeof params.request !== "object" || Array.isArray(params.request)) {
+        if (input.method === "taric.identify") {
+          if (!resolvePrincipal) {
+            response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: single-principal listener does not accept identity frames" } };
+          } else if (identified) {
+            response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: connection identity is frozen" } };
+          } else if (!params || typeof params.token !== "string" || params.token.length < 32 || !params.declare || typeof params.declare !== "object" || Array.isArray(params.declare)) {
+            response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error" } };
+          } else {
+            const declare = params.declare as { role?: unknown; principal_id?: unknown; engagement_id?: unknown };
+            const roles = ["model", "host", "reviewer", "writer", "operator"];
+            if (typeof declare.role !== "string" || !roles.includes(declare.role) || typeof declare.principal_id !== "string" || !declare.principal_id.trim() || declare.principal_id.length > 256 || (declare.engagement_id !== undefined && typeof declare.engagement_id !== "string")) {
+              response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "validation_error", message: "identity declaration is invalid" } } };
+            } else {
+              try {
+                // 呈交凭证即 identify 帧的 token；resolver 查表完成 token↔身份的全部校验。
+                const resolved = await resolvePrincipal({ role: declare.role as Principal["role"], principal_id: declare.principal_id, ...(typeof declare.engagement_id === "string" ? { engagement_id: declare.engagement_id } : {}) }, params.token);
+                identifiedToken = params.token;
+                connectionPrincipal = registerTransportPrincipal({ ...resolved, transport_verified: true as const });
+                identified = true;
+                response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: true, data: { identified: true, role: declare.role, principal_id: declare.principal_id } } };
+              } catch {
+                // resolver 拒绝（token/身份不匹配或未知 token）：不注册任何身份。
+                response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error" } };
+              }
+            }
+          }
+        } else if (resolvePrincipal && !identified) {
+          response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: connection must identify before dispatch" } };
+        } else if (resolvePrincipal && params && typeof params.token === "string" && params.token !== identifiedToken) {
+          response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: connection credential changed after identification" } };
+        } else if ((input.method === "taric.subscribe" || input.method === "taric.unsubscribe") && params && params.token === (resolvePrincipal ? identifiedToken : token) && (!params.request || (typeof params.request === "object" && !Array.isArray(params.request)))) {
+          // 显式进入/退出订阅模式后服务端才可写 unsolicited 通知行。
+          if (input.method === "taric.unsubscribe") {
+            socketSubscription?.unsubscribe();
+            socketSubscription = undefined;
+            response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: true, data: { subscribed: false } } };
+          } else {
+            const request = (params.request ?? {}) as Record<string, unknown>;
+            if (request.engagement_id !== undefined && request.engagement_id !== connectionPrincipal!.engagement_id) {
+              response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "authorization_error", message: "subscription engagement must match the listener principal" } } };
+            } else {
+              try {
+                const handle = await service.subscribe(connectionPrincipal!, {
+                  engagement_id: connectionPrincipal!.engagement_id!,
+                  ...(Array.isArray(request.topics) ? { topics: request.topics as string[] } : {}),
+                  ...(typeof request.debounce_ms === "number" ? { debounce_ms: request.debounce_ms } : {}),
+                  ...(typeof request.since_read_seq === "number" ? { since_read_seq: request.since_read_seq } : {}),
+                  ...(Object.hasOwn(request, "l1_backlog_threshold") ? { l1_backlog_threshold: request.l1_backlog_threshold as number } : {}),
+                }, (signal) => writeRpcNotification(socket, signal));
+                socketSubscription?.unsubscribe();
+                socketSubscription = handle;
+                response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: true, data: { subscribed: true, engagement_id: connectionPrincipal!.engagement_id } } };
+              } catch (cause) {
+                const detail = cause as { code?: string; message?: string };
+                response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: detail.code ?? "internal_error", message: detail.message ?? "subscription rejected" } } };
+              }
+            }
+          }
+        } else if (input.method !== "taric.dispatch" || !params || params.token !== (resolvePrincipal ? identifiedToken : token) || typeof params.operation !== "string" || !params.request || typeof params.request !== "object" || Array.isArray(params.request)) {
           response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error" } };
         } else {
           const request = params.request as Record<string, unknown>;
@@ -205,7 +291,7 @@ function handleSocket(socket: Socket, service: CoreService, principal: Principal
               boundedRequest = { ...boundedRequest, page_size: Math.min(typeof request.page_size === "number" ? request.page_size : RPC_ARTIFACT_PAGE_ITEMS_MAX, RPC_ARTIFACT_PAGE_ITEMS_MAX) };
             }
             if (readsArtifactContent && params.operation !== "artifact.content.read") boundedRequest.max_response_bytes = Math.min(typeof boundedRequest.max_response_bytes === "number" ? boundedRequest.max_response_bytes : RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES, RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES);
-            const result = await service.dispatch(params.operation, principal, boundedRequest);
+            const result = await service.dispatch(params.operation, connectionPrincipal!, boundedRequest);
             response = { jsonrpc: "2.0", id: input.id ?? null, result };
           }
         }

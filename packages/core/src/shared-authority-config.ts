@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION } from "@taric/schemas";
+import { API_CONTRACT_VERSION, SCHEMA_VERSION } from "@taric/schemas";
 import { policyDigest } from "./policy.js";
 import { checkDeploymentGuard, type DeploymentGuardResult } from "./deployment-guard.js";
 import { runtimeConformancePassed, type AuthorityRuntimeConformance } from "./storage-contract.js";
@@ -39,7 +39,7 @@ export interface SharedAuthorityBackendManifest {
   };
   postgresql: { minimum_major: number; maximum_major: number; supported_majors: readonly number[]; version_source: "postgresql.org/support/versioning" };
   schema_version: string;
-  api_version: "1.0.0";
+  api_version: typeof API_CONTRACT_VERSION;
   policy_digest: string;
 }
 
@@ -57,7 +57,7 @@ export const SHARED_AUTHORITY_BACKEND_MANIFEST: SharedAuthorityBackendManifest =
     version_source: "postgresql.org/support/versioning",
   },
   schema_version: SCHEMA_VERSION,
-  api_version: "1.0.0",
+  api_version: API_CONTRACT_VERSION,
   policy_digest: policyDigest(),
 } as const);
 

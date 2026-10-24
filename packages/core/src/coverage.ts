@@ -184,19 +184,25 @@ export function evaluateCoverageGate(cells: CoverageCell[]): CoverageGateResult 
   }
   return { can_close: gaps.length === 0, action_authorized: false, gaps };
 }
-export async function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string): Promise<CoverageGateResult> {
+export interface CoverageVisibilitySummary {
+  pending_impact_count: number;
+  revalidation_count: number;
+  conflicted_count: number;
+  pending_external_results_count: number;
+  complete: boolean;
+}
+
+export interface CoverageGateSnapshot extends CoverageGateResult {
+  engagement_id: string;
+  visibility: CoverageVisibilitySummary;
+  read_seq: number;
+}
+
+export function coverageCloseGate(source: CoverageCell[]): Promise<CoverageGateResult>;
+export function coverageCloseGate(source: AuthorityStore, engagementId: string): Promise<CoverageGateSnapshot>;
+export async function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string): Promise<CoverageGateResult | CoverageGateSnapshot> {
   if (Array.isArray(source)) return evaluateCoverageGate(source);
-  // Current cells and unresolved operator-visible history must share one read view.
-  return source.maintenanceRead(async () => {
-    const cells = (await source.list(engagementId ?? "", { includeCandidates: true })).filter((record) => record.kind === "coverage") as CoverageCell[];
-    const result = evaluateCoverageGate(cells);
-    const visibility = await coverageVisibility(source, engagementId ?? "");
-    if (visibility.pending_impact.length > 0) result.gaps.push({ kind: "pending_impact", cell_ids: [], reason: "impact propagation is incomplete; pending watermark remains visible" });
-    if (visibility.revalidation_queue.length > 0) result.gaps.push({ kind: "pending_revalidation", cell_ids: [], reason: "revalidation work remains queued" });
-    if (visibility.conflicted.length > 0) result.gaps.push({ kind: "conflicting", cell_ids: visibility.conflicted.map((cell) => cell.id), reason: "contradicted or inconclusive coverage remains unresolved" });
-    result.can_close = result.gaps.length === 0;
-    return result;
-  });
+  return coverageGateSnapshot(source, engagementId ?? "");
 }
 
 export interface CoverageVisibility {
@@ -212,15 +218,7 @@ export interface CoverageVisibility {
   complete: boolean;
 }
 
-/**
- * Report-side visibility (task 2.4). Unfinished impact/revalidation, un-ingested
- * external results and counter-evidence must be visible; a report may only claim
- * complete coverage when none of them exist.
- */
-export async function coverageVisibility(store: AuthorityStore, engagementId: string): Promise<CoverageVisibility> {
-  // Reports are an operator surface: include recalled current records so stale,
-  // contradicted and retracted outcomes remain visible as unresolved history.
-  const records = await store.list(engagementId, { includeCandidates: true, includeRecalled: true });
+function coverageVisibilityFromRecords(records: CanonicalRecord[]): CoverageVisibility {
   const cells = records.filter((record) => record.kind === "coverage") as CoverageCell[];
   const pending_external_results = cells.filter((cell) => cell.external_result_state === "pending" || cell.external_result_state === "unavailable");
   const conflicted = cells.filter((cell) => (Array.isArray(cell.counter_evidence_refs) ? cell.counter_evidence_refs : []).length > 0 || cell.status === "inconclusive");
@@ -237,4 +235,48 @@ export async function coverageVisibility(store: AuthorityStore, engagementId: st
     conflicted,
     complete: pending_external_results.length === 0 && revalidation_queue.length === 0 && pending_impact.length === 0 && conflicted.length === 0,
   };
+}
+
+function addVisibilityGaps(result: CoverageGateResult, visibility: CoverageVisibility): CoverageGateResult {
+  if (visibility.pending_impact.length > 0) result.gaps.push({ kind: "pending_impact", cell_ids: [], reason: "impact propagation is incomplete; pending watermark remains visible" });
+  if (visibility.revalidation_queue.length > 0) result.gaps.push({ kind: "pending_revalidation", cell_ids: [], reason: "revalidation work remains queued" });
+  if (visibility.conflicted.length > 0) result.gaps.push({ kind: "conflicting", cell_ids: visibility.conflicted.map((cell) => cell.id), reason: "contradicted or inconclusive coverage remains unresolved" });
+  result.can_close = result.gaps.length === 0;
+  return result;
+}
+
+function summarizeCoverageVisibility(visibility: CoverageVisibility): CoverageVisibilitySummary {
+  return {
+    pending_impact_count: visibility.pending_impact.length,
+    revalidation_count: visibility.revalidation_queue.length,
+    conflicted_count: visibility.conflicted.length,
+    pending_external_results_count: visibility.pending_external_results.length,
+    complete: visibility.complete,
+  };
+}
+
+/** Gate decision, operator visibility and watermark from one authority read snapshot. */
+export async function coverageGateSnapshot(store: AuthorityStore, engagementId: string): Promise<CoverageGateSnapshot> {
+  return store.maintenanceRead(async ({ read_seq }) => {
+    const current = (await store.list(engagementId, { includeCandidates: true })).filter((record) => record.kind === "coverage") as CoverageCell[];
+    const visibleRecords = await store.list(engagementId, { includeCandidates: true, includeRecalled: true });
+    const visibility = coverageVisibilityFromRecords(visibleRecords);
+    return {
+      ...addVisibilityGaps(evaluateCoverageGate(current), visibility),
+      engagement_id: engagementId,
+      visibility: summarizeCoverageVisibility(visibility),
+      read_seq,
+    };
+  });
+}
+
+/**
+ * Report-side visibility (task 2.4). Unfinished impact/revalidation, un-ingested
+ * external results and counter-evidence must be visible; a report may only claim
+ * complete coverage when none of them exist.
+ */
+export async function coverageVisibility(store: AuthorityStore, engagementId: string): Promise<CoverageVisibility> {
+  // Reports are an operator surface: include recalled current records so stale,
+  // contradicted and retracted outcomes remain visible as unresolved history.
+  return store.maintenanceRead(async () => coverageVisibilityFromRecords(await store.list(engagementId, { includeCandidates: true, includeRecalled: true })));
 }

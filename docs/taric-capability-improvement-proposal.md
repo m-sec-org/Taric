@@ -20,7 +20,7 @@
 | I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，未触发 resources subscription，订阅保持 disabled。 |
 | I-08 导入边界 | 公开 `snapshot.import` 在 dispatch/Core/CLI 明确拒绝，内部隔离 restore 不构成宿主迁移 API；旧材料通过正常 proposal/evidence 治理接入。 |
 
-[干净构建报告](benchmarks/capability-verification-v2.json)记录 339 项测试全部通过、零失败/跳过，技术完成与运行时验证通过；其 `base_commit` 为 `c3db857`，而 `source_digest` 与当前工作区一致，说明已验证内容包含后来提交为 `2867b26` 的 `authority-sql/3` 布局与宿主接入改动；此后任何源码改动都须重跑 `scripts/verify-release.mjs` 才重新有效。[PostgreSQL v2](benchmarks/postgres-runtime-v2.json)记录 12 个场景通过及独立逻辑恢复 24 张表一致、审计序列 107→107。人工标注/基线样本数为 0，质量证据仍 pending，`release_state=blocked`；技术完成不等于质量发布通过。Bun 原生驱动、远程传输、MCP Tasks 和订阅均未因此成为受支持能力。
+[干净构建报告](benchmarks/capability-verification-v2.json)记录 339 项测试全部通过、零失败/跳过，技术完成与运行时验证通过；其 `base_commit` 为 `c3db857`。该报告曾与包含 `authority-sql/3` 布局和宿主接入改动的工作区摘要相符；本轮后续源码改动已使该摘要失效，不能作为当前树的构建证据，须重跑 `scripts/verify-release.mjs`。[PostgreSQL v2](benchmarks/postgres-runtime-v2.json)记录 12 个场景通过及独立逻辑恢复 24 张表一致、审计序列 107→107。人工标注/基线样本数为 0，质量证据仍 pending，`release_state=blocked`；技术完成不等于质量发布通过。Bun 原生驱动、远程传输、MCP Tasks 和订阅均未因此成为受支持能力。
 
 ## Abstract / 摘要
 

@@ -5,10 +5,23 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./storage-contract": {
+      "types": "./dist/storage-contract.d.ts",
+      "import": "./dist/storage-contract.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=2"
   },
   "dependencies": {
     "@taric/schemas": "0.1.0",

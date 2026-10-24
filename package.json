@@ -7,9 +7,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @taric/schemas && npm run build --workspace @taric/core && npm run build --workspace @taric/cli && npm run build --workspace @taric/mcp",
-    "typecheck": "npm run typecheck --workspace @taric/schemas && npm run typecheck --workspace @taric/core && npm run typecheck --workspace @taric/cli && npm run typecheck --workspace @taric/mcp",
-    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspace @taric/schemas && npm run build --workspace @taric/core && npm run build --workspace @taric/driver-bun-sqlite && npm run build --workspace @taric/cli && npm run build --workspace @taric/mcp",
+    "typecheck": "npm run typecheck --workspace @taric/schemas && npm run typecheck --workspace @taric/core && npm run typecheck --workspace @taric/driver-bun-sqlite && npm run typecheck --workspace @taric/cli && npm run typecheck --workspace @taric/mcp",
+    "test": "npm run test --workspaces --if-present --workspace-concurrency=1",
+    "verify:matrix": "node scripts/emit-compatibility-matrix.mjs --check",
     "clean": "node scripts/clean-dist.mjs",
     "test:clean": "npm install && npm run clean && npm run build && npm test"
   },

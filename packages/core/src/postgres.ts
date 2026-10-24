@@ -62,7 +62,7 @@ const runtimeDomainMethods = {
   pinned_read: ["snapshot", "getAt", "recordsPage"], backup_restore: ["exportSnapshot", "importSnapshot"],
 } as const satisfies Record<AuthorityRuntimeScenario, readonly AuthorityBackendMethod[]>;
 const runtimeDomainTables = {
-  proposal: ["proposals", "proposal_versions", "object_refs"], review: ["proposals", "reviews", "object_refs"],
+  proposal: ["proposals", "proposal_versions", "object_refs"], review: ["proposals", "proposal_versions", "reviews", "admission_review_packs", "object_refs"],
   admission_l1: ["proposals", "records", "record_versions", "object_refs", "idempotency", "events", "outbox"],
   admission_l2: ["proposals", "reviews", "records", "record_versions", "object_refs", "events", "outbox"],
   checkpoint: ["work_runs", "attempts", "checkpoints", "records", "object_refs"],
@@ -76,6 +76,7 @@ const requiredRuntimeColumns: Readonly<Record<string, readonly string[]>> = {
   metadata: ["key", "value"], records: ["id", "engagement_id", "kind", "trust_level", "version", "body", "display_id"],
   proposals: ["id", "engagement_id", "subject_type", "expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version", "content_hash", "body", "status"],
   proposal_versions: ["id", "engagement_id", "commit_seq", "body"], reviews: ["id", "proposal_id", "reviewer_id", "input_hash", "verdict", "body"],
+  admission_review_packs: ["proposal_id", "engagement_id", "proposal_hash", "canonical_id", "policy_digest", "evidence_snapshot_hash", "admission_seq", "evidence_snapshot"],
   work_runs: ["run_id", "work_item_id", "engagement_id", "generation", "owner_host", "owner_agent", "lease_expires_at", "status", "body"],
   attempts: ["attempt_id", "run_id", "generation", "owner_host", "owner_agent", "lease_expires_at", "status", "body"],
   checkpoints: ["checkpoint_id", "run_id", "generation", "body"], action_intents: ["action_id", "run_id", "generation", "status", "body"],

@@ -30,15 +30,21 @@ const fixtures = {
   proposalProvenance: () => ({ host_id: "pi", producer_id: "model", source_kind: "model" }),
   promotionL2: () => ({ engagement_id: randomUUID(), proposal_id: randomUUID(), target_id: randomUUID(), expected_version: 1, input_hash: `sha256:${"a".repeat(64)}`, evidence_snapshot_hash: `sha256:${"b".repeat(64)}`, policy_digest: `sha256:${"c".repeat(64)}`, review_refs: [randomUUID()] }),
   review: () => ({ ...base(), proposal_ref: randomUUID(), reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: `sha256:${"a".repeat(64)}`, verdict: "pass" }),
+  reviewPackRequest: () => ({ engagement_id: randomUUID(), proposal_id: randomUUID() }),
+  reviewSubmitRequest: () => ({ engagement_id: randomUUID(), proposal_id: randomUUID(), reviewer_id: "reviewer-b", reviewer_kind: "reviewer", input_hash: `sha256:${"a".repeat(64)}`, evidence_snapshot_hash: `sha256:${"b".repeat(64)}`, policy_digest: `sha256:${"c".repeat(64)}`, verdict: "pass" }),
   protectiveControl: () => ({ ...base(), name: "WAF", layer: "edge", resource_ref: randomUUID(), control_kind: "waf" }),
   controlObservation: () => ({ ...base(), control_ref: randomUUID(), outcome: "inconclusive", observed_at: "2026-10-09T00:00:00.000Z", evidence_refs: [], limitations: [] }),
   accessDecisionObservation: () => ({ ...base(), resource_ref: randomUUID(), identity_ref: randomUUID(), operation: "GET /", decision: "deny", observed_at: "2026-10-09T00:00:00.000Z", conditions: [], evidence_refs: [] }),
   attempt: () => ({ ...base(), work_item_ref: randomUUID(), status: "running", generation: 1 }),
   workRun: () => ({ ...base(), work_item_ref: randomUUID(), status: "running", generation: 1 }),
+  workQueryRequest: () => ({ engagement_id: randomUUID() }),
+  coverageGateResult: () => ({ can_close: true, action_authorized: false, gaps: [] }),
+  coverageQueryRequest: () => ({ engagement_id: randomUUID() }),
   checkpoint: () => ({ ...base(), work_item_ref: randomUUID(), work_run_ref: randomUUID(), attempt_ref: randomUUID(), generation: 1, target_version: 1, work_item_version: 1, scope_version: 0, owner: { host_id: "pi", agent_id: "worker" }, lease_expires_at: "2026-10-09T00:02:00.000Z", source_read_seq: 1, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: randomUUID(), read_seq: 1, builder_version: "context/1.0" } }),
   actionIntent: () => ({ ...base(), target: "host-ref", method: "inspect", status: "recommended", mode: "llm_recommend" }),
   artifactSessionBinding: () => ({ engagement_id: randomUUID(), session_id: "session-1", root: "/tmp/session-1", mode: "host-session" }),
   artifactStoreBegin: () => ({ engagement_id: randomUUID(), session_id: "session-1", payload_kind: "binary", media_type: "application/octet-stream" }),
+  artifactIngestFile: () => ({ engagement_id: randomUUID(), session_id: "session-1", path: "/session-1/tool-output.bin", authorize_spool_access: true, payload_kind: "binary", media_type: "application/octet-stream", delete_source: true }),
   artifactStoreAppend: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", ordinal: 0, chunk_hash: `sha256:${"a".repeat(64)}`, data: "YQ==", encoding: "base64" }),
   artifactStoreCommit: () => ({ engagement_id: randomUUID(), session_id: "session-1", upload_id: "upload-1", total_bytes: 1, content_hash: `sha256:${"a".repeat(64)}` }),
   artifactContentRead: () => ({ engagement_id: randomUUID(), session_id: "session-1", content_ref: "artifact-1@v1", offset: 0, length: 1 }),
@@ -70,6 +76,7 @@ for (const name of contractNames) {
     else if (name === "apiError") delete invalid.error;
     else if (name === "auditEvent") delete invalid.event_type;
     else if (name === "proposalProvenance") delete invalid.source_kind;
+    else if (name === "coverageGateResult") delete invalid.can_close;
     assert.equal(validate(invalid), false);
     const extra = fixtures[name]();
     extra.unexpected = true;

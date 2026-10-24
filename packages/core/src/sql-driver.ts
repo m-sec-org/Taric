@@ -1,12 +1,19 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "./identity.js";
 import { SCHEMA_VERSION } from "@taric/schemas";
 import { ContractValidationError } from "./validation.js";
 import { AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION } from "./sql-schema.js";
+
+/** Bun 运行时没有 node:sqlite 内置模块：延迟到构造 node 驱动时才加载，
+ * 让本模块（以及整个 core barrel）可在注入第三方驱动的宿主中被导入。 */
+let nodeSqliteModule: typeof import("node:sqlite") | undefined;
+async function loadNodeSqlite(): Promise<typeof import("node:sqlite")> {
+  return nodeSqliteModule ??= await import("node:sqlite");
+}
 
 export type SqlTransactionMode = "read" | "write";
 export interface SqlRunResult { changes: number; lastInsertRowid?: number | bigint; }
@@ -59,7 +66,7 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   readonly backend = "sqlite" as const;
   readonly filename: string;
   readonly authorityId: string;
-  private readonly db: DatabaseSync;
+  private db?: DatabaseSync;
   private readonly queue: ConnectionQueue;
   private readonly sqlMetrics: SqlMetrics = { statements: 0, rows_returned: 0, rows_affected: 0, queue_wait_ms: 0, sql_elapsed_ms: 0 };
   private initialization?: Promise<void>;
@@ -67,7 +74,6 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   constructor(filename = ":memory:") {
     this.filename = filename;
     this.authorityId = filename === ":memory:" ? `memory:${randomUUID()}` : `sqlite:${resolve(filename)}`;
-    this.db = new DatabaseSync(filename);
     if (filename === ":memory:") this.queue = new ConnectionQueue();
     else {
       const key = resolve(filename);
@@ -76,29 +82,33 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
     }
   }
   get ready(): Promise<void> {
-    return this.initialization ??= this.queue.run(() => {
-      const hasMetadata = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").get());
-      const hasRecords = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get());
-      const schema = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get() as { value?: string } | undefined : undefined;
-      if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible");
-      const storageFormat = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='storage_format'").get() as { value?: string } | undefined : undefined;
-      if (storageFormat && storageFormat.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible");
-      const proposals = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposals'").get();
-      if (proposals) {
-        const columns = new Set((this.db.prepare("PRAGMA table_info(proposals)").all() as Array<{ name: string }>).map((column) => column.name));
-        if (!["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"].every((field) => columns.has(field))) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible");
-      }
-      this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
-      this.db.exec("BEGIN IMMEDIATE");
-      try {
-        this.db.exec(AUTHORITY_SQL_TABLES);
-        const columns = this.db.prepare("PRAGMA table_info(artifact_catalog)").all() as Array<{ name: string }>;
-        if (!columns.some((column) => column.name === "media_type")) this.db.exec("ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT");
-        this.db.exec(AUTHORITY_SQL_INDEXES);
-        for (const [key, value] of AUTHORITY_SQL_INITIAL_METADATA) this.db.prepare("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING").run(key, value);
-        this.db.exec("COMMIT");
-      } catch (error) { this.db.exec("ROLLBACK"); throw error; }
-    });
+    return this.initialization ??= (async () => {
+      const { DatabaseSync } = await loadNodeSqlite();
+      const db = this.db = new DatabaseSync(this.filename);
+      return this.queue.run(() => {
+        const hasMetadata = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").get());
+        const hasRecords = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get());
+        const schema = hasMetadata ? db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get() as { value?: string } | undefined : undefined;
+        if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible");
+        const storageFormat = hasMetadata ? db.prepare("SELECT value FROM metadata WHERE key='storage_format'").get() as { value?: string } | undefined : undefined;
+        if (storageFormat && storageFormat.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible");
+        const proposals = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposals'").get();
+        if (proposals) {
+          const columns = new Set((db.prepare("PRAGMA table_info(proposals)").all() as Array<{ name: string }>).map((column) => column.name));
+          if (!["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"].every((field) => columns.has(field))) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible");
+        }
+        db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+        db.exec("BEGIN IMMEDIATE");
+        try {
+          db.exec(AUTHORITY_SQL_TABLES);
+          const columns = db.prepare("PRAGMA table_info(artifact_catalog)").all() as Array<{ name: string }>;
+          if (!columns.some((column) => column.name === "media_type")) db.exec("ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT");
+          db.exec(AUTHORITY_SQL_INDEXES);
+          for (const [key, value] of AUTHORITY_SQL_INITIAL_METADATA) db.prepare("INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING").run(key, value);
+          db.exec("COMMIT");
+        } catch (error) { db.exec("ROLLBACK"); throw error; }
+      });
+    })();
   }
   private async access<T>(operation: () => T | Promise<T>): Promise<T> {
     if (this.closed) throw new ContractValidationError("conflict", "authority store is closed");
@@ -116,15 +126,15 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
     });
   }
   async get<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row | undefined> {
-    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const row = this.db.prepare(sql).get(...values as SQLInputValue[]) as Row | undefined; if (row) this.sqlMetrics.rows_returned++; return row; });
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const row = this.db!.prepare(sql).get(...values as SQLInputValue[]) as Row | undefined; if (row) this.sqlMetrics.rows_returned++; return row; });
   }
   async all<Row = Record<string, unknown>>(sql: string, ...values: unknown[]): Promise<Row[]> {
-    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const rows = this.db.prepare(sql).all(...values as SQLInputValue[]) as Row[]; this.sqlMetrics.rows_returned += rows.length; return rows; });
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const rows = this.db!.prepare(sql).all(...values as SQLInputValue[]) as Row[]; this.sqlMetrics.rows_returned += rows.length; return rows; });
   }
   async run(sql: string, ...values: unknown[]): Promise<SqlRunResult> {
-    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const result = this.db.prepare(sql).run(...values as SQLInputValue[]); const changes = Number(result.changes); this.sqlMetrics.rows_affected += changes; return { changes, lastInsertRowid: result.lastInsertRowid }; });
+    return this.access(() => { this.sqlMetrics.statements += statementCount(sql); const result = this.db!.prepare(sql).run(...values as SQLInputValue[]); const changes = Number(result.changes); this.sqlMetrics.rows_affected += changes; return { changes, lastInsertRowid: result.lastInsertRowid }; });
   }
-  async exec(sql: string): Promise<void> { await this.access(() => { this.sqlMetrics.statements += statementCount(sql); this.db.exec(sql); }); }
+  async exec(sql: string): Promise<void> { await this.access(() => { this.sqlMetrics.statements += statementCount(sql); this.db!.exec(sql); }); }
   async transaction<T>(mode: SqlTransactionMode, operation: () => T | Promise<T>): Promise<T> {
     const parent = sqliteScope.getStore();
     if (parent?.driver === this && parent.active) {
@@ -134,9 +144,9 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
         if (!parent.active) throw new ContractValidationError("conflict", "authority transaction scope is closed");
         const savepoint = `authority_nested_${parent.savepoints.next++}`;
         const child: SqliteScope = { ...parent, active: true, children: new ConnectionQueue() };
-        this.db.exec(`SAVEPOINT ${savepoint}`);
-        try { const value = await sqliteScope.run(child, operation); await child.children.drain(); this.db.exec(`RELEASE ${savepoint}`); return value; }
-        catch (error) { await child.children.drain(); this.db.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`); throw error; }
+        this.db!.exec(`SAVEPOINT ${savepoint}`);
+        try { const value = await sqliteScope.run(child, operation); await child.children.drain(); this.db!.exec(`RELEASE ${savepoint}`); return value; }
+        catch (error) { await child.children.drain(); this.db!.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`); throw error; }
         finally { child.active = false; }
       });
     }
@@ -145,9 +155,9 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
     return this.queue.run(async () => {
       this.sqlMetrics.queue_wait_ms += performance.now() - queued;
       const scope: SqliteScope = { driver: this, mode, active: true, savepoints: { next: 0 }, children: new ConnectionQueue() };
-      this.db.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
-      try { const value = await sqliteScope.run(scope, operation); await scope.children.drain(); this.db.exec("COMMIT"); return value; }
-      catch (error) { await scope.children.drain(); this.db.exec("ROLLBACK"); throw error; }
+      this.db!.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
+      try { const value = await sqliteScope.run(scope, operation); await scope.children.drain(); this.db!.exec("COMMIT"); return value; }
+      catch (error) { await scope.children.drain(); this.db!.exec("ROLLBACK"); throw error; }
       finally { scope.active = false; }
     });
   }
@@ -160,7 +170,7 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
   jsonValue(column: string, field: string): string { return `json_extract(${column},'$.${field}')`; }
   dateValue(expression: string): string { return `julianday(${expression})`; }
   metrics(): SqlMetricsSnapshot { return { ...this.sqlMetrics }; }
-  async close(): Promise<void> { await this.queue.run(() => { if (!this.closed) { this.db.close(); this.closed = true; } }); }
+  async close(): Promise<void> { await this.queue.run(() => { if (!this.closed) { this.db?.close(); this.closed = true; } }); }
 }
 
 /** Operator-owned Pool/Client subset: Core never closes the supplied connection. */

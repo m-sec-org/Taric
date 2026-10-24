@@ -14,6 +14,11 @@ import {
   createPiDescriptor,
   createPrincipal,
   isSupportedPiVersion,
+  piVersionCertificationState,
+  supportedPiCapabilities,
+  CERTIFIED_PI_VERSIONS,
+  SUPPORTED_PI_HOST,
+  TARIC_COMPATIBILITY_MANIFEST,
   uuidv7,
   validateAdapter,
 } from "../dist/index.js";
@@ -26,11 +31,11 @@ import { createHash } from "node:crypto";
 const base = { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION, capabilities: [], supported: false };
 
 test("adapter contract rejects unsupported versions, capabilities and API mismatch", () => {
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, contract_version: "9.0" }).accepted, false);
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, api_contract_version: "9.0.0" }).accepted, false);
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, capabilities: ["unknown"] }).accepted, false);
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, supported: true, capabilities: ["proposal_submission"] }).accepted, true);
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.1.0", ...base, supported: false }).reason, "unsupported_capability");
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, contract_version: "9.0" }).accepted, false);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "9.0.0" }).accepted, false);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, capabilities: ["unknown"] }).accepted, false);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: true, capabilities: ["proposal_submission"] }).accepted, true);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: false }).reason, "unsupported_capability");
 });
 
 test("custom adapter identities are format-validated metadata and do not grant native capability", async () => {
@@ -74,7 +79,7 @@ test("adapter client never exposes the store and keeps engagement attribution", 
   assert.equal(store.db, undefined);
   assert.equal("store" in adapter, false);
   assert.equal("db" in adapter, false);
-  assert.equal(adapter.descriptor.host_commit, "7c10bd4");
+  assert.equal(adapter.descriptor.host_commit, "4a08025");
   assert.deepEqual(adapter.status().capabilities, []);
   assert.equal(adapter.status().service_connected, false);
   assert.equal(adapter.status().capability_status.session_lifecycle.reason, "adapter instance has not registered runtime hooks or tools");
@@ -155,12 +160,32 @@ test("authenticated adapter Artifact calls use Core authorization and content co
   }
 });
 
-test("untested Pi versions are unsupported", () => {
-  assert.equal(isSupportedPiVersion("1.1.0"), true);
-  assert.equal(isSupportedPiVersion("0.74.2"), false);
-  const descriptor = createPiDescriptor("0.74.2");
-  assert.equal(descriptor.supported, false);
-  assert.deepEqual(descriptor.capabilities, []);
+test("certification-aware version gate: set membership with explicit degradation", () => {
+  assert.equal(isSupportedPiVersion("1.4.0"), true);
+  assert.equal(isSupportedPiVersion("1.1.0"), false);
+  // 集合成员资格，不做区间推断：相邻补丁版本不因邻近认证项而自动支持。
+  assert.equal(isSupportedPiVersion("1.4.1"), false);
+  assert.equal(piVersionCertificationState("1.4.0"), "certified");
+  // 同 major 未认证：只读安全子集 + not_certified，永不 supported。
+  const sameMajor = createPiDescriptor("1.5.0");
+  assert.equal(sameMajor.supported, false);
+  assert.equal(sameMajor.certification_state, "not_certified");
+  assert.deepEqual(sameMajor.capabilities, ["session_lifecycle", "context_injection"]);
+  assert.deepEqual(sameMajor.certification_evidence, []);
+  // 更远版本：最小诊断集 + unsupported，不再是零能力无解释。
+  const far = createPiDescriptor("0.74.2");
+  assert.equal(far.supported, false);
+  assert.equal(far.certification_state, "unsupported");
+  assert.deepEqual(far.capabilities, ["session_lifecycle"]);
+});
+
+test("compatibility manifest stays in lockstep with the certified Pi set", () => {
+  const hosts = TARIC_COMPATIBILITY_MANIFEST.hosts.pi;
+  assert.equal(hosts.version, SUPPORTED_PI_HOST.version);
+  assert.equal(hosts.commit, SUPPORTED_PI_HOST.host_commit);
+  assert.deepEqual(hosts.certified_versions, CERTIFIED_PI_VERSIONS.map((entry) => entry.version));
+  const certified = createPiDescriptor(SUPPORTED_PI_HOST.version);
+  assert.deepEqual(certified.capabilities, [...supportedPiCapabilities]);
 });
 
 test("Pi capability status keeps technical availability separate from pending quality evidence", async () => {
@@ -206,15 +231,15 @@ test("stale, skipped, and mock adapter evidence cannot enable native capabilitie
   const engagement_id = uuidv7();
   for (const evidence of [
     { version: "1.0.9", state: "verified" },
-    { version: "1.1.0", state: "skipped" },
-    { version: "1.1.0", state: "mock" },
+    { version: "1.4.0", state: "skipped" },
+    { version: "1.4.0", state: "mock" },
   ]) {
     const adapter = createPiAdapter(service, createPrincipal("host", `pi-${evidence.state}`, engagement_id));
     adapter.descriptor.certification_evidence = [{
       framework_package: "@earendil-works/pi-coding-agent",
       distribution: "pi",
       version: evidence.version,
-      commit: "7c10bd4",
+      commit: "4a08025",
       state: evidence.state,
       ref: "fixture-only",
     }];

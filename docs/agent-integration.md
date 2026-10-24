@@ -118,6 +118,21 @@ Do not run that command in the proxy's socket stream. MCP is a separate stdio tr
 
 The resolver defaults ID to operator-local unless a model role/ID was explicitly selected, even though stdio later forces role model; set the model ID explicitly to avoid misleading attribution. The server only supports six tools and no resource subscriptions. See [tool-specific field differences](taric-api.md#model-facing-operations); Core-only scan budgets, reviewer metadata or generation fields cannot be assumed available in a tool schema.
 
+## Bun in-process embedding
+
+Profile selection, artifact packaging, API `1.1.0` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
+
+A Bun host embeds the authority in-process over the driver contract instead of proxying to a Node process. Bun has no `node:sqlite` builtin, so import the reference driver package and construct the store directly:
+
+```ts
+import { AuthorityStore, createCoreService } from "@taric/core";
+import { BunSqliteAuthorityDriver } from "@taric/driver-bun-sqlite";
+const store = new AuthorityStore(new BunSqliteAuthorityDriver(dbPath));
+const service = await createCoreService(store, contentRoot);
+```
+
+`openRuntimeService`'s sqlite path constructs the node:sqlite driver itself; Bun hosts use the direct construction above. Core loads `node:sqlite` lazily, so the full `@taric/core` import works under Bun. Driver acceptance evidence: the twelve authority runtime scenarios plus the driver-specific suite pass on Bun 1.3.13 — see [bun-driver-conformance-v1](benchmarks/bun-driver-conformance-v1.json) and the [driver guide](authority-driver-guide.md). The Node bridge proxy remains the documented fallback topology.
+
 ## Runtime Configuration
 
 Config discovery selects the first existing JSON file from TARIC_CONFIG, `<cwd>/.taric/config.json`, `~/.taric/config.json`, without merging. A missing explicit path does not stop the search. An invalid selected file fails startup.
@@ -259,6 +274,6 @@ Use Taric when durable scoped memory, governed Findings, lease-aware recovery or
 
 Record actual integration effort, failed attempts, Core calls, reviewer waits, retries, proxy restarts, CPU/RSS/latency, fixture/version and commands. The proxy report supplies synthetic local calls/timing, not engineering labor-hours, production reviewer time or ROI. Host observations can still be false, discovery incomplete and external action outcomes unknown; Taric checks its state/identity/governance contracts rather than proving target-system truth.
 
-The saved [clean-build report](benchmarks/capability-verification-v2.json) records 339 tests passed, zero failures/skips, technical_passed/runtime_verified true and release_state blocked at `base_commit` `c3db857`; its `source_digest` matches the current working tree, so the content it verified includes the `authority-sql/3` and host-integration changes committed as `2867b26`. Any further source edit invalidates that digest and requires a fresh run. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records 12 scenarios and a 24-table logical restore with audit 107→107. The [release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md) indexes T01–T14. Human annotation/baseline sample count is zero, so quality evidence stays pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
+The saved [clean-build report](benchmarks/capability-verification-v2.json) records 339 tests passed, zero failures/skips, technical_passed/runtime_verified true and release_state blocked at `base_commit` `c3db857`. It previously covered the workspace containing the `authority-sql/3` and host-integration changes committed as `2867b26`; subsequent source edits in this change invalidate that digest, so it is not current build evidence and a fresh run is required. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records 12 scenarios and a 24-table logical restore with audit 107→107. The [release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md) indexes T01–T14. Human annotation/baseline sample count is zero, so quality evidence stays pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
 
 Archived changes record implementation decisions. They do not automatically enable a runtime, certify a third-party deployment, or remove pending quality gates.

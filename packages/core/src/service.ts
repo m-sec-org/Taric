@@ -1,18 +1,19 @@
 import { AuthorityStore, type CanonicalRecord, type TrustLevel } from "./store.js";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve, isAbsolute, sep } from "node:path";
+import { constants, closeSync, createReadStream, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { uuidv7 } from "./identity.js";
 import { buildContextPack, ContextBudgetError, type ContextPack } from "./context.js";
 import { InvalidCursorError } from "./cursor-key.js";
 import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
 import { ContractValidationError, schemaValidator, validateContract, validateProposalEnvelope } from "./validation.js";
-import { coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
-import { createAccessDecisionObservation, createControlObservation, type AccessDecisionObservationInput, type ControlObservationInput } from "./coverage.js";
-import { ArtifactContentStore, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
+import { API_CONTRACT_VERSION, coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
+import { createAccessDecisionObservation, createControlObservation, type AccessDecisionObservationInput, type ControlObservationInput, coverageGateSnapshot } from "./coverage.js";
+import { ArtifactContentStore, ARTIFACT_CHUNK_BYTES, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
-export const API_CONTRACT_VERSION = "1.0.0" as const;
+export { API_CONTRACT_VERSION };
 export type PrincipalRole = "model" | "host" | "reviewer" | "writer" | "operator";
 /** principal 只能由 transport 创建，不能由请求 body 自行声明权限。 */
 export type PrincipalCapability = "read" | "propose" | "review" | "admit" | "work" | "checkpoint" | "action" | "audit" | "operator" | "writer" | "content" | "content_read";
@@ -98,6 +99,12 @@ catch {
     return {};
 } }
 function saveAdapterConfig(value: Record<string, unknown>) { const path = adapterConfigPath(); mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); }
+function stableJsonValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(stableJsonValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stableJsonValue(item)]));
+}
+function requestDigest(value: unknown): string { return `sha256:${createHash("sha256").update(JSON.stringify(stableJsonValue(value))).digest("hex")}`; }
 function containsCheckpointReasoning(value: unknown): boolean {
     if (Array.isArray(value))
         return value.some(containsCheckpointReasoning);
@@ -125,6 +132,11 @@ function sanitizeModelValue(value: unknown): unknown {
 }
 function sanitizeModelRecord(record: CanonicalRecord): CanonicalRecord {
     return sanitizeModelValue(record) as CanonicalRecord;
+}
+function projectModelWorkItem(record: CanonicalRecord): CanonicalRecord {
+    const allowed = ["id", "engagement_id", "kind", "version", "status", "title", "scope_ref", "target_version", "acceptance_criteria", "goal", "acceptance", "depends_on", "resource_refs", "risk_class", "risk_budget"] as const;
+    const projected = Object.fromEntries(allowed.filter((field) => Object.hasOwn(record, field)).map((field) => [field, record[field]])) as CanonicalRecord;
+    return sanitizeModelRecord(projected);
 }
 export interface CoreService {
     close(): Promise<void>;
@@ -193,6 +205,7 @@ export interface CoreService {
         prompt_digest?: string;
         ruleset_digest?: string;
     }): Promise<ApiResponse<Record<string, unknown>>>;
+    reviewPack(principal: Principal, input: { engagement_id: string; proposal_id: string }): Promise<ApiResponse<Record<string, unknown>>>;
     admitProposal(principal: Principal, input: {
         engagement_id: string;
         proposal_id: string;
@@ -373,6 +386,14 @@ export interface CoreService {
     }): Promise<ApiResponse<Record<string, unknown>>>;
     capabilityStatus(principal?: Principal): Promise<ApiResponse<Record<string, unknown>>>;
     dispatch(operation: string, principal: Principal, request: Record<string, unknown>): Promise<ApiResponse<unknown>>;
+    /** 宿主面（host/operator）进程内订阅：信号无内容，投递前重鉴权，漏信号由权威状态读取恢复。 */
+    subscribe(principal: Principal, options: {
+        engagement_id: string;
+        since_read_seq?: number;
+        topics?: readonly string[];
+        debounce_ms?: number;
+        l1_backlog_threshold?: number;
+    }, onSignal: (signal: { topic: string; engagement_id: string; read_seq: number; emitted_at: string }) => void): Promise<{ unsubscribe(): void }>;
 }
 export async function createCoreService(store: AuthorityStore, contentRoot = process.env.TARIC_CONTENT_ROOT ?? defaultContentRoot(store)): Promise<CoreService> {
     await store.ready;
@@ -389,7 +410,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
         }) {
             return (await safe(async () => ({ ok: true as const, data: (await store.initializeEngagement(engagement)) })));
         },
-        async status() { return { ok: true as const, data: { schema_version: API_CONTRACT_VERSION, schema_supported: true } }; },
+        async status() { return { ok: true as const, data: { schema_version: SCHEMA_VERSION, api_contract_version: API_CONTRACT_VERSION, schema_supported: true } }; },
         async artifactSessionBind(principal: Principal, input: {
             engagement_id: string;
             session_id: string;
@@ -418,6 +439,155 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (sessionError)
                 return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.begin(input, principal.id)) })));
+        },
+        async artifactIngestFile(principal: Principal, input: Record<string, unknown>) {
+            const access = authorize(principal, "artifact.ingest_file", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
+            if (!access.ok)
+                return access;
+            const sessionError = checkArtifactTransportSession(principal, typeof input.session_id === "string" ? input.session_id : "");
+            if (sessionError)
+                return sessionError;
+            return (await safe(async () => {
+                const { path, delete_source, authorize_spool_access, idempotency_key, contract_version: _ignored, ...fence } = input as Record<string, unknown>;
+                if (authorize_spool_access !== true)
+                    throw new ContractValidationError("authorization_error", "host must explicitly authorize access to this task-session spool file");
+                if (typeof path !== "string" || !path.trim() || path.length > 4096 || path.includes("\0"))
+                    throw new ContractValidationError("validation_error", "path must be a bounded non-empty string");
+                if (delete_source !== undefined && typeof delete_source !== "boolean")
+                    throw new ContractValidationError("validation_error", "delete_source must be a boolean");
+                if (fence.storage_mode === "external")
+                    throw new ContractValidationError("validation_error", "ingest_file stores bytes; external registration is the zero-copy alternative and the modes are mutually exclusive");
+                const engagementId = String(fence.engagement_id);
+                const sessionId = String(fence.session_id);
+                const binding = (await store.artifactSessions({ engagement_id: engagementId, session_id: sessionId }))[0];
+                if (!binding || binding.engagement_id !== engagementId)
+                    throw new ContractValidationError("authorization_error", "no registered task-session binding for this engagement and session");
+                if (typeof constants.O_NOFOLLOW !== "number")
+                    throw new ContractValidationError("unsupported_capability", "this runtime cannot open spool files without following symlinks");
+                const rootReal = realpathSync(binding.root);
+                if (rootReal !== binding.root)
+                    throw new ContractValidationError("authorization_error", "registered task-session root identity changed");
+                const ingestRequestHash = requestDigest({ ...fence, path, delete_source, authorize_spool_access });
+                if (typeof idempotency_key === "string") {
+                  const prior = await store.artifactIdempotencyResult(idempotency_key, "artifact.ingest_file", principal.id, engagementId, ingestRequestHash) as Record<string, unknown> | undefined;
+                  if (prior) return { ok: true as const, data: prior };
+                }
+                if ((path as string).split(/[\\/]+/).includes(".."))
+                    throw new ContractValidationError("validation_error", "ingest path cannot contain parent traversal");
+                const candidate = isAbsolute(path as string) ? resolve(path as string) : resolve(join(rootReal, path as string));
+                let sourceFd: number;
+                try { sourceFd = openSync(candidate, constants.O_RDONLY | constants.O_NOFOLLOW); }
+                catch { throw new ContractValidationError("validation_error", "ingest source file is unavailable or is a symlink"); }
+                try {
+                  const initial = fstatSync(sourceFd, { bigint: true });
+                  const sameObject = (left: typeof initial, right: typeof initial) => left.dev === right.dev && left.ino === right.ino;
+                  const sameFileState = (left: typeof initial, right: typeof initial) => sameObject(left, right) && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
+                  if (!initial.isFile()) throw new ContractValidationError("validation_error", "ingest path must reference a regular file");
+                  const targetReal = realpathSync(candidate);
+                  if (targetReal !== rootReal && !targetReal.startsWith(rootReal + sep))
+                    throw new ContractValidationError("validation_error", "ingest path escapes the session binding root");
+                  const entry = lstatSync(candidate, { bigint: true });
+                  if (entry.isSymbolicLink() || !sameObject(entry, initial))
+                    throw new ContractValidationError("conflict", "ingest source identity changed before reading");
+                  const sourceBytes = Number(initial.size);
+                  if (!Number.isSafeInteger(sourceBytes))
+                    throw new ContractValidationError("validation_error", "ingest source size exceeds the supported integer range");
+                  const configuredCap = process.env.TARIC_INGEST_MAX_BYTES;
+                  const cap = configuredCap === undefined || configuredCap === "" ? 2 * 1024 * 1024 * 1024 : Number(configuredCap);
+                  if (!Number.isSafeInteger(cap) || cap < 1)
+                    throw new ContractValidationError("validation_error", "TARIC_INGEST_MAX_BYTES must be a positive safe integer");
+                  if (sourceBytes < 1 || sourceBytes > cap)
+                    throw new ContractValidationError("validation_error", `ingest file must contain 1 byte to ${cap} bytes`);
+                  if (fence.expected_bytes !== undefined && fence.expected_bytes !== sourceBytes)
+                    throw new ContractValidationError("conflict", "expected byte count does not match the opened source");
+                // 幂等键按操作阶段派生：同键重放时 begin/append/commit 各自命中既有结果。
+                  const stageKeys = typeof idempotency_key === "string"
+                    ? { begin: `${idempotency_key}#begin`, append: (ordinal: number) => `${idempotency_key}#append:${ordinal}`, commit: `${idempotency_key}#commit` }
+                    : undefined;
+                  const begun = (await artifactStore.begin({
+                    ...fence,
+                    engagement_id: engagementId,
+                    session_id: sessionId,
+                    expected_bytes: sourceBytes,
+                    ...(stageKeys ? { idempotency_key: stageKeys.begin } : {}),
+                } as unknown as ArtifactBeginInput, principal.id)) as Record<string, unknown>;
+                // 顺序分块：appendBinaryStream 单次承载一个 ≤ ARTIFACT_CHUNK_BYTES 的块。
+                const uploadId = String(begun.upload_id);
+                let ordinal = 0;
+                let buffer = Buffer.alloc(0);
+                let totalBytes = 0;
+                const digest = createHash("sha256");
+                const appendChunk = async (chunk: Buffer) => {
+                    totalBytes += chunk.length;
+                    if (totalBytes > cap) throw new ContractValidationError("validation_error", `ingest file exceeds the ${cap} byte limit`);
+                    digest.update(chunk);
+                    const chunkHash = `sha256:${createHash("sha256").update(chunk).digest("hex")}`;
+                    await artifactStore.appendBinaryStream({
+                        engagement_id: engagementId, session_id: sessionId, upload_id: uploadId,
+                        ordinal, byte_length: chunk.length, chunk_hash: chunkHash,
+                        ...(stageKeys ? { idempotency_key: stageKeys.append(ordinal) } : {}),
+                    }, principal.id, (async function* singleton() { yield chunk; })());
+                    ordinal += 1;
+                };
+                  try {
+                    for await (const raw of createReadStream(candidate, { fd: sourceFd, autoClose: false, highWaterMark: ARTIFACT_CHUNK_BYTES })) {
+                      buffer = buffer.length === 0 ? Buffer.from(raw as Buffer) : Buffer.concat([buffer, raw as Buffer]);
+                      while (buffer.length >= ARTIFACT_CHUNK_BYTES) {
+                        const chunk = buffer.subarray(0, ARTIFACT_CHUNK_BYTES);
+                        await appendChunk(chunk);
+                        buffer = buffer.subarray(ARTIFACT_CHUNK_BYTES);
+                      }
+                    }
+                  } catch (cause) {
+                    if (cause instanceof ContractValidationError) throw cause;
+                    throw new ContractValidationError("conflict", "ingest source changed or could not be read completely");
+                  }
+                  if (buffer.length > 0) await appendChunk(buffer);
+                  if (ordinal === 0 || totalBytes !== sourceBytes)
+                    throw new ContractValidationError("conflict", "ingest source byte count changed while reading");
+                  const finalDescriptor = fstatSync(sourceFd, { bigint: true });
+                  let finalEntry: typeof initial;
+                  try { finalEntry = lstatSync(candidate, { bigint: true }); }
+                  catch { throw new ContractValidationError("conflict", "ingest source directory entry disappeared while reading"); }
+                  if (!sameFileState(initial, finalDescriptor) || finalEntry.isSymbolicLink() || !sameObject(finalEntry, initial))
+                    throw new ContractValidationError("conflict", "ingest source identity or contents changed while reading");
+                  const contentHash = `sha256:${digest.digest("hex")}`;
+                  if (typeof fence.expected_hash === "string" && fence.expected_hash !== contentHash)
+                    throw new ContractValidationError("conflict", "expected content hash does not match the opened source");
+                  const row = (await artifactStore.commit({
+                    engagement_id: engagementId, session_id: sessionId, upload_id: uploadId,
+                    total_bytes: totalBytes, content_hash: contentHash,
+                    ...(stageKeys ? { idempotency_key: stageKeys.commit } : {}),
+                  }, principal.id)) as unknown as Record<string, unknown>;
+                  const resultData: Record<string, unknown> = { ...begun, ...row, byte_length: totalBytes, content_hash: contentHash, delete_source_requested: delete_source === true, source_deleted: false };
+                  if (typeof idempotency_key === "string")
+                    await store.saveArtifactIdempotency(idempotency_key, "artifact.ingest_file", principal.id, engagementId, ingestRequestHash, resultData);
+                  // 删除只作用于仍指向已读 descriptor 的目录项；替换后保留当前文件。
+                  let sourceDeleted = false;
+                  let sourceDeleteReason: string | undefined;
+                  if (delete_source === true) {
+                    try {
+                      const deletionEntry = lstatSync(candidate, { bigint: true });
+                      const deletionDescriptor = fstatSync(sourceFd, { bigint: true });
+                      if (deletionEntry.isSymbolicLink() || !sameObject(deletionEntry, initial) || !sameFileState(initial, deletionDescriptor)) {
+                        sourceDeleteReason = "source directory entry or file identity changed; source preserved";
+                      } else {
+                        sourceDeleteReason = "runtime lacks atomic identity-safe unlink; source preserved for host/operator cleanup";
+                      }
+                    } catch { sourceDeleteReason = "source directory entry could not be verified; source preserved"; }
+                  }
+                  resultData.source_deleted = sourceDeleted;
+                  if (sourceDeleteReason) resultData.source_delete_reason = sourceDeleteReason;
+                  if (delete_source === true && typeof idempotency_key === "string")
+                    await store.updateArtifactIdempotencyResult(idempotency_key, "artifact.ingest_file", principal.id, engagementId, ingestRequestHash, resultData);
+                  return {
+                    ok: true as const,
+                    data: resultData,
+                  };
+                } finally {
+                  closeSync(sourceFd);
+                }
+            }));
         },
         async artifactStoreAppend(principal: Principal, input: ArtifactAppendInput) {
             const access = authorize(principal, "artifact.store.append", input.engagement_id);
@@ -650,6 +820,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return { ok: true as const, data: (await store.submitReview({ proposal_id: input.proposal_id, reviewer_id: principal.id, reviewer_kind: "reviewer", input_hash: input.input_hash, verdict: input.verdict, policy_digest: input.policy_digest, evidence_snapshot_hash: input.evidence_snapshot_hash, rubric_hash: input.rubric_hash, limitations: input.limitations, idempotencyKey: input.idempotency_key, principal: principal.id, reviewer_capability: attestation?.capability ?? "model", reviewer_model: attestation?.model, prompt_digest: attestation?.prompt_digest, ruleset_digest: attestation?.ruleset_digest })) };
             }));
         },
+        async reviewPack(principal: Principal, input: { engagement_id: string; proposal_id: string }) {
+            const response = authorize(principal, "review.pack", input.engagement_id);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => ({ ok: true as const, data: await store.reviewPack(input.engagement_id, input.proposal_id) })));
+        },
         async admitProposal(principal: Principal, input: {
             engagement_id: string;
             proposal_id: string;
@@ -694,6 +870,123 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (!response.ok)
                 return response;
             return (await safe(async () => ({ ok: true as const, data: (await store.proposalsPage({ ...input, principal_id: principal.id, cursor_key_root: contentRoot })) })));
+        },
+        async workQuery(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "work.query", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => {
+                const allowed = new Set(["engagement_id", "resource_refs", "status", "include_active_runs", "page_size", "cursor", "contract_version"]);
+                if (Object.keys(input).some((field) => !allowed.has(field)))
+                    return error("validation_error", "work query contains unsupported fields");
+                const engagementId = String(input.engagement_id);
+                const statuses = ["queued", "claimed", "in_progress", "checkpointed", "blocked", "completed", "failed", "cancelled", "lost"];
+                const stringList = (value: unknown, name: string, bound: number, vocabulary?: readonly string[]): string[] | undefined => {
+                    if (value === undefined)
+                        return undefined;
+                    if (!Array.isArray(value) || value.length === 0 || value.length > bound || value.some((item) => typeof item !== "string"))
+                        throw new ContractValidationError("validation_error", `${name} must be a non-empty string array of at most ${bound} items`);
+                    if (vocabulary && value.some((item) => !vocabulary.includes(item)))
+                        throw new ContractValidationError("validation_error", `${name} contains an unsupported work status`);
+                    return value as string[];
+                };
+                const resourceRefs = stringList(input.resource_refs, "resource_refs", 16);
+                resourceRefs?.forEach((ref) => {
+                    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ref))
+                        throw new ContractValidationError("validation_error", "resource_refs entries must be record ids");
+                });
+                const status = stringList(input.status, "status", 9, statuses);
+                if (input.include_active_runs !== undefined && typeof input.include_active_runs !== "boolean")
+                    throw new ContractValidationError("validation_error", "include_active_runs must be a boolean");
+                if (input.page_size !== undefined && (!Number.isSafeInteger(input.page_size) || (input.page_size as number) < 1 || (input.page_size as number) > 200))
+                    throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
+                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 512))
+                    throw new ContractValidationError("validation_error", "cursor must be a bounded string");
+                const page = (await store.workItemsPage({
+                    engagement_id: engagementId,
+                    principal_id: principal.id,
+                    cursor_key_root: contentRoot,
+                    ...(input.cursor === undefined ? {} : { cursor: input.cursor as string }),
+                    ...(input.page_size === undefined ? {} : { page_size: input.page_size as number }),
+                    ...(resourceRefs === undefined ? {} : { resource_refs: resourceRefs }),
+                    ...(status === undefined ? {} : { status }),
+                    include_active_runs: input.include_active_runs === true,
+                }));
+                return {
+                    ok: true as const,
+                    data: {
+                        engagement_id: engagementId,
+                        items: principal.role === "model" ? page.items.map(projectModelWorkItem) : page.items,
+                        has_more: page.has_more,
+                        ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }),
+                        read_seq: page.read_seq,
+                        scan_stats: { scanned_rows: page.scanned_rows, returned_rows: page.returned_rows },
+                    },
+                };
+            }));
+        },
+        async coverageGate(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "coverage.gate", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => {
+                const allowed = new Set(["engagement_id", "contract_version"]);
+                if (Object.keys(input).some((field) => !allowed.has(field)))
+                    return error("validation_error", "coverage gate contains unsupported fields");
+                const engagementId = String(input.engagement_id);
+                const snapshot = await coverageGateSnapshot(store, engagementId);
+                return {
+                    ok: true as const,
+                    data: snapshot,
+                };
+            }));
+        },
+        async coverageQuery(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "coverage.query", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => {
+                const allowed = new Set(["engagement_id", "resource_ref", "test_category", "status", "include_candidates", "page_size", "cursor", "contract_version"]);
+                if (Object.keys(input).some((field) => !allowed.has(field)))
+                    return error("validation_error", "coverage query contains unsupported fields");
+                const engagementId = String(input.engagement_id);
+                const statuses = ["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"];
+                if (input.resource_ref !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(input.resource_ref)))
+                    throw new ContractValidationError("validation_error", "resource_ref must be a record id");
+                if (input.test_category !== undefined && (typeof input.test_category !== "string" || input.test_category.length > 128))
+                    throw new ContractValidationError("validation_error", "test_category must be a bounded string");
+                if (input.status !== undefined && (typeof input.status !== "string" || !statuses.includes(input.status)))
+                    throw new ContractValidationError("validation_error", "status contains an unsupported coverage status");
+                if (input.include_candidates !== undefined && typeof input.include_candidates !== "boolean")
+                    throw new ContractValidationError("validation_error", "include_candidates must be a boolean");
+                if (input.page_size !== undefined && (!Number.isSafeInteger(input.page_size) || (input.page_size as number) < 1 || (input.page_size as number) > 200))
+                    throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
+                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 512))
+                    throw new ContractValidationError("validation_error", "cursor must be a bounded string");
+                const page = (await store.coverageCellsPage({
+                    engagement_id: engagementId,
+                    principal_id: principal.id,
+                    cursor_key_root: contentRoot,
+                    ...(input.cursor === undefined ? {} : { cursor: input.cursor as string }),
+                    ...(input.page_size === undefined ? {} : { page_size: input.page_size as number }),
+                    ...(input.resource_ref === undefined ? {} : { resource_ref: String(input.resource_ref) }),
+                    ...(input.test_category === undefined ? {} : { test_category: input.test_category as string }),
+                    ...(input.status === undefined ? {} : { status: input.status as string }),
+                    // 模型主体永不接收候选 cell；host/operator 显式请求才包含。
+                    include_candidates: principal.role === "model" ? false : input.include_candidates === true,
+                }));
+                return {
+                    ok: true as const,
+                    data: {
+                        engagement_id: engagementId,
+                        cells: page.cells,
+                        has_more: page.has_more,
+                        ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }),
+                        read_seq: page.read_seq,
+                        scan_stats: { scanned_rows: page.scanned_rows, returned_rows: page.returned_rows },
+                    },
+                };
+            }));
         },
         async workClaim(principal: Principal, input: {
             engagement_id: string;
@@ -1021,8 +1314,8 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 const config = entry && typeof entry === "object" && !Array.isArray(entry)
                     ? entry as Record<string, unknown>
                     : undefined;
-                const expectedVersion = "version" in manifest ? manifest.version : "1.1.0";
-                const expectedCommit = "commit" in manifest ? manifest.commit : "7c10bd4";
+                const expectedVersion = "version" in manifest ? manifest.version : "1.4.0";
+                const expectedCommit = "commit" in manifest ? manifest.commit : "4a08025";
                 const version = typeof config?.version === "string" ? config.version : undefined;
                 const commit = typeof config?.commit === "string" ? config.commit : undefined;
                 return {
@@ -1082,7 +1375,8 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
         } : TARIC_COMPATIBILITY_MANIFEST;
         const unsupported = Object.fromEntries(compatibilityManifest.capabilities.filter((item) => item.state === "unsupported").map((item) => [item.id, item.follow_up ?? "complete-taric-runtime-gaps"]));
             return { ok: true as const, data: {
-                    schema_version: API_CONTRACT_VERSION,
+                    schema_version: SCHEMA_VERSION,
+                    api_contract_version: API_CONTRACT_VERSION,
                 compatibility_manifest: compatibilityManifest,
                     // 支持名单必须来自统一操作注册表，避免 Core、CLI、MCP 与 Pi 各维护一份。
                     supported_operations: operationContracts.map((contract) => contract.operation),
@@ -1102,7 +1396,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return error("unsupported_capability", `${host} has no verified native hooks`, "MCP/CLI fallback remains available");
             const config = readAdapterConfig();
             const adapters = (config.adapters && typeof config.adapters === "object" ? config.adapters : {}) as Record<string, unknown>;
-            adapters[host] = { enabled: true, version: "version" in evidence ? evidence.version : "1.1.0", commit: "commit" in evidence ? evidence.commit : "7c10bd4" };
+            adapters[host] = { enabled: true, version: "version" in evidence ? evidence.version : "1.4.0", commit: "commit" in evidence ? evidence.commit : "4a08025" };
             config.adapters = adapters;
             saveAdapterConfig(config);
             return { ok: true as const, data: { host, installed: true, config_path: adapterConfigPath() } };
@@ -1140,9 +1434,141 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             return { ok: true as const, data: { host, config: adapters[host], config_path: adapterConfigPath() } };
         }
     };
+    // ── 宿主面订阅信号（L0）──────────────────────────────────────────────
+    // 触发机制：内部定时器轮询驱动水位（dataVersion），零提交路径侵入。
+    // 信号无内容（topic + 水位）；每次投递前重鉴权，失效即静默退订。
+    const subscriptionTopics = ["delta", "l1_backlog", "impact_pending", "lease_expiry", "artifact_integrity"] as const;
+    type SubscriptionTopicState = Awaited<ReturnType<AuthorityStore["subscriptionTopicStates"]>>;
+    interface HostSubscription {
+        principal: Principal;
+        engagementId: string;
+        topics: Set<string>;
+        debounceMs: number;
+        l1BacklogThreshold: number;
+        topicStates: SubscriptionTopicState;
+        lastReadSeq: number;
+        onSignal: (signal: { topic: string; engagement_id: string; read_seq: number; emitted_at: string }) => void;
+        pendingEmission?: NodeJS.Timeout;
+        closed: boolean;
+    }
+    const hostSubscriptions = new Set<HostSubscription>();
+    let watermarkTimer: NodeJS.Timeout | undefined;
+    let leaseWakeTimer: NodeJS.Timeout | undefined;
+    let lastWatermarkVersion: number | string | undefined;
+    const stopSubscriptionTimers = (): void => {
+        if (watermarkTimer) { clearInterval(watermarkTimer); watermarkTimer = undefined; }
+        if (leaseWakeTimer) { clearInterval(leaseWakeTimer); leaseWakeTimer = undefined; }
+        lastWatermarkVersion = undefined;
+    };
+    const deliverSubscription = async (subscription: HostSubscription): Promise<void> => {
+        if (subscription.closed) return;
+        // 投递前重鉴权：权限失效即静默退订（不向 onSignal 抛错）。
+        const access = authorize(subscription.principal, "context.query", subscription.engagementId);
+        if (!access.ok) { removeSubscription(subscription); return; }
+        const states = await store.subscriptionTopicStates(subscription.engagementId, subscription.l1BacklogThreshold);
+        if (subscription.closed) return;
+        const due: string[] = [];
+        if (subscription.topics.has("delta") && states.committed_seq > subscription.lastReadSeq) due.push("delta");
+        for (const topic of ["l1_backlog", "impact_pending", "lease_expiry", "artifact_integrity"] as const)
+            if (subscription.topics.has(topic) && states[topic] !== subscription.topicStates[topic]) due.push(topic);
+        subscription.topicStates = states;
+        subscription.lastReadSeq = Math.max(subscription.lastReadSeq, states.committed_seq);
+        if (due.length === 0) return;
+        const emittedAt = new Date().toISOString();
+        for (const topic of due) {
+            try { subscription.onSignal({ topic, engagement_id: subscription.engagementId, read_seq: states.committed_seq, emitted_at: emittedAt }); }
+            catch { /* Notification callbacks are best-effort; host polling remains authoritative. */ }
+        }
+    };
+    const removeSubscription = (subscription: HostSubscription): void => {
+        subscription.closed = true;
+        if (subscription.pendingEmission) clearTimeout(subscription.pendingEmission);
+        hostSubscriptions.delete(subscription);
+        if (hostSubscriptions.size === 0) stopSubscriptionTimers();
+        else if (![...hostSubscriptions].some((candidate) => candidate.topics.has("lease_expiry")) && leaseWakeTimer) {
+            clearInterval(leaseWakeTimer);
+            leaseWakeTimer = undefined;
+        }
+    };
+    const scheduleEvaluation = (subscription: HostSubscription): void => {
+        if (subscription.closed || subscription.pendingEmission) return;
+        // A single trailing evaluation merges state changes during the debounce window.
+        subscription.pendingEmission = setTimeout(() => {
+            subscription.pendingEmission = undefined;
+            void deliverSubscription(subscription).catch(() => undefined);
+        }, subscription.debounceMs);
+    };
+    const pollWatermark = (): void => {
+        void (async () => {
+            const version = await store.dataVersion();
+            if (Number.isNaN(version)) return; // NaN 后端（PG）：订阅在注册时已拒绝
+            if (version === lastWatermarkVersion) return;
+            lastWatermarkVersion = version;
+            for (const subscription of [...hostSubscriptions]) scheduleEvaluation(subscription);
+        })().catch(() => undefined);
+    };
+    const wakeLeaseSubscriptions = (): void => {
+        for (const subscription of [...hostSubscriptions])
+            if (subscription.topics.has("lease_expiry")) scheduleEvaluation(subscription);
+    };
+    const subscribe: CoreService["subscribe"] = async (principal, options, onSignal) => {
+        // 订阅是宿主面能力：模型主体永不订阅（即便 context.query 对其开放）。
+        if (principal.role !== "host" && principal.role !== "operator")
+            throw new ContractValidationError("authorization_error", "subscription is a host/operator surface");
+        const access = authorize(principal, "context.query", typeof options.engagement_id === "string" ? options.engagement_id : undefined);
+        if (!access.ok) throw new ContractValidationError("authorization_error", access.error.message);
+        const debounceMs = options.debounce_ms ?? 1000;
+        if (!Number.isSafeInteger(debounceMs) || debounceMs < 10 || debounceMs > 10_000)
+            throw new ContractValidationError("validation_error", "debounce_ms must be an integer between 10 and 10000");
+        const requested = options.topics === undefined ? ["delta"] : options.topics;
+        if (!Array.isArray(requested) || requested.length === 0 || requested.some((topic) => typeof topic !== "string" || !(subscriptionTopics as readonly string[]).includes(topic)))
+            throw new ContractValidationError("validation_error", `topics must be a non-empty subset of ${subscriptionTopics.join("|")}`);
+        const topics = new Set(requested);
+        const l1BacklogThreshold = options.l1_backlog_threshold ?? 1;
+        if (topics.has("l1_backlog")) {
+            if (!Number.isSafeInteger(options.l1_backlog_threshold) || (options.l1_backlog_threshold as number) < 1 || (options.l1_backlog_threshold as number) > 100_000)
+                throw new ContractValidationError("validation_error", "l1_backlog_threshold must be an integer between 1 and 100000");
+        } else if (options.l1_backlog_threshold !== undefined) {
+            throw new ContractValidationError("validation_error", "l1_backlog_threshold is only valid for the l1_backlog topic");
+        }
+        const initialStates = await store.subscriptionTopicStates(options.engagement_id, l1BacklogThreshold);
+        if (options.since_read_seq !== undefined && (!Number.isSafeInteger(options.since_read_seq) || options.since_read_seq < 0 || options.since_read_seq > initialStates.committed_seq))
+            throw new InvalidCursorError("since_read_seq must be a committed non-negative watermark");
+        // 后端水印不可用（如 PostgreSQL dataVersion=NaN）时如实拒绝，不假装支持。
+        const version = await store.dataVersion();
+        if (Number.isNaN(version))
+            throw new ContractValidationError("unsupported_capability", "backend watermark is unavailable; polling remains the recovery path");
+        if (hostSubscriptions.size >= 256)
+            throw new ContractValidationError("unavailable_host", "subscription capacity is full; use host.state polling");
+        const subscription: HostSubscription = {
+            principal, engagementId: options.engagement_id, topics, debounceMs, l1BacklogThreshold,
+            topicStates: initialStates, lastReadSeq: options.since_read_seq ?? initialStates.committed_seq,
+            onSignal, closed: false,
+        };
+        hostSubscriptions.add(subscription);
+        if (!watermarkTimer) {
+            watermarkTimer = setInterval(pollWatermark, 200);
+            watermarkTimer.unref?.();
+        }
+        if (topics.has("lease_expiry") && !leaseWakeTimer) {
+            // Time-driven lease state is checked on a bounded timer even when no SQL commit occurs.
+            leaseWakeTimer = setInterval(wakeLeaseSubscriptions, 250);
+            leaseWakeTimer.unref?.();
+        }
+        // Register between two reads: changes during registration and any caller watermark lag
+        // become a delta hint, then the host resumes from the last authoritative sequence.
+        const afterRegistration = await store.subscriptionTopicStates(options.engagement_id, l1BacklogThreshold);
+        if (afterRegistration.committed_seq > subscription.lastReadSeq) scheduleEvaluation(subscription);
+        return { unsubscribe: () => removeSubscription(subscription) };
+    };
     return {
         ...api,
-        close: () => store.close(),
+        close: async () => {
+            for (const subscription of [...hostSubscriptions]) removeSubscription(subscription);
+            stopSubscriptionTimers();
+            await store.close();
+        },
+        subscribe,
         async dispatch(operation, principal, request) {
             if (Object.prototype.hasOwnProperty.call(deferred, operation))
                 return error("unsupported_capability", `operation is deferred to ${deferred[operation as keyof typeof deferred]}`, deferred[operation as keyof typeof deferred]);
@@ -1156,7 +1582,11 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const access = authorize(principal, operation, requestedEngagement);
             if (!access.ok)
                 return access;
-            if (operation.startsWith("artifact.")) {
+            if (operation === "review.submit" && (request.reviewer_id !== principal.id || request.reviewer_kind !== "reviewer"))
+                return error("authorization_error", "reviewer identity is bound to the authenticated principal");
+            if (operation === "review.submit" && ["reviewer_capability", "reviewer_model", "prompt_digest", "ruleset_digest"].some((field) => Object.prototype.hasOwnProperty.call(request, field)))
+                return error("authorization_error", "reviewer attestation is assigned by the authenticated transport");
+            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit") {
                 const requestContract = operationContract(operation)!.request as ContractName;
                 let validate = operationRequestValidators.get(requestContract);
                 if (!validate) {
@@ -1166,7 +1596,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!validate || !validate(request))
                     return error("validation_error", `invalid ${operation} request`);
             }
-            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.query": "coverageQuery", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
             aliases["host.state"] = "hostState";
             const methodName = aliases[operation] ?? operation;
             if (operation === "admission.promote_l2")
@@ -1295,7 +1725,7 @@ async function hostTransportAttribution(store: AuthorityStore, principal: Princi
 function capabilityForOperation(operation: string): PrincipalCapability | undefined {
     if (operation === "admission.promote_l2")
         return "writer";
-    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "control.list", "host.state", "engagement.status"].includes(operation))
+    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "review.pack", "control.list", "host.state", "engagement.status", "work.query", "coverage.gate", "coverage.query"].includes(operation))
         return "read";
     if (["proposal.submit", "capture.observation", "checkpoint.propose", "action.recommend"].includes(operation))
         return "propose";

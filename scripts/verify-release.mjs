@@ -17,7 +17,7 @@ const collect = (path) => {
   }
 };
 collect(join(root, "packages")); collect(join(root, "scripts"));
-sourceFiles.push("package.json", "package-lock.json", "tsconfig.json", "AGENTS.md", "readme.md"); sourceFiles.sort();
+sourceFiles.push("package.json", "package-lock.json", "compatibility-matrix.json", "tsconfig.json", "AGENTS.md", "readme.md"); sourceFiles.sort();
 const sourceDigest = digest(Buffer.concat(sourceFiles.flatMap((path) => [Buffer.from(`${path}\0`), readFileSync(join(root, path)), Buffer.from("\0")])));
 const bunVersion = spawnSync("bun", ["--version"], { cwd: root, encoding: "utf8" });
 const runtimeVersions = {
@@ -34,7 +34,7 @@ const buildDigest = (checkout) => {
       else if (entry.isFile()) files.push(relative(checkout, child));
     }
   };
-  for (const packageName of ["schemas", "core", "cli", "mcp"]) visit(join(checkout, "packages", packageName, "dist"));
+  for (const packageName of ["schemas", "core", "cli", "mcp", "driver-bun-sqlite"]) visit(join(checkout, "packages", packageName, "dist"));
   files.sort();
   return digest(Buffer.concat(files.flatMap((path) => [Buffer.from(`${path}\0`), readFileSync(join(checkout, path)), Buffer.from("\0")])));
 };
@@ -61,11 +61,13 @@ try {
   for (const path of sourceFiles) { const target = join(directory, path); mkdirSync(dirname(target), { recursive: true }); cpSync(join(root, path), target); }
   for (const path of ["docs", "openspec"]) cpSync(join(root, path), join(directory, path), { recursive: true });
   const built = run("dependencies", "npm", ["ci", "--ignore-scripts"]) && run("clean-build", "npm", ["run", "build"]) && run("typecheck", "npm", ["run", "typecheck"]);
-  if (built) for (const packageName of ["schemas", "core", "cli", "mcp", "hermes"]) {
+  if (built) for (const packageName of ["schemas", "core", "cli", "mcp", "hermes", "driver-bun-sqlite"]) {
     if (packageName === "hermes") run("tests:hermes", "python3", ["-m", "unittest", "discover", "-s", "tests"], join(directory, "packages/hermes-plugin"));
+    else if (packageName === "driver-bun-sqlite") { if (bunVersion.status === 0) run("tests:driver-bun-sqlite", "bun", ["test"], join(directory, "packages/driver-bun-sqlite")); }
     else run(`tests:${packageName}`, process.execPath, ["--test", "--test-concurrency=2", "--test-reporter=tap"], join(directory, "packages", packageName));
   }
   if (built) run("documentation-links", process.execPath, ["scripts/check-doc-links.mjs"]);
+  if (built) run("compatibility-matrix", process.execPath, ["scripts/emit-compatibility-matrix.mjs", "--check"]);
   let live;
   if (built && liveRequested) {
     const livePath = join(directory, "postgres-runtime-verification.json");

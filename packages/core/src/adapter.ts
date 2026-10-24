@@ -48,6 +48,8 @@ export interface AdapterDescriptor {
   certification_evidence?: AdapterCertificationEvidence[];
   /** Static certification is supplied by Taric's manifest, never by a capability declaration. */
   native_certified?: boolean;
+  /** Version-gate outcome: certified (full) / not_certified (same-major safe subset) / unsupported (far). */
+  certification_state?: "certified" | "not_certified" | "unsupported";
   /** Quality-release evidence is independent from technical capability evidence. */
   quality_release_state?: "verified" | "pending" | "blocked";
   fallback?: string[];
@@ -108,6 +110,8 @@ export interface AdapterCapabilityReport {
   commit?: string;
   host_commit?: string;
   supported: boolean;
+  /** Version-gate outcome surfaced next to `supported`; uncertified never reports supported. */
+  certification_state?: "certified" | "not_certified" | "unsupported";
   capabilities: AdapterCapability[];
   unsupported_capabilities: string[];
   service_connected: boolean;
@@ -232,18 +236,22 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   status(): AdapterCapabilityReport {
+    const certification = this.descriptor.certification_state ?? (this.descriptor.supported ? "certified" : "unsupported");
     const certificationVerified = this.hasCurrentCertificationEvidence();
-    const registeredCapabilities = this.#runtimeInitialized ? this.#availableCapabilities : [];
-    const available = this.descriptor.supported && certificationVerified && this.#principal.transport_verified === true ? [...registeredCapabilities] : [];
-    const evidence = this.currentEvidenceState();
+    // certified 需完整取证；not_certified 允许 descriptor 声明的安全子集以
+    // evidence_state "pending" 运行；unsupported 不激活任何运行时能力。
+    const runtimeAllowed = certification === "certified" ? this.descriptor.supported && certificationVerified : certification === "not_certified";
+    const registeredCapabilities = this.#runtimeInitialized ? [...this.#availableCapabilities] : [];
+    const available = runtimeAllowed && this.#principal.transport_verified === true ? registeredCapabilities : [];
+    const evidence = runtimeAllowed && certification === "not_certified" ? "pending" : this.currentEvidenceState();
     const quality = this.descriptor.quality_release_state ?? "pending";
-    const implementation_state = this.descriptor.supported && certificationVerified ? "available" : "unavailable";
+    const implementation_state = runtimeAllowed ? "available" : "unavailable";
     const runtime_state = available.length > 0 ? "enabled" : "disabled";
     const authorization_state = this.#principal.transport_verified === true && Boolean(this.#principal.engagement_id) ? "authorized" : "unauthorized";
     const capability_status = Object.fromEntries(adapterCapabilities.map((capability) => {
       const enabled = available.includes(capability);
       return [capability, {
-        implementation_state: this.descriptor.supported && this.descriptor.capabilities.includes(capability) ? "available" : "unavailable",
+        implementation_state: runtimeAllowed && this.descriptor.capabilities.includes(capability) ? "available" : "unavailable",
         runtime_state: enabled && runtime_state === "enabled" ? "enabled" : "disabled",
         authorization_state,
         evidence_state: enabled ? evidence : (evidence === "verified" ? "pending" : evidence),
@@ -261,6 +269,7 @@ export class TaricAdapterClient implements AdapterClient {
       commit: this.descriptor.commit ?? this.descriptor.host_commit,
       host_commit: this.descriptor.host_commit,
       supported: this.descriptor.supported && certificationVerified,
+      certification_state: certification,
       capabilities: [...available],
       unsupported_capabilities: [...(this.descriptor.unsupported_capabilities ?? [])],
       service_connected: this.#serviceContacted,
@@ -286,6 +295,9 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   private reasonForUnavailable(capability: AdapterCapability): string {
+    const certification = this.descriptor.certification_state ?? (this.descriptor.supported ? "certified" : "unsupported");
+    if (certification === "unsupported") return "host version is outside the certified line";
+    if (certification === "not_certified" && !this.descriptor.capabilities.includes(capability)) return "capability requires a certified host version";
     if (!this.descriptor.supported || !this.hasCurrentCertificationEvidence()) return "unknown release or missing matching certification evidence";
     if (this.#principal.transport_verified !== true || !this.#principal.engagement_id) return "authenticated Engagement binding is unavailable";
     if (!this.#runtimeInitialized) return "adapter instance has not registered runtime hooks or tools";
@@ -317,7 +329,10 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   async register(extension: PiExtensionApi, binding: PiRuntimeBinding = {}): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }> {
-    if (this.descriptor.host_id !== "pi" || !this.descriptor.supported) throw new ContractValidationError("unsupported_capability", "unsupported_capability");
+    const certification = this.descriptor.certification_state ?? (this.descriptor.supported ? "certified" : "unsupported");
+    // not_certified（同 major 未认证）允许注册以绑定只读安全子集；unsupported 拒绝。
+    if (this.descriptor.host_id !== "pi" || certification === "unsupported") throw new ContractValidationError("unsupported_capability", "unsupported_capability");
+    const certifiedRuntime = certification === "certified";
     if (this.#principal.role !== "host" || !this.#principal.id || this.#principal.transport_verified !== true || !this.#principal.engagement_id) throw new ContractValidationError("authorization_error", "authorization_error");
     // /reload 会重新调用工厂。这里保证同一实例重复注册不会产生第二次业务副作用。
     if (this.#loaded) return { loaded: true, callbacks: [], hooks: [], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };
@@ -327,13 +342,15 @@ export class TaricAdapterClient implements AdapterClient {
 
     const hooks = ["session_start", "context", "before_agent_start", "agent_before_settle", "tool_result", "session_shutdown"];
     // `callbacks` is the stable Taric lifecycle vocabulary. `hooks` below is
-    // the concrete Pi 1.1.0 registration list; Pi has no native proposal,
-    // checkpoint, action, result, or error event names.
+    // the concrete Pi 1.x registration list (unchanged through 1.4.0); Pi has
+    // no native proposal, checkpoint, action, result, or error event names.
     const callbacks: PiLifecycleEventName[] = ["session_start", "context"];
     extension.on("session_start", async (raw) => this.handle("session_start", raw));
     extension.on("context", async (raw) => this.handle("context", raw));
     extension.on("before_agent_start", async (raw) => this.handle("context", raw));
     extension.on("agent_before_settle", async (raw) => {
+      // 权威写入面（checkpoint/error.report）仅认证版本可触达。
+      if (!certifiedRuntime) return undefined;
       const event = raw as { outcome?: unknown };
       if (binding.checkpoint && this.hasRunBinding(binding) && event?.outcome !== "error") {
         const checkpoint = binding.checkpoint(raw);
@@ -345,6 +362,8 @@ export class TaricAdapterClient implements AdapterClient {
       return undefined;
     });
     extension.on("tool_result", async (raw) => {
+      // 权威写入面（error.report/action.host-result）仅认证版本可触达。
+      if (!certifiedRuntime) return undefined;
       const event = raw as { toolCallId?: unknown; toolName?: unknown; isError?: unknown };
       if (event?.isError === true) {
         return this.call("error.report", { engagement_id: this.#principal.engagement_id, error_ref: typeof event.toolCallId === "string" ? event.toolCallId : undefined, message: `Pi tool ${typeof event.toolName === "string" ? event.toolName : "unknown"} failed` });
@@ -355,14 +374,16 @@ export class TaricAdapterClient implements AdapterClient {
       }
       return undefined;
     });
-    if (extension.registerTool) {
+    if (certifiedRuntime && extension.registerTool) {
       extension.registerTool(this.proposalTool(binding));
       if (binding.recommendationForTool && this.hasRunBinding(binding)) hooks.push("tool_call");
-      if (binding.recommendationForTool && this.hasRunBinding(binding)) extension.on("tool_call", async (raw) => {
-        const recommendation = binding.recommendationForTool?.(raw);
-        if (!recommendation) return undefined;
-        return this.call("action.recommend", { ...recommendation, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
-      });
+      if (binding.recommendationForTool && this.hasRunBinding(binding)) {
+        extension.on("tool_call", async (raw) => {
+          const recommendation = binding.recommendationForTool?.(raw);
+          if (!recommendation) return undefined;
+          return this.call("action.recommend", { ...recommendation, engagement_id: this.#principal.engagement_id, work_run_id: binding.work_run_id, generation: binding.generation });
+        });
+      }
       hooks.push("registerTool:taric_proposal");
       if (binding.recommendationForTool && this.hasRunBinding(binding)) {
         extension.registerTool(this.actionRecommendationTool(binding));
@@ -380,6 +401,8 @@ export class TaricAdapterClient implements AdapterClient {
       ...(binding.checkpoint && hasRunBinding ? ["checkpoint"] as AdapterCapability[] : []),
       ...(binding.resultForTool && hasRunBinding ? ["host_result"] as AdapterCapability[] : []),
     ];
+    // 未认证版本收敛到 descriptor 声明的安全子集/最小集。
+    if (!certifiedRuntime) this.#availableCapabilities = this.#availableCapabilities.filter((capability) => this.descriptor.capabilities.includes(capability));
     this.#runtimeInitialized = true;
     this.#loaded = true;
     return { loaded: true, callbacks, hooks: [...hooks], available_capabilities: [...this.#availableCapabilities], missing_capabilities: adapterCapabilities.filter((item) => !this.#availableCapabilities.includes(item)), reload_idempotent: true };

@@ -193,6 +193,8 @@ test("trusted Node principals complete the governed finding flow without expandi
     assert.equal(l1.data.trust_phase, "machine_approved");
     assert.equal(l1.data.record.trust_level, "L1");
     assert.ok(l1.data.remaining_l2_requirements.includes("independent_review"));
+    const reviewPack = await operator.call("review.pack", { engagement_id: engagementId, proposal_id: finding.data.id });
+    assert.equal(reviewPack.ok, true);
 
     const reviewInput = {
       engagement_id: engagementId,
@@ -200,6 +202,7 @@ test("trusted Node principals complete the governed finding flow without expandi
       reviewer_id: reviewerA.principal.id,
       reviewer_kind: "reviewer",
       input_hash: finding.data.content_hash,
+      evidence_snapshot_hash: reviewPack.data.evidence_snapshot_hash,
       policy_digest: policyDigest,
       verdict: "pass",
       limitations: ["automated fixture review; no claim of human review"],

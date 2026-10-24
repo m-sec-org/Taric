@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.submit", "admission.evaluate", "admission.promote_l2", "capture.observation", "control.list", "host.state", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "artifact.session.bind", "artifact.store.begin", "artifact.store.append", "artifact.store.append-file", "artifact.store.commit", "artifact.metadata", "artifact.content.read", "artifact.content.list", "artifact.session.output", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
+export const cliCommands = ["engagement.init", "engagement.status", "context.build", "query", "proposal.submit", "proposal.list", "review.pack", "review.submit", "admission.evaluate", "admission.promote_l2", "capture.observation", "control.list", "host.state", "control.observe", "access.observe", "work.claim", "work.renew", "work.reclaim", "work.resume", "checkpoint.propose", "checkpoint.commit", "action.recommend", "action.host-decision", "action.host-result", "action.reconcile", "artifact.session.bind", "artifact.store.begin", "artifact.store.append", "artifact.store.append-file", "artifact.store.commit", "artifact.metadata", "artifact.content.read", "artifact.content.list", "artifact.session.output", "audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "resource.revise", "resource.patch", "resource.relation", "resource.impact", "adapter.status", "adapter.install", "adapter.remove", "adapter.config", "capability.status"] as const;
 
 /** 二级动词白名单。只有这里列出的组合才会被转发到 Core，未知组合不猜测。 */
 export const cliSubcommands: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -116,7 +116,7 @@ export function normalizeCliOperation(argv: string[]): string {
 
 export function cliHelp(): string {
   const groups = Object.entries(cliSubcommands).map(([group, verbs]) => `  ${group} ${verbs.join("|")}`).join("\n");
-  return `usage: taric <operation> [json]\n  <json> 必须是 JSON 对象；成功输出 stdout，失败输出 stderr\n  artifact.store.append-file <metadata-json> <path> streams one local file up to 64 MiB\n\n别名:\n  init status propose review capture query capability.status adapter.status\n\n分组命令:\n${groups}\n\n完整 operation 清单:\n  ${cliCommands.join("\n  ")}`;
+  return `usage: taric <operation> [json]\n  <json> 必须是 JSON 对象；成功输出 stdout，失败输出 stderr\n  artifact.store.append-file <metadata-json> <path> streams one local file up to 64 MiB\n  review --proposal <id> | --input-hash <sha256> --export | --submit-result <path> exports or forwards an external result\n  review submission requires trusted TARIC_REVIEWER_ID and TARIC_REVIEWER_ATTESTATION host configuration\n  Taric review does not call providers, select reviewers, or generate verdicts\n\n别名:\n  init status propose review capture query capability.status adapter.status\n\n分组命令:\n${groups}\n\n完整 operation 清单:\n  ${cliCommands.join("\n  ")}`;
 }
 
 function cliError(exitCode: CliExitCode, code: string, message: string) {
@@ -136,6 +136,25 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     }
     const { runProxyMain } = await import("./proxy.js");
     return await runProxyMain() as CliExitCode;
+  }
+  if (argv[0] === "gateway") {
+    const configFlag = argv.indexOf("--config");
+    const configPath = configFlag >= 0 ? argv[configFlag + 1] : undefined;
+    const { runGatewayMain } = await import("./gateway.js");
+    return await runGatewayMain(configPath) as CliExitCode;
+  }
+  // `taric review --proposal …` exports the admission-bound fixed pack or
+  // forwards an external result; `taric review '<json>'` remains review.submit.
+  if (argv[0] === "review" && (argv.length === 1 || (argv[1] ?? "").startsWith("--"))) {
+    const { runReviewHarness } = await import("./review.js");
+    try {
+      const result = await runReviewHarness(argv.slice(1));
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return result.ok && result.submitted ? 0 : result.ok ? 0 : 1;
+    } catch (cause) {
+      process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "review_harness_failed", message: cause instanceof Error ? cause.message : "review harness failed" } })}\n`);
+      return 1;
+    }
   }
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
     process.stdout.write(`taric ${API_CONTRACT_VERSION}\n${cliHelp()}\n`);

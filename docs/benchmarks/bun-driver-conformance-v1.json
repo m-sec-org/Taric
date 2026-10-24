@@ -1,0 +1,109 @@
+{
+  "version": "bun-driver-conformance/1",
+  "runtime": "bun 1.3.13",
+  "generated_at": "2026-10-23T02:27:47.073Z",
+  "report": {
+    "version": "authority-runtime-conformance/1",
+    "passed": true,
+    "missing_methods": [],
+    "scenarios": [
+      {
+        "id": "proposal",
+        "passed": true,
+        "evidence": [
+          "real Core proposal boundary rejects missing kind, privileged identity, absent/foreign refs with zero mutation",
+          "request-bound proposal idempotency preserves one pending envelope"
+        ]
+      },
+      {
+        "id": "review",
+        "passed": true,
+        "evidence": [
+          "authenticated principal controls review identity and author cannot review own proposal",
+          "immutable proposal/evidence/review hashes and request-bound review retries are verified"
+        ]
+      },
+      {
+        "id": "admission_l1",
+        "passed": true,
+        "evidence": [
+          "L1 reports machine_approved with explicit remaining evidence and independent-review requirements",
+          "candidate UUIDv7 is Core allocated and excluded from ordinary fact recall"
+        ]
+      },
+      {
+        "id": "admission_l2",
+        "passed": true,
+        "evidence": [
+          "writer-only L2 promotion binds independent review, fixed proposal/evidence hash and expected canonical version",
+          "changed evidence fails stale_version without mutation; successful promotion and retry yield one L2 fact"
+        ]
+      },
+      {
+        "id": "checkpoint",
+        "passed": true,
+        "evidence": [
+          "checkpoint rejects forged owner, Attempt, target/WorkItem/Scope version and nested hidden reasoning without mutation",
+          "committed executable checkpoint survives resume with fixed visible state"
+        ]
+      },
+      {
+        "id": "action",
+        "passed": true,
+        "evidence": [
+          "action cannot skip recommendation/host authorization or turn unknown into an executed result automatically",
+          "unknown action stays pending until explicit current-owner reconciliation"
+        ]
+      },
+      {
+        "id": "artifact",
+        "passed": true,
+        "evidence": [
+          "real Core binary upload/catalog/read survives authority restart; corrupt and missing chunks fail closed",
+          "publication-marker fault exposes no premature catalog row and restart recovers only verified bytes"
+        ]
+      },
+      {
+        "id": "lease",
+        "passed": true,
+        "evidence": [
+          "lease requires existing same-Engagement WorkItem; eight concurrent claims yield exactly one owner",
+          "server expiry fences renew and reclaim creates one new generation and Attempt"
+        ]
+      },
+      {
+        "id": "fencing",
+        "passed": true,
+        "evidence": [
+          "reclaimed generation fences run transition, checkpoint, action, reconciliation, Core Artifact begin/append/commit and Core error reporting with zero authority mutation",
+          "stale model proposal is explicitly quarantined and cannot create a canonical record"
+        ]
+      },
+      {
+        "id": "audit_outbox",
+        "passed": true,
+        "evidence": [
+          "concurrent records retain globally unique display IDs and gap-free audit hash order; outbox consumers cannot duplicate events",
+          "database event failure atomically rolls back record, event, outbox and idempotency before a successful same-key retry"
+        ]
+      },
+      {
+        "id": "pinned_read",
+        "passed": true,
+        "evidence": [
+          "keyset continuation retains the same authority read sequence with no duplicate or omitted record",
+          "later inserts and updates remain absent from pinned pages, snapshots and getAt"
+        ]
+      },
+      {
+        "id": "backup_restore",
+        "passed": true,
+        "evidence": [
+          "integrity and schema version failures leave an independent restore destination unmodified",
+          "atomic restore preserves identity/version/display alias and valid audit; real restart supports expected-version CAS"
+        ]
+      }
+    ],
+    "failures": []
+  }
+}

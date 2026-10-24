@@ -265,6 +265,10 @@ export class ArtifactContentStore {
   }
   async appendBinaryStream(input: ArtifactBinaryAppendStreamInput, principal: string, source: AsyncIterable<Uint8Array>): Promise<Record<string, unknown>> {
     await this.initialize();
+    // 幂等短路先于活跃 upload 校验：对已完成上传的重放直接返回原结果。
+    // 哈希基底与 appendBinaryStreamQueued 的内部 appendHash 一致（transport_hash 恒等于 chunk_hash）。
+    const priorAppend = await this.idempotentResult(input.idempotency_key, "artifact.store.append", principal, input.engagement_id, requestHash({ engagement_id: input.engagement_id, session_id: input.session_id, upload_id: input.upload_id, ordinal: input.ordinal, chunk_hash: input.chunk_hash, transport_hash: input.chunk_hash }));
+    if (priorAppend) return priorAppend as Record<string, unknown>;
     return this.uploadOperation(input.upload_id, () => this.artifactMutation(() => this.appendBinaryStreamQueued(input, principal, source)));
   }
   private async appendUpload(input: ArtifactAppendInput, principal: string): Promise<Record<string, unknown>> {
@@ -341,6 +345,9 @@ export class ArtifactContentStore {
   }
   async commit(input: ArtifactCommitInput, principal = "unknown"): Promise<ArtifactRow> {
     await this.initialize();
+    // 幂等短路先于活跃 upload 校验（与 begin 一致）：整流程重放依赖于此。
+    const priorCommit = await this.idempotentResult(input.idempotency_key, "artifact.store.commit", principal, input.engagement_id, requestHash(input));
+    if (priorCommit) return priorCommit as ArtifactRow;
     return this.uploadOperation(input.upload_id, () => this.commitUpload(input, principal));
   }
   private async commitUpload(input: ArtifactCommitInput, principal: string): Promise<ArtifactRow> {

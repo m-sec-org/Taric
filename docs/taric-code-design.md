@@ -32,7 +32,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | TypeScript | ESM、strict、target ES2022，`tsc` 分包构建 |
 | Node.js | Core 静态依赖 `node:sqlite`；已保存进程证据使用 Node 22.21.1；需要提供该模块的 Node 版本 |
 | SQLite | `DatabaseSync`、WAL；对外为异步方法，同进程按数据库文件排队 |
-| PostgreSQL | `pg` 驱动，支持声明为 14～18；事务、服务端时钟与 schema 范围锁；布局 `authority-sql/3` |
+| PostgreSQL | `pg` 驱动，支持声明为 14～18；事务、服务端时钟与 schema 范围锁；布局 `authority-sql/4` |
 | Schema | JSON Schema 2020-12、Ajv 与 ajv-formats；64 个 `$defs`，包含基础类型、领域及请求/响应定义，不等于 64 种领域记录 |
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
@@ -274,7 +274,7 @@ node scripts/check-doc-links.mjs
 
 重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。真实 PG 测试须显式测试 URL，真实 Bun 进程须安装 Bun；跳过不等于验证通过。
 
-[2026-10-18 验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)及[干净构建报告](benchmarks/capability-verification-v2.json)保存 339 项通过、零失败/跳过，其 `base_commit` 为 `c3db857`；报告的 `source_digest` 与当前工作区一致，说明它验证的内容已包含后来以 `2867b26` 提交的 `authority-sql/3` 与宿主接入改动。任何后续源码改动都会使该摘要失效，须重新运行 `scripts/verify-release.mjs`。[PG 报告](benchmarks/postgres-runtime-v2.json)保存 12 场景及独立 pg_dump/pg_restore、24 张表一致、audit 107→107。它们是历史结果，不代表任何新构建/当前部署自动启用。人工标注/基线样本为 0，质量证据 pending，release_state=blocked。
+[2026-10-18 验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)及[干净构建报告](benchmarks/capability-verification-v2.json)保存 339 项通过、零失败/跳过，其 `base_commit` 为 `c3db857`。该报告曾覆盖包含 `authority-sql/3` 与宿主接入改动的工作区，但本轮后续源码改动已使其摘要失效，不能作为当前树的构建证据；须重新运行 `scripts/verify-release.mjs`。[PG 报告](benchmarks/postgres-runtime-v2.json)保存 12 场景及独立 pg_dump/pg_restore、24 张表一致、audit 107→107。它们是历史结果，不代表任何新构建/当前部署自动启用。人工标注/基线样本为 0，质量证据 pending，release_state=blocked。
 
 ## 13. 已知差距与假设
 

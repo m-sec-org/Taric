@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCoreService } from "@taric/core";
 import { createPrincipal, uuidv7 } from "@taric/core";
-import { AuthorityStore } from "@taric/core/dist/store.js";
+import { AuthorityStore } from "@taric/core";
 import { cliCommands, cliSubcommands, discoverCliConfig, normalizeCliOperation, resolveCliStartup, runCli } from "../dist/cli.js";
 test("CLI help lists deterministic Phase 1 commands", async () => {
     const store = new AuthorityStore();

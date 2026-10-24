@@ -25,7 +25,7 @@ class ReadOnlyProbe {
   statements = [];
   columns = runtimeColumns();
   schemaVersion = "1.0.0";
-  storageFormat = "authority-sql/3";
+  storageFormat = "authority-sql/4";
   authorityId = uuidv7();
   invalidLeaseCount = 0;
   unavailable = false;
@@ -86,7 +86,7 @@ test("passing evidence is accepted only when current schema, methods and lease h
   assert.equal((await store.runtimeReadiness(report)).runtime_state, "disabled");
   probe.schemaVersion = "1.0.0"; probe.storageFormat = "obsolete";
   assert.equal((await store.runtimeReadiness(report)).health.schema_valid, false);
-  probe.storageFormat = "authority-sql/3"; probe.invalidLeaseCount = 1;
+  probe.storageFormat = "authority-sql/4"; probe.invalidLeaseCount = 1;
   assert.equal((await store.runtimeReadiness(report)).health.fencing, false);
   probe.invalidLeaseCount = 0; probe.authorityId = "invalid";
   assert.equal((await store.runtimeReadiness(report)).runtime_state, "disabled");
@@ -99,12 +99,13 @@ test("passing evidence is accepted only when current schema, methods and lease h
 
 test("primitive or incomplete PostgreSQL shape cannot use a passing report to activate", async () => {
   const probe = new ReadOnlyProbe();
-  probe.columns = probe.columns.filter((row) => !["proposals", "proposal_versions", "reviews", "artifact_catalog", "checkpoints", "action_intents"].includes(row.table_name));
+  probe.columns = probe.columns.filter((row) => !["proposals", "proposal_versions", "reviews", "admission_review_packs", "artifact_catalog", "checkpoints", "action_intents"].includes(row.table_name));
   const store = new PostgresAuthorityStore(probe, { profile: "multi_host_authority" });
   const report = await store.runtimeReadiness(passingReport());
   assert.equal(report.runtime_state, "disabled");
   assert.equal(report.conformance.passed, false);
   assert.ok(report.domains.find((entry) => entry.id === "proposal").missing_tables.includes("proposals"));
+  assert.ok(report.domains.find((entry) => entry.id === "review").missing_tables.includes("admission_review_packs"));
   assert.ok(report.domains.find((entry) => entry.id === "artifact").missing_tables.includes("artifact_catalog"));
   probe.columns = runtimeColumns().filter((row) => row.table_name !== "attempts" || row.column_name !== "generation");
   const fenced = await store.runtimeReadiness(passingReport());

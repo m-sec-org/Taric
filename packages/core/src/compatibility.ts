@@ -22,7 +22,7 @@ export interface CompatibilityManifest {
   non_goals: NonGoal[];
   security_invariants: SecurityInvariant[];
   hosts: {
-    pi: { state: "supported" | "unsupported"; package: string; version: string; commit: string; extension_api: string; detail: string; follow_up?: string };
+    pi: { state: "supported" | "unsupported"; package: string; version: string; commit: string; certified_versions: string[]; extension_api: string; detail: string; follow_up?: string };
     "deepseek-harness": ManifestCapability & { version?: string; commit?: string; contract?: string };
     hermes: ManifestCapability & { version?: string; commit?: string; contract?: string };
   };
@@ -86,10 +86,11 @@ export const TARIC_COMPATIBILITY_MANIFEST: CompatibilityManifest = {
     pi: {
       state: "supported",
       package: "@earendil-works/pi-coding-agent",
-      version: "1.1.0",
-      commit: "7c10bd4",
+      version: "1.4.0",
+      commit: "4a08025",
+      certified_versions: ["1.4.0"],
       extension_api: "ExtensionAPI.on",
-      detail: "Pi 1.1.0 lifecycle hooks and bound proposal/checkpoint/action/result/error paths are supported by the pinned host contract.",
+      detail: "Pi 1.4.0 lifecycle hooks and bound proposal/checkpoint/action/result/error paths are supported by the pinned host contract.",
     },
     "deepseek-harness": { id: "deepseek_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", version: "0.2.0-rc.2", commit: "639ed01", contract: "@deepseek-ai/cordis@4.0.4", detail: "Locked DeepSeek Harness/Cordis lifecycle bridge with Core-scoped callbacks." },
     hermes: { id: "hermes_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/hermes-plugin/tests/test_plugin.py"], follow_up_state: "none", version: "0.19.0", commit: "3ef6bbd201263d354fd83ec55b3c306ded2eb72a", contract: "general-plugin-hooks-v1", detail: "Hermes general plugin with Core RPC for context and session/tool observation; no provider replacement." },
@@ -97,10 +98,10 @@ export const TARIC_COMPATIBILITY_MANIFEST: CompatibilityManifest = {
   capabilities: [
     { id: "cli.operator", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/cli/test/bin.test.mjs"], follow_up_state: "none", detail: "JSON 输入输出、stderr 诊断与非零退出码。" },
     { id: "mcp.stdio_model_tools", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/mcp/test/stdio.test.mjs"], follow_up_state: "none", detail: "initialize/tools/list/tools/call；stdout 仅协议 JSON。" },
-    { id: "pi_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "绑定 Pi 1.1.0（commit 7c10bd4）；未测试版本按 unsupported 处理。" },
+    { id: "pi_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "绑定 Pi 1.4.0（commit 4a08025）；版本门为认证集合成员资格：同 major 未认证版本仅获只读安全子集并标记 not_certified，更远版本仅最小诊断集，未认证版本不进入 supported。" },
     { id: "pi.session_lifecycle", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "session_start 已接入受认证 Core client。" },
     { id: "pi.context_injection", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "context 与 before_agent_start 返回 Taric Context Pack。" },
-    { id: "pi.proposal_checkpoint_action_result_hooks", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "Pi 1.1.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client." },
+    { id: "pi.proposal_checkpoint_action_result_hooks", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "Pi 1.4.0 proposal, checkpoint, action/result, and error callbacks are bound to the authenticated Core client." },
     { id: "artifact.task_session_content", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/artifact-content.test.mjs", "packages/core/test/artifact-durability.test.mjs"], follow_up_state: "none", detail: "Authenticated host/operator operations store opaque bytes; explicit content reads require content_read. Publication markers support process-crash recovery; power-loss durability is not claimed." },
     { id: "deepseek_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/core/test/host-adapters.test.mjs"], follow_up_state: "none", detail: "Locked DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 session events; no context or action lifecycle hooks." },
     { id: "hermes_native_adapter", state: "supported", implementation_state: "available", runtime_state: "enabled", evidence_state: "verified", evidence: ["packages/hermes-plugin/tests/test_plugin.py"], follow_up_state: "none", detail: "Hermes 0.19.0 context and observer hooks over Core RPC; proposal/checkpoint integration and provider replacement unsupported." },

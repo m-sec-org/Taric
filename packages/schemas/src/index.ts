@@ -1,5 +1,6 @@
 import contractSchema from "../schemas/v1/core.schema.json" with { type: "json" };
 import { SCHEMA_VERSION } from "./version.js";
+import { ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION } from "./registry.js";
 
 export { SCHEMA_VERSION } from "./version.js";
 export * from "./registry.js";
@@ -31,6 +32,8 @@ export const contractNames = [
   "proposalProvenance",
   "promotionL2",
   "review",
+  "reviewPackRequest",
+  "reviewSubmitRequest",
   "protectiveControl",
   "protectiveControlRevision",
   "controlObservation",
@@ -38,10 +41,14 @@ export const contractNames = [
   "controlApplicabilityEvent",
   "attempt",
   "workRun",
+  "workQueryRequest",
+  "coverageGateResult",
+  "coverageQueryRequest",
   "checkpoint",
   "actionIntent",
   "artifactSessionBinding",
   "artifactStoreBegin",
+  "artifactIngestFile",
   "artifactStoreAppend",
   "artifactStoreCommit",
   "artifactContentRead",
@@ -67,8 +74,8 @@ export type UnsupportedCapability = (typeof unsupportedCapabilities)[number];
 export const supportedProfile = {
   deployment: "single_host",
   schema_version: SCHEMA_VERSION,
-  core_api_version: "1.0.0",
-  adapter_api_version: "1.0.0",
+  core_api_version: API_CONTRACT_VERSION,
+  adapter_api_version: ADAPTER_CONTRACT_VERSION,
   host: { name: "Pi", version: "unsupported-unpinned", commit: "unsupported-unpinned" },
   unsupported_capabilities: unsupportedCapabilities,
 } as const;

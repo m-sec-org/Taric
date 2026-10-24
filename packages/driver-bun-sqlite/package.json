@@ -1,0 +1,34 @@
+{
+  "name": "@taric/driver-bun-sqlite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "taric": {
+    "runtime": "bun"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/run-bun-tests.mjs"
+  },
+  "peerDependencies": {
+    "@taric/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@taric/core": "0.1.0",
+    "@taric/schemas": "0.1.0",
+    "bun-types": "^1.3.0",
+    "typescript": "^5.9.3"
+  }
+}
