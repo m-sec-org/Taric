@@ -1,7 +1,7 @@
 # Taric 宿主同步适配：设计与实现方案
 
 > **版本**：v1（2026-10-22）
-> **状态**：设计稿，未实施。所有条目需按 openspec 流程立项、实现、验收后方可声明交付。
+> **状态**：历史设计稿，主要条目已在 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 中实施并验证。下文保留原设计和实现前的源码判断；当前合同以 [API 边界](taric-api.md)、[接入指南](agent-integration.md) 和 [当前候选发布报告](../openspec/changes/harden-taric-authority-runtime/release-report.md) 为准。
 > **背景**：[Taric面向渗透测试智能体的集成方案](Taric面向渗透测试智能体的集成方案.md) §14 与 BreachWeave 宿主工作区输入文档《Taric外置记忆集成差距分析与建议方案.md》（v4，未随 Taric 仓库分发）的分析表明：BreachWeave 集成中最昂贵的宿主侧工程，其成本多数来自 Taric 的**通用性缺口**而非 BreachWeave 的特殊性。
 > **本方案的约束（不可违反）**：Taric 保持**独立且通用的外置记忆插件**定位——
 > 1. 每项改动必须能以"任意宿主接入都需要"的语言立项，BreachWeave 只是首个消费者与验证宿主；

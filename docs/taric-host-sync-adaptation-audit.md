@@ -5,6 +5,8 @@
 > **代码基线**：HEAD `73a6dfd` 加当前未提交工作区改动；本报告不代表已提交版本或正式发布物。
 > **范围**：Taric 侧设计与实现、所记录的容器验证和跨仓契约风险。未执行 BreachWeave 真实部署验收，不能据此宣称跨仓集成通过。
 
+> **后续状态（2026-10-25）**：本文是 2026-10-24 修复前的历史评审。其关于 Work/Coverage 分页、API 版本、lease 订阅唤醒、Artifact 单次读取、review pack 绑定及发布证据的阻断结论，已由 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 和 [当前候选发布报告](../openspec/changes/harden-taric-authority-runtime/release-report.md)更新。真实第三方宿主、容器挂载、远程 gateway 与双进程多主机仍按 profile 保持未验证；不要把本文原结论当作当前源码状态。
+
 ---
 
 ## 1. 独立插件边界与责任归属

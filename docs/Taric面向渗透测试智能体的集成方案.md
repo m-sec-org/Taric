@@ -222,7 +222,7 @@ try {
 
 ### 4.4 异构宿主的协作接入
 
-自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。锁定的 Pi 1.1.0 合同覆盖 session/context/proposal/checkpoint/action/result/error 生命周期；DeepSeek Harness 原生桥主要覆盖已验证的 session 事件；Hermes 覆盖上下文和 session/tool 观察钩子，不替换 MemoryProvider。使用后两者时，未覆盖的认领、续租、检查点、动作结果与恢复流程需由可信宿主经 CLI/host RPC 或内嵌 Core 补齐；模型 MCP 六工具不能替代这些 host-only 操作，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。一个未参与 Taric 设计的真实 Bun 宿主的完整映射与改造清单见 §14。
+自主开发的渗透测试宿主可直接内嵌 Core，或在本机经受认证通道对接；模型仍用受限 MCP 工具。当前认证的 Pi 1.4.0 合同覆盖 session/context/proposal/checkpoint/action/result/error 生命周期；DeepSeek Harness 原生桥主要覆盖已验证的 session 事件；Hermes 覆盖上下文和 session/tool 观察钩子，不替换 MemoryProvider。使用后两者时，未覆盖的认领、续租、检查点、动作结果与恢复流程需由可信宿主经 CLI/host RPC 或内嵌 Core 补齐；模型 MCP 六工具不能替代这些 host-only 操作，不能把“可访问共同数据库”视为“完整协作闭环已完成”。版本与边界以[接入指南](agent-integration.md)和[能力清单](../packages/core/src/compatibility.ts)为准。一个未参与 Taric 设计的真实 Bun 宿主的完整映射与改造清单见 §14。
 
 ## 5. 采用闭环、成本与保证边界
 
@@ -772,7 +772,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 | 共享记忆 | 项目级 `Memory`（`fact/evidence/failure/note/hint`）与 `Idea`（`pending/testing/verified/failed/skipped`），一条一 JSON 文件 + 目录锁 | 结构上接近 Taric 的 Observation/Evidence/Claim/TestHypothesis，但**无准入、无信任分级、无证据硬门** |
 | 资产状态 | `{ asset, asset_hash, scanned: boolean }`；报告提交即 `scanned = true`，全量 `scanned` 即项目完成（`store.ts:29-33`、`store.ts:479-483`、`manager.ts:1260-1281`） | 覆盖矩阵的最小映射对象；`scanned` 必须升级为 `CoverageCell` |
 | 并发控制 | 目录锁 + 60s 陈旧锁强删（`store.ts:139-172`） | 无租约、无 generation、无 CAS；由 Taric 补齐 |
-| 模型生态 | `@mariozechner/pi-coding-agent@^0.65`（与 Taric 锁定的 `@earendil-works/pi-coding-agent@1.1.0` 是不同命名空间） | **原生 Pi adapter 不可用**；只能走 MCP + host 通道 |
+| 模型生态 | `@mariozechner/pi-coding-agent@^0.65`（与 Taric 锁定的 `@earendil-works/pi-coding-agent@1.4.0` 是不同命名空间） | **原生 Pi adapter 不可用**；只能走 MCP + host 通道 |
 | 容器基础镜像 | Kali + Node 20（`runtime/assets/Dockerfile:124-125`） | Node 20 不提供 `node:sqlite`；容器内 MCP 侧车需升级到 Node 22.21.1（Taric 验证版本） |
 
 基线提交：BreachWeave `6957a55`（`pentest` 分支，2026-10-09），Taric 当前 HEAD 工作区。

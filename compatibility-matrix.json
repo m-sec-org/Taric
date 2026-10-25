@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "core_version": "0.1.0",
-  "api_contract_version": "1.1.0",
+  "api_contract_version": "1.2.0",
   "storage_contract_version": "authority-storage/3",
   "runtime_dependency_closure": {
     "@taric/schemas": {
@@ -591,6 +591,26 @@
       "engagement_scoped": true
     },
     {
+      "operation": "work.transition",
+      "roles": [
+        "host"
+      ],
+      "request_schema": "workTransitionRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
       "operation": "work.resume",
       "roles": [
         "host"
@@ -645,6 +665,27 @@
       ],
       "idempotent": false,
       "mutates_authority": false,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "coverage.record",
+      "roles": [
+        "host",
+        "operator"
+      ],
+      "request_schema": "coverageRecordRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
       "engagement_scoped": true
     },
     {

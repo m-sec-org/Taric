@@ -1,5 +1,8 @@
 import {
   evaluateMemoryQuality,
+  QUALITY_CONFIDENCE_INTERVAL_METHOD,
+  QUALITY_EVALUATION_VERSION,
+  qualitySampleDigest,
   qualityProvenanceFailures,
   type QualityEvidenceProvenance,
   type QualityEvaluationOptions,
@@ -20,6 +23,9 @@ export interface ReleaseReportDigests {
   commit: Sha256Digest;
   schema: Sha256Digest;
   policy: Sha256Digest;
+  /** Digest of the exact ordered quality sample input. */
+  sample: Sha256Digest;
+  /** Digest of the implementation fixture used by the release gates. */
   fixture: Sha256Digest;
 }
 
@@ -117,7 +123,35 @@ export interface ReleaseReport {
   capabilities: readonly ManifestCapability[];
 }
 
+export interface ReleaseReportVerificationFailure {
+  kind: "invalid-report" | "stale-report" | "failed-report";
+  reason: string;
+}
+
+export interface ReleaseReportVerification {
+  activatable: boolean;
+  failures: readonly ReleaseReportVerificationFailure[];
+}
+
 const SHA256 = /^sha256:([0-9a-f]{64})$/i;
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function isSha256(value: unknown): value is Sha256Digest {
+  return typeof value === "string" && SHA256.test(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function canonicalReportValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalReportValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalReportValue(item)]));
+  return value;
+}
 
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${field} is required`);
@@ -240,6 +274,7 @@ export function buildReleaseReport(input: ReleaseReportInput): ReleaseReport {
     commit: digest(input.digests?.commit, "commit digest"),
     schema: digest(input.digests?.schema, "schema digest"),
     policy: digest(input.digests?.policy, "policy digest"),
+    sample: digest(input.digests?.sample, "sample digest"),
     fixture: digest(input.digests?.fixture, "fixture digest")
   };
   if (!Array.isArray(input.samples)) throw new TypeError("samples must be an array");
@@ -248,6 +283,8 @@ export function buildReleaseReport(input: ReleaseReportInput): ReleaseReport {
     if (!sample || typeof sample.id !== "string" || sample.id.length === 0) throw new TypeError("quality sample id is required");
   }
   samples.sort((a, b) => a.id.localeCompare(b.id));
+  const computedSampleDigest = qualitySampleDigest(samples);
+  if (digests.sample !== computedSampleDigest) throw new TypeError("sample digest does not match the report input");
   const configuration = normalizeConfiguration(input.config);
   const quality = evaluateMemoryQuality(samples, configuration);
   const gates = normalizeGates(input.gates, configuration.requiredGateIds);
@@ -282,4 +319,111 @@ export function buildReleaseReport(input: ReleaseReportInput): ReleaseReport {
 
 /** Alias kept alongside the verb-style builder for callers that construct reports. */
 export const createReleaseReport = buildReleaseReport;
+
+/**
+ * Verify a persisted report against the release identity that is about to be
+ * activated. This intentionally accepts unknown data so malformed artifacts
+ * fail closed with a stable reason instead of throwing during startup.
+ */
+export function verifyReleaseReport(report: unknown, expectedDigests: ReleaseReportDigests): ReleaseReportVerification {
+  const failures: ReleaseReportVerificationFailure[] = [];
+  if (!report || typeof report !== "object") {
+    return { activatable: false, failures: [{ kind: "invalid-report", reason: "release report must be an object" }] };
+  }
+  const candidate = report as Record<string, unknown>;
+  if (candidate.version !== RELEASE_REPORT_VERSION) failures.push({ kind: "stale-report", reason: `release report version must be ${RELEASE_REPORT_VERSION}` });
+
+  const expected: Partial<ReleaseReportDigests> = expectedDigests && typeof expectedDigests === "object" ? expectedDigests : {};
+  const reportDigests = candidate.digests;
+  if (!reportDigests || typeof reportDigests !== "object") {
+    failures.push({ kind: "invalid-report", reason: "release report digests are required" });
+  } else {
+    for (const field of ["commit", "schema", "policy", "sample", "fixture"] as const) {
+      let expectedDigest: Sha256Digest;
+      try { expectedDigest = digest(expected[field], `${field} digest`); }
+      catch { failures.push({ kind: "invalid-report", reason: `expected ${field} digest is invalid` }); continue; }
+      let actualDigest: Sha256Digest;
+      try { actualDigest = digest((reportDigests as Record<string, unknown>)[field], `report ${field} digest`); }
+      catch { failures.push({ kind: "invalid-report", reason: `release report ${field} digest is invalid` }); continue; }
+      if (actualDigest !== expectedDigest) failures.push({ kind: "stale-report", reason: `${field} digest does not match the current release identity` });
+    }
+  }
+
+  const quality = candidate.quality;
+  if (!quality || typeof quality !== "object" || (quality as Record<string, unknown>).version !== QUALITY_EVALUATION_VERSION) {
+    failures.push({ kind: "invalid-report", reason: `quality report version must be ${QUALITY_EVALUATION_VERSION}` });
+  } else {
+    const qualityValue = quality as Record<string, unknown>;
+    const configuration = candidate.configuration;
+    if (!configuration || typeof configuration !== "object") {
+      failures.push({ kind: "invalid-report", reason: "release report configuration is required" });
+    } else {
+      const config = configuration as Record<string, unknown>;
+      if (!Number.isInteger(config.minimumSampleCount) || Number(config.minimumSampleCount) < 1 || qualityValue.minimumSampleCount !== config.minimumSampleCount) failures.push({ kind: "invalid-report", reason: "quality minimum sample count does not match configuration" });
+      if (!Number.isInteger(config.calibrationBinCount) || Number(config.calibrationBinCount) < 1) failures.push({ kind: "invalid-report", reason: "release report calibration bin count is invalid" });
+      if (!Array.isArray(config.requiredGateIds) || config.requiredGateIds.length === 0 || config.requiredGateIds.some((id) => !isNonEmptyString(id))) failures.push({ kind: "invalid-report", reason: "release report required gate ids are invalid" });
+      if (!Array.isArray(config.requiredStrata) || config.requiredStrata.some((stratum) => !stratum || typeof stratum !== "object" || !["web", "host"].includes(String((stratum as Record<string, unknown>).surface)) || !isNonEmptyString((stratum as Record<string, unknown>).riskClass) || !isNonEmptyString((stratum as Record<string, unknown>).evidenceLevel))) failures.push({ kind: "invalid-report", reason: "release report required strata are invalid" });
+    }
+    const strata = qualityValue.strata;
+    if (!Array.isArray(strata) || strata.length === 0) {
+      failures.push({ kind: "invalid-report", reason: "quality report strata are required" });
+    } else {
+      const validStrata = strata.every((stratum) => {
+        if (!stratum || typeof stratum !== "object") return false;
+        const value = stratum as Record<string, unknown>;
+        return (value.surface === "web" || value.surface === "host") && isNonEmptyString(value.riskClass) && isNonEmptyString(value.evidenceLevel) && Number.isInteger(value.sampleCount) && Number(value.sampleCount) >= 0 && Number.isInteger(value.minimumSampleCount) && Number(value.minimumSampleCount) >= 1 && (value.status === "evaluated" || value.status === "insufficient") && typeof value.passed === "boolean" && value.status === (Number(value.sampleCount) < Number(value.minimumSampleCount) ? "insufficient" : "evaluated") && value.passed === (value.status === "evaluated");
+      });
+      if (!validStrata) failures.push({ kind: "invalid-report", reason: "quality report strata contain invalid status or counts" });
+      const stratumKeys = strata.filter((stratum) => stratum && typeof stratum === "object").map((stratum) => JSON.stringify([(stratum as Record<string, unknown>).surface, (stratum as Record<string, unknown>).riskClass, (stratum as Record<string, unknown>).evidenceLevel]));
+      if (new Set(stratumKeys).size !== stratumKeys.length) failures.push({ kind: "invalid-report", reason: "quality report strata contain duplicates" });
+      if (configuration && typeof configuration === "object" && Array.isArray((configuration as Record<string, unknown>).requiredStrata)) {
+        const available = new Set(stratumKeys);
+        for (const required of (configuration as Record<string, unknown>).requiredStrata as unknown[]) {
+          if (!required || typeof required !== "object" || !available.has(JSON.stringify([(required as Record<string, unknown>).surface, (required as Record<string, unknown>).riskClass, (required as Record<string, unknown>).evidenceLevel]))) failures.push({ kind: "invalid-report", reason: "required quality stratum is missing from evaluation" });
+        }
+      }
+      const stratumCount = strata.reduce((sum, stratum) => sum + (stratum && typeof stratum === "object" && Number.isInteger((stratum as Record<string, unknown>).sampleCount) ? Number((stratum as Record<string, unknown>).sampleCount) : 0), 0);
+      if (!Number.isInteger(candidate.sampleCount) || Number(candidate.sampleCount) < 0 || stratumCount !== Number(candidate.sampleCount)) failures.push({ kind: "invalid-report", reason: "release report sample count does not match strata" });
+      if (qualityValue.passed !== strata.every((stratum) => Boolean(stratum && typeof stratum === "object" && (stratum as Record<string, unknown>).passed === true))) failures.push({ kind: "failed-report", reason: "quality evaluation pass state does not match strata" });
+      const projected = candidate.strata;
+      if (!Array.isArray(projected) || JSON.stringify(canonicalReportValue(projected)) !== JSON.stringify(canonicalReportValue(strata))) failures.push({ kind: "invalid-report", reason: "release report strata projection does not match quality evaluation" });
+    }
+  }
+  const provenance = candidate.quality_provenance;
+  if (!provenance || typeof provenance !== "object") {
+    failures.push({ kind: "invalid-report", reason: "quality evidence provenance is required" });
+  } else {
+    const value = provenance as Record<string, unknown>;
+    if (value.kind !== "human_annotated" || !isNonEmptyString(value.dataset_version) || !isNonEmptyString(value.strata_version) || !isSha256(value.sample_digest)) failures.push({ kind: "invalid-report", reason: "quality evidence dataset provenance is incomplete" });
+    if (isSha256(value.sample_digest) && reportDigests && typeof reportDigests === "object" && (reportDigests as Record<string, unknown>).sample !== value.sample_digest) failures.push({ kind: "stale-report", reason: "sample digest does not match quality provenance" });
+    const annotators = value.annotators;
+    if (!Array.isArray(annotators) || annotators.length < 2 || annotators.some((item) => !item || typeof item !== "object" || !isNonEmptyString((item as Record<string, unknown>).id) || !["annotator", "adjudicator"].includes(String((item as Record<string, unknown>).role))) || new Set(annotators.filter((item) => item && typeof item === "object").map((item) => String((item as Record<string, unknown>).id))).size !== annotators.length) failures.push({ kind: "invalid-report", reason: "quality evidence annotator provenance is incomplete" });
+    if (!isNonEmptyString(value.review_process)) failures.push({ kind: "invalid-report", reason: "quality evidence review process is incomplete" });
+    const timeRange = value.time_range;
+    const from = timeRange && typeof timeRange === "object" && typeof (timeRange as Record<string, unknown>).from === "string" ? Date.parse((timeRange as Record<string, unknown>).from as string) : Number.NaN;
+    const to = timeRange && typeof timeRange === "object" && typeof (timeRange as Record<string, unknown>).to === "string" ? Date.parse((timeRange as Record<string, unknown>).to as string) : Number.NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) failures.push({ kind: "invalid-report", reason: "quality evidence annotation time range is invalid" });
+    const baseline = value.human_baseline;
+    if (!baseline || typeof baseline !== "object" || !isNonEmptyString((baseline as Record<string, unknown>).source_ref) || !isNonEmptyString((baseline as Record<string, unknown>).protocol) || (baseline as Record<string, unknown>).blinded !== true) failures.push({ kind: "invalid-report", reason: "quality evidence human baseline provenance is incomplete" });
+    const agreement = value.annotation_agreement;
+    if (!agreement || typeof agreement !== "object" || (agreement as Record<string, unknown>).metric !== "cohen_kappa" || !isFiniteNumber((agreement as Record<string, unknown>).value) || Number((agreement as Record<string, unknown>).value) < -1 || Number((agreement as Record<string, unknown>).value) > 1 || !Number.isInteger((agreement as Record<string, unknown>).sample_count) || Number((agreement as Record<string, unknown>).sample_count) !== candidate.sampleCount) failures.push({ kind: "invalid-report", reason: "annotation agreement provenance must cover every sample" });
+    if (value.confidence_interval_method !== QUALITY_CONFIDENCE_INTERVAL_METHOD) failures.push({ kind: "invalid-report", reason: "confidence interval method provenance is incomplete" });
+  }
+
+  if (candidate.passed !== true || candidate.evidence_state !== "verified") failures.push({ kind: "failed-report", reason: "release report is not verified" });
+  if (!Array.isArray(candidate.failures) || candidate.failures.length > 0) failures.push({ kind: "failed-report", reason: "release report contains failed evidence" });
+  const gates = candidate.gates;
+  const configuration = candidate.configuration;
+  if (!Array.isArray(gates) || gates.some((gate) => !gate || typeof gate !== "object" || !isNonEmptyString((gate as Record<string, unknown>).id) || typeof (gate as Record<string, unknown>).required !== "boolean" || typeof (gate as Record<string, unknown>).passed !== "boolean") || new Set(gates.filter((gate) => gate && typeof gate === "object").map((gate) => String((gate as Record<string, unknown>).id))).size !== gates.length) {
+    failures.push({ kind: "invalid-report", reason: "release report gate outcomes are invalid" });
+  } else if (configuration && typeof configuration === "object" && Array.isArray((configuration as Record<string, unknown>).requiredGateIds)) {
+    const gateById = new Map(gates.map((gate) => [String((gate as Record<string, unknown>).id), gate as Record<string, unknown>]));
+    for (const id of (configuration as Record<string, unknown>).requiredGateIds as unknown[]) {
+      const gate = gateById.get(String(id));
+      if (!gate || gate.required !== true || gate.passed !== true) failures.push({ kind: "failed-report", reason: `required gate ${String(id)} is not passing` });
+    }
+  }
+  if (!quality || typeof quality !== "object" || (quality as Record<string, unknown>).passed !== true) failures.push({ kind: "failed-report", reason: "quality evaluation did not pass" });
+  return { activatable: failures.length === 0, failures };
+}
 

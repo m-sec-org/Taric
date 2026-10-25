@@ -3,29 +3,29 @@
 > 基于 BreachWeave 集成推演 · 结合 MCP 事件驱动机制演进
 
 - 分析日期：2026-10-16
-- 分析对象：Taric `c3db857`（HEAD 工作区源码）
+- 分析对象：Taric `c3db857`（历史 HEAD 工作区源码；本文不是当前实现基线）
 - 推演宿主：[BreachWeave](https://github.com/m-sec-org/BreachWeave)（`pentest` 分支，Bun monorepo，多角色渗透测试协作平台）
 - 分析方式：宿主侧集成可行性推演（非纸面评审） + Taric 源码逐项走读 + MCP 现行规范与工作组章程核对
-- 配套阅读：[代码设计](taric-code-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[接入指南](agent-integration.md)、[既有硬化发布报告](../openspec/changes/archive/2026-10-17-harden-taric-authority-runtime/release-report.md)
+- 配套阅读：[代码设计](taric-code-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[接入指南](agent-integration.md)、[当前硬化变更](../openspec/changes/harden-taric-authority-runtime/)
 
 **方法论说明**：本报告的差距不是通过规格对照发现的，而是通过**尝试把 Taric 接入一个真实存在、且未参与 Taric 设计的宿主**发现的。这决定了差距的性质——它们绝大多数不在 Taric 的能力内部，而在「一个有意愿接入的团队能否走通」。
 
 ---
 
-## 能力提升后的状态校正（2026-10-18）
+## 能力提升后的状态校正（2026-10-25）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
+本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和当前变更中的验证资产为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
-| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已交付并完成重启验证；Bun 进程内加载 Core 仍未支持。 |
+| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite` 进程内驱动已在隔离 tarball consumer 中验证。Registry 发布和第三方宿主认证仍未完成。 |
 | 宿主 ID 封闭 | 自定义 adapter ID 已开放，认证仍按 package/distribution/version/commit 与实际实例绑定判断。 |
 | 无最小接入路径 | A～E 依赖闭环与独立 Node 治理示例已交付。 |
-| 无状态通知 | host.state 与退避轮询已实现；本次测量未触发 resources subscription，推送/Tasks 仍未交付。 |
+| 无状态通知 | Core in-process 与 authenticated adapter RPC 已实现 bounded best-effort host subscription，并使用 query/read_seq 恢复；MCP resources subscription 与 Tasks 仍未交付。本机轮询 fixture 满足 1000ms 预算，不要求所有部署启用通知。 |
 | 存量导入 | 公开 snapshot.import 明确 unsupported；旧材料走正常 proposal/evidence，不提供通用历史迁移。 |
-| 远程拓扑 | 本机 Unix socket 与显式 PostgreSQL 共享 authority 可用，远程 host RPC 未交付。 |
+| 远程拓扑 | 本机 Unix socket 与 PostgreSQL 单 authority profile 已验证；双进程多主机和通用远程 host RPC 仍未验证/交付。 |
 
-综合[技术验收](benchmarks/capability-verification-v2.json)339 项测试全部通过；PostgreSQL 12 个 live 场景通过。质量证据 pending、`release_state=blocked`。这里的实施完成不代表正文所有建议被采用，未交付方向不因归档而启用。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)记录旧基线 339 项测试；当前实现请以[候选 release report](../openspec/changes/harden-taric-authority-runtime/release-report.json)为准：Core 350/350、PG 单 authority 12 个 runtime 场景通过，质量证据仍因人工基线缺失 blocked。本文中的代码行号、Bun/推送/宿主差距均保留为历史推演，不等于当前未完成项。
 
 ## 目录
 
@@ -90,7 +90,7 @@ BreachWeave 是一个 CTF/渗透测试多 Agent 协作平台（腾讯云黑客�
 
 推演过程中发现 Taric 现有文档间存在**反方向漂移**（文档低估实现）：
 
-`README.MD:42` 声明「Pi 1.1.0 的 proposal/checkpoint/action/result 原生 hooks 仍标为 unsupported」，而 `packages/core/src/compatibility.ts:103` 将 `pi.proposal_checkpoint_action_result_hooks` 标为 `supported` / `evidence_state: verified` / `follow_up_state: none`。
+历史基线中的 `README.MD` 曾声明 Pi 1.1.0 hooks unsupported；当前仓库实际文件为 [`readme.md`](../readme.md)，认证版本为 Pi 1.4.0，能力状态以 `packages/core/src/compatibility.ts` 与 adapter 实例状态为准。
 
 先前的实现分析评审（`taric-implementation-analysis-review.md` G1）只捕获了「文档说 supported、实现 unsupported」这一侧。**反向漂移同样有害**：它会误导集成方放弃本可用的能力。以 `compatibility.ts` 为唯一源同步一次。
 

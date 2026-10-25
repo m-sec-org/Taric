@@ -116,7 +116,7 @@ export interface CoverageCellInput {
   /** Counter-evidence that contradicts this cell's outcome (task 2.2). */
   counter_evidence_refs?: string[];
 }
-export async function createCoverageCell(store: AuthorityStore, input: CoverageCellInput): Promise<CoverageCell> {
+export function validateCoverageCellInput(input: CoverageCellInput): void {
   const conditions = [...new Set(stringList(input.conditions ?? [], "conditions"))].sort(); const evidence = stringList(input.evidence_refs ?? [], "evidence_refs");
   const counterEvidence = stringList(input.counter_evidence_refs ?? [], "counter_evidence_refs");
   if (!input.resource_ref || !input.test_category) throw new ContractValidationError("validation_error", "coverage requires resource_ref and test_category");
@@ -127,6 +127,11 @@ export async function createCoverageCell(store: AuthorityStore, input: CoverageC
   if (input.status === "not_applicable" && !input.not_applicable_reason?.trim()) throw new ContractValidationError("validation_error", "not_applicable requires an explicit reason");
   if (input.status !== "not_applicable" && input.not_applicable_reason) throw new ContractValidationError("validation_error", "not_applicable_reason is only valid for a not_applicable cell");
   assertOriginEvidence(input.origin_reached ?? "unknown", evidence);
+}
+export async function createCoverageCell(store: AuthorityStore, input: CoverageCellInput): Promise<CoverageCell> {
+  validateCoverageCellInput(input);
+  const conditions = [...new Set(stringList(input.conditions ?? [], "conditions"))].sort(); const evidence = stringList(input.evidence_refs ?? [], "evidence_refs");
+  const counterEvidence = stringList(input.counter_evidence_refs ?? [], "counter_evidence_refs");
   return await store.commit({ ...input, tested_at: input.tested_at ?? new Date().toISOString(), conditions, evidence_refs: evidence, counter_evidence_refs: counterEvidence, id: uuidv7(), kind: "coverage" } as CanonicalRecord, "L1") as CoverageCell;
 }
 export interface NegativeObservationInput {

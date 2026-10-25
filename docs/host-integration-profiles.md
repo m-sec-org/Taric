@@ -17,7 +17,7 @@ Optional profiles are independently enabled and independently verified. Their ex
 
 ## Version and package pairing
 
-This release exposes API contract `1.1.0`, schema `1.0.0`, Core package `0.1.0`, and authority storage contract `authority-storage/3`. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions.
+This release exposes API contract `1.2.0`, schema `1.0.0`, Core package `0.1.0`, and authority storage contract `authority-storage/3`. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions.
 
 The Bun embedding profile uses versioned package artifacts; public npm publication is not required. Build the artifacts in dependency order:
 
@@ -38,7 +38,7 @@ npm pack packages/driver-bun-sqlite
 
 Install the three matching tarballs in the consumer together with the host's locked runtime dependencies. Do not rely on workspace links, TypeScript path aliases, or a separately built source tree. The clean consumer must import `AuthorityStore` and `BunSqliteAuthorityDriver`, open a temporary authority, then run shared runtime and driver-specific conformance. See the [Bun driver guide](authority-driver-guide.md) for the driver API and acceptance scenarios.
 
-Taric uses exact contract-version matching. A host declaring API `1.0.0` is rejected by an API `1.1.0` service; deploy a matching host/Taric pair or a separately maintained earlier release. No compatibility shim or implicit downgrade is provided.
+Taric uses exact contract-version matching. A host declaring API `1.1.0` is rejected by an API `1.2.0` service; deploy a matching host/Taric pair or a separately maintained earlier release. No compatibility shim or implicit downgrade is provided.
 
 ## Release claims
 

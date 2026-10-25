@@ -33,6 +33,7 @@ const base = { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSI
 test("adapter contract rejects unsupported versions, capabilities and API mismatch", () => {
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, contract_version: "9.0" }).accepted, false);
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "9.0.0" }).accepted, false);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "1.1.0" }).reason, "unsupported API contract version");
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, capabilities: ["unknown"] }).accepted, false);
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: true, capabilities: ["proposal_submission"] }).accepted, true);
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: false }).reason, "unsupported_capability");

@@ -6,6 +6,10 @@ node_modules/
 **/reference/
 .DS_Store
 **/openspec/
+!openspec/
+openspec/changes/*
+!openspec/changes/harden-taric-authority-runtime/
+!openspec/changes/harden-taric-authority-runtime/*.md
 **/.claude/
 **/.pi-reference-1.1.0/
 **/.taric/

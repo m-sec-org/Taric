@@ -1,6 +1,6 @@
 # Single-host authority reads and maintenance
 
-Current capability contracts and saved validation results are summarized in [the capability improvement release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md). Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Saved benchmark reports are historical evidence and should be kept unchanged when collecting new samples.
+Current capability contracts and saved validation results are summarized in the [current release record](../openspec/changes/harden-taric-authority-runtime/release-report.md). Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Saved benchmark reports are historical evidence and should be kept unchanged when collecting new samples.
 
 > Last reviewed: 2026-10-18
 

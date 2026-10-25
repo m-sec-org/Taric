@@ -8,7 +8,7 @@ import { SCHEMA_VERSION } from "./version.js";
  * 单机首发实际交付的操作；延期能力必须显式登记为 unsupported 并给出 follow-up。
  */
 
-export const API_CONTRACT_VERSION = "1.1.0" as const;
+export const API_CONTRACT_VERSION = "1.2.0" as const;
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
 
 export type OperationRole = "model" | "host" | "reviewer" | "writer" | "operator";
@@ -104,9 +104,11 @@ export const operationContracts: OperationContract[] = [
   { operation: "work.claim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.renew", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "work.reclaim", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "work.transition", roles: ["host"], request: "workTransitionRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "work.resume", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "work.query", roles: ["model", "host", "operator"], request: "workQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "coverage.gate", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "coverage.record", roles: ["host", "operator"], request: "coverageRecordRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "coverage.query", roles: ["model", "host", "operator"], request: "coverageQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "checkpoint.propose", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "checkpoint.commit", roles: ["host"], request: "checkpoint", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },

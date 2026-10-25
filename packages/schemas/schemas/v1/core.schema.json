@@ -1374,6 +1374,21 @@
             "parameter": {
               "type": "string"
             },
+            "role": {
+              "type": "string"
+            },
+            "tenant_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "path": {
+              "type": "string"
+            },
+            "network_condition": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
             "conditions": {
               "$ref": "#/$defs/stringList"
             },
@@ -1411,6 +1426,12 @@
                 "pending",
                 "unavailable"
               ]
+            },
+            "not_applicable_reason": {
+              "type": "string"
+            },
+            "counter_evidence_refs": {
+              "$ref": "#/$defs/uuidList"
             }
           }
         }
@@ -3511,6 +3532,24 @@
       },
       "additionalProperties": false
     },
+    "workTransitionRequest": {
+      "type": "object",
+      "required": [
+        "engagement_id",
+        "work_run_id",
+        "generation",
+        "status"
+      ],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "work_run_id": { "$ref": "#/$defs/uuidV7" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["running", "checkpointed", "blocked", "completed", "failed", "cancelled"] },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "reviewPackRequest": {
       "type": "object",
       "required": [
@@ -3545,7 +3584,8 @@
         "evidence_snapshot_hash": { "$ref": "#/$defs/sha256" },
         "rubric_hash": { "$ref": "#/$defs/sha256" },
         "limitations": { "$ref": "#/$defs/stringList" },
-        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -3635,6 +3675,67 @@
           "maxLength": 512
         }
       }
+    },
+    "coverageRecordRequest": {
+      "type": "object",
+      "required": [
+        "engagement_id",
+        "expected_version",
+        "resource_ref",
+        "test_category",
+        "status",
+        "limitations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuid" },
+        "cell_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_version": { "type": "integer", "minimum": 0 },
+        "resource_ref": { "$ref": "#/$defs/uuid" },
+        "resource_revision_ref": { "$ref": "#/$defs/uuid" },
+        "test_category": { "$ref": "#/$defs/nonEmptyString" },
+        "identity_ref": { "$ref": "#/$defs/uuid" },
+        "operation": { "type": "string" },
+        "parameter": { "type": "string" },
+        "conditions": { "$ref": "#/$defs/stringList" },
+        "status": {
+          "enum": [
+            "not_tested",
+            "queued",
+            "in_progress",
+            "tested_no_observation",
+            "positive",
+            "inconclusive",
+            "blocked",
+            "blocked_by_control",
+            "not_applicable"
+          ]
+        },
+        "tested_at": { "$ref": "#/$defs/timestamp" },
+        "limitations": { "$ref": "#/$defs/stringList" },
+        "evidence_refs": { "$ref": "#/$defs/uuidList" },
+        "control_observation_ref": { "$ref": "#/$defs/uuid" },
+        "origin_reached": { "$ref": "#/$defs/originReached" },
+        "external_result_state": { "enum": ["ingested", "pending", "unavailable"] },
+        "role": { "type": "string" },
+        "tenant_ref": { "$ref": "#/$defs/uuid" },
+        "path": { "type": "string" },
+        "network_condition": { "type": "string" },
+        "method": { "type": "string" },
+        "not_applicable_reason": { "type": "string" },
+        "counter_evidence_refs": { "$ref": "#/$defs/uuidList" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "oneOf": [
+        {
+          "properties": { "expected_version": { "const": 0 }, "cell_id": false }
+        },
+        {
+          "properties": { "expected_version": { "type": "integer", "minimum": 1 }, "cell_id": { "$ref": "#/$defs/uuidV7" } },
+          "required": ["cell_id"]
+        }
+      ]
     },
     "artifactIngestFile": {
       "type": "object",

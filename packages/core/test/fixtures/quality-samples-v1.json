@@ -1,0 +1,46 @@
+{
+  "dataset_schema": "taric.quality-samples",
+  "dataset_version": "quality-samples-v1",
+  "required_strata": [
+    { "surface": "web", "riskClass": "medium", "evidenceLevel": "direct" }
+  ],
+  "provenance": {
+    "kind": "synthetic_fixture",
+    "dataset_version": "quality-samples-v1",
+    "strata_version": "web-medium-direct/1",
+    "sample_digest": "sha256:ee059ce010645f69516bf73b84805a1cc44ac30e3ef5518578451c1bf41065c6",
+    "confidence_interval_method": "wilson_score_95_and_fixed_seed_bootstrap_percentile_95"
+  },
+  "samples": [
+    { "id": "quality-v1-001", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-002", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-003", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-004", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-005", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-006", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-007", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-008", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-009", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-010", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-011", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-012", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-013", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-014", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-015", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-016", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-017", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-018", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-019", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-020", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-021", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-022", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-023", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-024", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-025", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-026", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-027", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-028", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 },
+    { "id": "quality-v1-029", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": true, "retrievalTruth": true, "findingDetected": true, "retrievalReturned": true, "humanFindingDetected": true, "humanRetrievalReturned": true, "findingConfidence": 0.9 },
+    { "id": "quality-v1-030", "surface": "web", "riskClass": "medium", "evidenceLevel": "direct", "findingTruth": false, "retrievalTruth": false, "findingDetected": false, "retrievalReturned": false, "humanFindingDetected": false, "humanRetrievalReturned": false, "findingConfidence": 0.1 }
+  ]
+}

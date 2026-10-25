@@ -25,6 +25,8 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
+当前合同为 API `1.2.0`、schema `1.0.0`、Core/workspace package `0.1.0`、authority storage `authority-storage/3`。实现与测试状态以[当前候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)为准；报告绑定了 dirty worktree，不能称为 clean Git release。
+
 ## 2. 技术栈
 
 | 层 | 实际实现 |
@@ -33,11 +35,11 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | Node.js | Core 静态依赖 `node:sqlite`；已保存进程证据使用 Node 22.21.1；需要提供该模块的 Node 版本 |
 | SQLite | `DatabaseSync`、WAL；对外为异步方法，同进程按数据库文件排队 |
 | PostgreSQL | `pg` 驱动，支持声明为 14～18；事务、服务端时钟与 schema 范围锁；布局 `authority-sql/4` |
-| Schema | JSON Schema 2020-12、Ajv 与 ajv-formats；64 个 `$defs`，包含基础类型、领域及请求/响应定义，不等于 64 种领域记录 |
+| Schema | JSON Schema 2020-12、Ajv 与 ajv-formats；72 个 `$defs`，包含基础类型、领域及请求/响应定义，不等于 72 种领域记录 |
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
 
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入；当前未提供 Bun 进程内 SQLite driver。
+`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite` 进程内驱动；当前候选完成了该 package 的隔离 tarball 安装、导入和 Bun query 测试，不代表 registry 发布或第三方宿主认证。
 
 ## 3. 仓库与代码结构
 
@@ -55,8 +57,12 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | `core/projection.ts` | 白名单投影、generation 发布、本地 Git checkpoint、受控 remote callbacks |
 | `core/adapter.ts` / `pi-adapter.ts` / `deepseek-adapter.ts` | 通用薄客户端、实例状态、锁定宿主合同及 hook 绑定 |
 | `core/adapter-rpc.ts` | [固定 host principal 的本机 JSON/binary socket](../packages/core/src/adapter-rpc.ts) |
+| `core/quality.ts` / `release-report.ts` | 确定性分层质量计算、来源校验及带 digest 的 release report |
+| `core/quality-release-activation.ts` | 独立报告 pin、implementation/schema/policy digest 校验及质量 capability fail-closed activation |
+| `core/implementation-digest.ts` | 当前 Core 实现摘要，用于 runtime quality evidence 绑定 |
 | `packages/cli` | JSON 命令、文件流式 append、配置管理；[proxy.ts](../packages/cli/src/proxy.ts) 打开 Core 并监听本机 RPC |
 | `packages/mcp` | [stdio server](../packages/mcp/src/server.ts)，固定六工具 |
+| `packages/driver-bun-sqlite` | Bun `bun:sqlite` reference authority driver |
 | `packages/hermes-plugin` | Python general plugin，经认证 Unix socket 调用 Core，不替换 MemoryProvider |
 
 ## 4. 核心设计决策
@@ -217,7 +223,7 @@ begin 创建 upload 与服务器分配 Artifact ID/version；append 按 ordinal 
 
 ## 7. API 表面
 
-当前注册表 50 个 supported operations、5 个 unsupported declarations、8 个永久非目标；`service.ts` 还单独识别 `storage.backup`/`storage.restore` 两个 deferred 名称；CLI `cliCommands` 46 项（含本地 append-file helper），MCP 固定六工具，三种清单不等价。完整逐操作角色与 capability 见 [API](taric-api.md#operation-inventory)。
+当前 schema registry 有 57 个 operations、5 个 unsupported declarations、8 个 permanent non-goals；`service.ts` 还单独识别 `storage.backup`/`storage.restore` 两个 deferred 名称。CLI `cliCommands` 有 49 项（含本地 `artifact.store.append-file` helper），MCP 固定六工具，三种清单不等价。完整逐操作角色与 capability 见 [API](taric-api.md#operation-inventory)。
 
 Core service 方法与公开 dispatch 的请求形状不总等于领域 schema：Artifact 请求在 dispatch 编译 schema 校验，其余很多注册项使用 `apiSuccess` 占位并由方法手工检查。不能声称每个输入都会自动套用完整领域 schema 或统一拒绝所有额外字段。错误 envelope 为 `ok:false/error`，11 个稳定 Core 错误码；startup 与 JSON-RPC 另有错误层。
 
@@ -233,6 +239,7 @@ MCP 支持 `initialize/tools/list/tools/call`，返回协议 `2024-11-05` 与 `{
 | db_path | TARIC_DB → config.db_path → authority.sqlite.path → ~/.taric/authority.sqlite |
 | content_root | TARIC_CONTENT_ROOT → config.content_root → DB 旁 content；显式 :memory: 使用临时根 |
 | runtime_conformance_path | TARIC_RUNTIME_CONFORMANCE → config.runtime_conformance_path |
+| quality release evidence | `TARIC_QUALITY_RELEASE_REPORT` + 独立配置的 `TARIC_QUALITY_RELEASE_REPORT_SHA256`；Core 校验报告原始字节 pin 与当前实现/schema/policy digest，失败或缺失时保持 disabled |
 | principal | CLI 默认 operator/operator-local；MCP stdio 强制 model，但 ID 来自 resolver，缺省可为 operator-local；proxy 固定 host |
 | content_read | 环境值为 true 或 config.content_read_enabled=true；环境 false 不覆盖配置 true；MCP server 不保留额外 grants |
 | transport session | TARIC_SESSION_ID 仅由 proxy 消费，普通 CLI/MCP 不读取 |
@@ -270,17 +277,18 @@ npm run typecheck
 npm run build
 npm test
 node scripts/check-doc-links.mjs
+node --test scripts/test/profile-verification.test.mjs
 ```
 
-重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。真实 PG 测试须显式测试 URL，真实 Bun 进程须安装 Bun；跳过不等于验证通过。
+重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。当前候选 workspace 测试为 Schemas 10/10、Core 350/350、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11，均零失败、零跳过；另通过 matrix、docs、profile manifest、clean consumer、proxy restart/replay 和 OrbStack PostgreSQL runtime 门禁。真实 PG 测试须显式配置 URL，Bun driver 测试须安装 Bun；跳过不等于验证通过。
 
-[2026-10-18 验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)及[干净构建报告](benchmarks/capability-verification-v2.json)保存 339 项通过、零失败/跳过，其 `base_commit` 为 `c3db857`。该报告曾覆盖包含 `authority-sql/3` 与宿主接入改动的工作区，但本轮后续源码改动已使其摘要失效，不能作为当前树的构建证据；须重新运行 `scripts/verify-release.mjs`。[PG 报告](benchmarks/postgres-runtime-v2.json)保存 12 场景及独立 pg_dump/pg_restore、24 张表一致、audit 107→107。它们是历史结果，不代表任何新构建/当前部署自动启用。人工标注/基线样本为 0，质量证据 pending，release_state=blocked。
+[当前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。该候选工作树非 clean，质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
 
 ## 13. 已知差距与假设
 
 - native adapter 认证限固定合同，不是第三方宿主生产端到端认证；实例 `service_connected` 只表示曾调用过 service，不是持续健康探针。
 - 自定义 adapter ID 与通用协议已开放，但 adapter install/config 只管理内置三类，未知版本/fork 不自动获得 native certification。
-- `host.state` 的聚合/时间轮询已实现，MCP resources subscription 未触发实施，仍 disabled；通用事件流、远程 host RPC、Tasks、Bun 原生驱动未交付。
+- `host.state` 聚合/时间轮询及 Core in-process、adapter RPC bounded subscription 已实现，使用 query/read_seq 作为恢复保证；MCP resources subscription、MCP Tasks 和通用远程 host RPC 未交付。Bun SQLite driver 已提供，远程和容器 profile 仍需独立环境验收。
 - Context 有界不代表 snapshot/export/audit/work.resume 全部有界；字符预算不是 token 预算。
 - 默认 Artifact 仅声明 local_process_crash，不声明 fsync/断电耐久；PG 不同步 spool。
 - 公开 snapshot.import/migration/backup.restore/remote.push/full_quality_evaluation 仍 unsupported；底层恢复/callback/统计函数不自动变成公开 operation。
@@ -289,3 +297,18 @@ node scripts/check-doc-links.mjs
 ## 14. 附录
 
 [API 请求与权限](taric-api.md)、[宿主集成](agent-integration.md)、[Context 恢复](context-recovery.md)、[单机维护](authority-storage-runbook.md)、[多主机运行](multi-host-authority-runbook.md)、[PG readiness](postgres-runtime-readiness.md)分别承担接口、接入与操作细节。历史差距分析与改进提案记录设计来源，不覆盖本文的当前实现合同。
+
+### 接口、函数与测试索引
+
+| 功能 | 公开入口/函数 | 主要回归测试 |
+|---|---|---|
+| WorkRun 状态迁移 | `CoreService.dispatch("work.transition", ...)`；经 `AuthorityStore.transitionWorkRun()` 提交 | [work-transition-dispatch](../packages/core/test/work-transition-dispatch.test.mjs)、[schema](../packages/schemas/test/schema.test.mjs) |
+| Coverage 写入、查询与 gate | `coverage.record/query/gate`；`createCoverageCell`、`coverageGateSnapshot`、`coverageCloseGate` | [coverage record](../packages/core/test/coverage-record-dispatch.test.mjs)、[coverage dispatch](../packages/core/test/coverage-dispatch.test.mjs)、[coverage lifecycle](../packages/core/test/coverage-lifecycle.test.mjs) |
+| 主机状态提示 | `CoreService.subscribe()`；RPC `taric.subscribe`/`taric.unsubscribe` | [subscription signals](../packages/core/test/subscription-signals.test.mjs)、[adapter RPC](../packages/core/test/adapter-rpc.test.mjs) |
+| Artifact 文件摄取 | `CoreService.dispatch("artifact.ingest_file", ...)` | [artifact ingest](../packages/core/test/artifact-ingest.test.mjs)、[Bun embedding smoke](../packages/driver-bun-sqlite/test/embedding-smoke.test.ts) |
+| 质量评估与报告 | `evaluateMemoryQuality()`、`buildReleaseReport()`、`verifyReleaseReport()` | [quality](../packages/core/test/quality.test.mjs)、[release report](../packages/core/test/release-report.test.mjs) |
+| 质量 capability 启用 | `verifyPinnedQualityReleaseReport()`、`loadPinnedQualityReleaseActivation()`、`runtimeImplementationDigest()`、`buildRuntimeActivationEvidence()` | [release support](../packages/core/test/release-support.test.mjs)、[runtime startup](../packages/core/test/runtime-startup.test.mjs) |
+| Schema 和兼容矩阵 | `operationContracts`、`core.schema.json`、`compatibility-matrix.json` | [schema contracts](../packages/schemas/test/schema.test.mjs)、[profile verification](../scripts/test/profile-verification.test.mjs) |
+| Bun SQLite driver | `BunSqliteAuthorityDriver` 与 Core `AuthorityStore` driver injection | [driver conformance](../packages/driver-bun-sqlite/test/conformance.test.ts)、[driver-specific tests](../packages/driver-bun-sqlite/test/driver-specific.test.ts) |
+
+公开 dispatch 的角色、capability、请求字段与传输差异见 [API 边界](taric-api.md)。

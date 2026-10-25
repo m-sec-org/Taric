@@ -4,7 +4,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { cpus, totalmem } from "node:os";
 import { spawnSync } from "node:child_process";
 import { coreSchema, operationContracts } from "@taric/schemas";
-import { buildReleaseReport, buildSharedAuthorityReleaseEvidence, PostgresAuthorityStore, runAuthorityRuntimeConformance, policyDigest, TARIC_COMPATIBILITY_MANIFEST } from "../packages/core/dist/index.js";
+import { buildReleaseReport, buildSharedAuthorityReleaseEvidence, PostgresAuthorityStore, runAuthorityRuntimeConformance, policyDigest, qualitySampleDigest, runtimeImplementationDigest, TARIC_COMPATIBILITY_MANIFEST } from "../packages/core/dist/index.js";
+import { buildProfileVerificationManifest, validateProfileVerificationManifest } from "./profile-verification.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const digest = (input) => `sha256:${createHash("sha256").update(input).digest("hex")}`;
@@ -39,6 +40,7 @@ const buildDigest = (checkout) => {
   return digest(Buffer.concat(files.flatMap((path) => [Buffer.from(`${path}\0`), readFileSync(join(checkout, path)), Buffer.from("\0")])));
 };
 const base_commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
+const source_tree_clean = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout.trim() === "";
 const directory = mkdtempSync(join(process.env.TMPDIR ?? "/tmp", "taric-clean-verification-"));
 const steps = []; const counts = [];
 const liveRequested = Boolean(process.env.TARIC_TEST_DATABASE_URL);
@@ -74,6 +76,9 @@ try {
   }
   if (built) run("documentation-links", process.execPath, ["scripts/check-doc-links.mjs"]);
   if (built) run("compatibility-matrix", process.execPath, ["scripts/emit-compatibility-matrix.mjs", "--check"]);
+  if (built) run("profile-manifest", process.execPath, ["--test", "scripts/test/profile-verification.test.mjs"]);
+  if (built) run("clean-consumer", process.execPath, ["scripts/verify-clean-consumer.mjs", "--output", join(directory, "clean-consumer-report.json")]);
+  if (built) run("proxy-restart-replay", process.execPath, ["scripts/benchmark-proxy-restart.mjs", `--output=${join(directory, "proxy-restart-report.json")}`]);
   let live;
   if (built && liveRequested) {
     const livePath = join(directory, "postgres-runtime-verification.json");
@@ -81,17 +86,18 @@ try {
     if (existsSync(livePath)) live = JSON.parse(readFileSync(livePath, "utf8"));
   }
   const fixturePath = join(root, "packages/core/test/fixtures/memory-quality-v1.json");
+  const qualityDatasetPath = join(root, "packages/core/test/fixtures/quality-samples-v1.json");
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
-  const samples = Array.isArray(fixture.samples) ? fixture.samples : [];
-  const requiredStrata = [...new Map((fixture.scenarios ?? []).map((scenario) => {
-    const stratum = { surface: scenario.surface, riskClass: scenario.risk_class, evidenceLevel: scenario.evidence_level };
-    return [JSON.stringify(stratum), stratum];
-  })).values()];
+  const qualityDataset = JSON.parse(readFileSync(qualityDatasetPath, "utf8"));
+  const samples = Array.isArray(qualityDataset.samples) ? qualityDataset.samples : [];
+  const requiredStrata = Array.isArray(qualityDataset.required_strata) ? qualityDataset.required_strata : [];
+  const qualityProvenance = qualityDataset.provenance;
   const postgres = new PostgresAuthorityStore({ query: async () => { throw new Error("no configured live PostgreSQL probe"); } }, { profile: "multi_host_authority" });
   const runtime_conformance = await runAuthorityRuntimeConformance(postgres, {});
-  const quality = buildReleaseReport({ samples, digests: { commit: sourceDigest, schema: digest(JSON.stringify(coreSchema)), policy: policyDigest(), fixture: digest(readFileSync(fixturePath)) }, config: { minimumSampleCount: 30, requiredStrata, requiredGateIds: steps.map((step) => step.id) }, gates: steps.map((step) => ({ id: step.id, passed: step.passed, evidence: [step.output_digest] })) });
+  const quality = buildReleaseReport({ samples, quality_provenance: qualityProvenance, digests: { commit: runtimeImplementationDigest(), schema: digest(JSON.stringify(coreSchema)), policy: policyDigest(), sample: qualitySampleDigest(samples), fixture: digest(readFileSync(fixturePath)) }, config: { minimumSampleCount: 30, requiredStrata, requiredGateIds: steps.map((step) => step.id) }, gates: steps.map((step) => ({ id: step.id, passed: step.passed, evidence: [step.output_digest] })) });
   const shared = live?.shared_authority ?? buildSharedAuthorityReleaseEvidence({ profile: "multi_host_authority", backend: "postgresql", authority_service: { configured: false, available: false, shared: false, count: 0 }, runtime_conformance });
-  const technical_passed = steps.length >= 8 && steps.every((step) => step.passed);
+  const requiredTechnicalChecks = ["dependencies", "clean-build", "typecheck", "tests:schemas", "tests:core", "tests:cli", "tests:mcp", "tests:hermes", "tests:driver-bun-sqlite", "documentation-links", "compatibility-matrix", "profile-manifest", "clean-consumer", "proxy-restart-replay"];
+  const technical_passed = requiredTechnicalChecks.every((id) => steps.some((step) => step.id === id && step.passed)) && (!liveRequested || steps.some((step) => step.id === "postgresql-runtime" && step.passed));
   const runtime_verified = technical_passed && live?.runtime_conformance?.passed === true && live?.readiness?.runtime_state === "enabled" && shared.enabled === true;
   // Implementation completion covers the delivered code and verified runtime.
   // Human quality evidence is an independent release decision.
@@ -101,7 +107,12 @@ try {
     ...(!runtime_verified ? ["Complete passing live PostgreSQL runtime verification is required to establish multi-host runtime verification and release readiness"] : []),
     ...(!quality.passed ? ["Representative human annotation and baseline evidence is pending; synthetic fixture cannot establish quality"] : []),
   ];
-  const report = { version: "taric-capability-verification/1", base_commit, source_digest: sourceDigest, build_digest: built ? buildDigest(directory) : null, schema_digest: digest(JSON.stringify(coreSchema)), policy_digest: policyDigest(), fixture_digest: digest(readFileSync(fixturePath)), configuration: { runtimes: runtimeVersions, host: { platform: process.platform, arch: process.arch, cpu_model: cpus()[0]?.model ?? null, cpu_count: cpus().length, total_memory_bytes: totalmem() }, checkout: "current source exported into an empty temporary directory", fixture_path: "packages/core/test/fixtures/memory-quality-v1.json", fixture_sample_count: samples.length, spec_count: readdirSync(join(root, "openspec/specs"), { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync(join(root, "openspec/specs", entry.name, "spec.md"))).length, operation_count: operationContracts.length, schema_definition_count: Object.keys(coreSchema.$defs).length, live_postgresql: liveRequested }, technical_passed, runtime_verified, implementation_complete, release_state: !technical_passed ? "failed" : implementation_complete && quality.passed ? "passed" : "blocked", checks: steps, test_counts: counts, capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities, quality, shared_authority: shared, postgres_runtime: live ?? null, blockers };
+  const profile_verification = buildProfileVerificationManifest({ checks: steps, runtimeVerified: runtime_verified, sourceDigest, postgresHostCount: shared.diagnostics?.host_count ?? 0 });
+  if (!validateProfileVerificationManifest(profile_verification)) throw new Error("profile verification manifest failed validation");
+  const profile_manifest_digest = digest(JSON.stringify(profile_verification));
+  const specsRoot = join(root, "openspec/specs");
+  const specCount = existsSync(specsRoot) ? readdirSync(specsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync(join(specsRoot, entry.name, "spec.md"))).length : 0;
+  const report = { version: "taric-capability-verification/1", base_commit, source_tree_clean, source_digest: sourceDigest, build_digest: built ? buildDigest(directory) : null, schema_digest: digest(JSON.stringify(coreSchema)), policy_digest: policyDigest(), sample_digest: quality.digests.sample, fixture_digest: digest(readFileSync(fixturePath)), profile_manifest_digest, profile_verification, configuration: { runtimes: runtimeVersions, host: { platform: process.platform, arch: process.arch, cpu_model: cpus()[0]?.model ?? null, cpu_count: cpus().length, total_memory_bytes: totalmem() }, checkout: "current source exported into an empty temporary directory", fixture_path: "packages/core/test/fixtures/memory-quality-v1.json", quality_dataset_path: "packages/core/test/fixtures/quality-samples-v1.json", quality_dataset_version: qualityProvenance?.dataset_version ?? null, quality_dataset_provenance_kind: qualityProvenance?.kind ?? null, quality_dataset_sample_count: samples.length, human_annotated_sample_count: qualityProvenance?.kind === "human_annotated" ? samples.length : 0, fixture_sample_count: fixture.samples?.length ?? 0, required_strata_count: requiredStrata.length, spec_count: specCount, operation_count: operationContracts.length, schema_definition_count: Object.keys(coreSchema.$defs).length, live_postgresql: liveRequested, clean_consumer_report: "clean-consumer-report.json", proxy_restart_report: "proxy-restart-report.json" }, technical_passed, runtime_verified, implementation_complete, release_state: !technical_passed ? "failed" : implementation_complete && quality.passed ? "passed" : "blocked", checks: steps, test_counts: counts, capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities, quality, shared_authority: shared, postgres_runtime: live ?? null, blockers };
   const text = `${JSON.stringify(report, null, 2)}\n`;
   const outputIndex = process.argv.indexOf("--output");
   const postgresOutputIndex = process.argv.indexOf("--postgres-output");
@@ -110,6 +121,8 @@ try {
   }
   if (outputIndex >= 0) {
     const path = resolve(root, process.argv[outputIndex + 1]); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text);
+    const pinPath = join(dirname(path), "release-report.sha256");
+    writeFileSync(pinPath, `${digest(text)}\n`);
     process.stdout.write(`${JSON.stringify({ report: relative(root, path), technical_passed, release_state: report.release_state, test_counts: counts, source_digest: sourceDigest })}\n`);
   } else process.stdout.write(text);
   if (!technical_passed) process.exitCode = 1;

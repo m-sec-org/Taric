@@ -32,6 +32,34 @@ test("contract registry covers every supported operation with request, response,
   assert.ok(names.includes("query"), "single-word operations such as `query` are supported names");
   assert.equal(names.includes("snapshot.import"), false, "snapshot.import is not a supported operation");
   assert.ok(contractRegistry.unsupported.some((entry) => entry.capability === "snapshot.import"));
+  const coverageRecord = operationContracts.find((entry) => entry.operation === "coverage.record");
+  assert.deepEqual(coverageRecord?.roles, ["host", "operator"]);
+  assert.equal(coverageRecord?.request, "coverageRecordRequest");
+  assert.equal(coverageRecord?.idempotent, true);
+  assert.equal(coverageRecord?.mutates_authority, true);
+});
+
+test("coverage.record request requires a versioned cell write and rejects writer-controlled fields", () => {
+  const validate = validators.get("coverageRecordRequest");
+  assert.equal(typeof validate, "function");
+  const request = {
+    engagement_id: "018f47a1-7c00-7000-8000-000000000001",
+    resource_ref: "018f47a1-7c00-7000-8000-000000000002",
+    test_category: "access-control",
+    status: "positive",
+    limitations: [],
+    expected_version: 0,
+    idempotency_key: "coverage-create-1",
+  };
+  assert.equal(validate(request), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...request, cell_id: "018f47a1-7c00-7000-8000-000000000003", expected_version: 1 }), true);
+  for (const invalid of [
+    { ...request, expected_version: undefined },
+    { ...request, expected_version: -1 },
+    { ...request, status: "closed" },
+    { ...request, owner: "self-asserted" },
+    { ...request, cell_id: "not-a-uuid" },
+  ]) assert.equal(validate(invalid), false, `${JSON.stringify(invalid)} must be rejected`);
 });
 
 test("every unsupported capability has a follow-up owner or is a permanent non-goal", () => {

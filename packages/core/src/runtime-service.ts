@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
 import { coreSchema, SCHEMA_VERSION } from "@taric/schemas";
 import { policyDigest } from "./policy.js";
 import { createCoreService, createCoreServiceForPath, type CoreService } from "./service.js";
@@ -9,17 +8,11 @@ import { authorityStartupDiagnostics } from "./shared-authority-config.js";
 import { createSharedAuthorityRuntime } from "./shared-runtime.js";
 import { runtimeConformancePassed, type AuthorityRuntimeConformance } from "./storage-contract.js";
 import { discoverRuntimeConfig, requireRuntimeAuthority, resolveRuntimeAuthority, RuntimeStartupError, type RuntimeStartupOptions } from "./runtime-startup.js";
+import { runtimeImplementationDigest } from "./implementation-digest.js";
 
 const digest = (value: string | Buffer): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
-/** Bind activation evidence to the actual Core JavaScript being executed. */
-export function runtimeImplementationDigest(): string {
-  const hasher = createHash("sha256");
-  for (const filename of readdirSync(import.meta.dirname).filter((file) => file.endsWith(".js")).sort()) {
-    hasher.update(filename).update("\0").update(readFileSync(join(import.meta.dirname, filename))).update("\0");
-  }
-  return `sha256:${hasher.digest("hex")}`;
-}
+export { runtimeImplementationDigest };
 
 export interface RuntimeActivationEvidence {
   version: "taric-runtime-activation/1";

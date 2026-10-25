@@ -1571,7 +1571,7 @@ export class AuthorityStore {
         const operation = context?.operation ?? "record.commit";
         const principal = context?.principal ?? "core";
         const engagementId = context?.engagement_id ?? normalized.engagement_id;
-        const requestHash = hash(json(stablePayload(record)));
+        const requestHash = hash(json(stablePayload({ record, expected_version: expectedVersion })));
             if (idempotencyKey) {
                 const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", idempotencyKey)) as {
                     result?: string;
@@ -1601,7 +1601,9 @@ export class AuthorityStore {
                 const nextKind = String(normalized.kind ?? normalized.type ?? "record");
                 if (prior.engagement_id !== normalized.engagement_id || String(prior.kind ?? prior.type ?? "record") !== nextKind)
                     throw new ContractValidationError("conflict", "canonical engagement ownership and kind are immutable");
-                for (const field of ["identity", "logical_identity", "resource_ref", "control_ref"]) {
+                const immutableFields = ["identity", "logical_identity", "resource_ref", "control_ref"];
+                if (nextKind === "coverage") immutableFields.push("resource_revision_ref", "test_category", "identity_ref", "operation", "parameter", "conditions", "role", "tenant_ref", "path", "network_condition", "method");
+                for (const field of immutableFields) {
                     if (prior[field] !== undefined && json(stablePayload(prior[field])) !== json(stablePayload(normalized[field])))
                         throw new ContractValidationError("conflict", "canonical logical identity is immutable");
                 }
@@ -1622,7 +1624,7 @@ export class AuthorityStore {
                 validateAuthorityReferences(committed, (await this.referenceIndex(committed, normalized.engagement_id)), normalized.engagement_id);
             (await this.sql.run("INSERT INTO records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,trust_level=excluded.trust_level,version=excluded.version,updated_at=excluded.updated_at", normalized.id, normalized.engagement_id, String(normalized.kind ?? normalized.type ?? "record"), trustLevel, version, committed.display_id ?? null, json(committed), now, now));
             (await this.sql.run("INSERT INTO object_refs(id,engagement_id,kind) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET engagement_id=excluded.engagement_id,kind=excluded.kind", normalized.id, normalized.engagement_id, String(normalized.kind ?? normalized.type ?? "record")));
-            const event = (await this.nextEvent("record.commit", { version, imported_version: importedVersion, trust_level: trustLevel, before_hash: old ? hash(json(old)) : null, after_hash: hash(json(committed)), changed_fields: Object.keys(committed).filter((key) => !old || json(old[key]) !== json((committed as Record<string, unknown>)[key])) }, normalized.id));
+            const event = (await this.nextEvent("record.commit", { version, imported_version: importedVersion, trust_level: trustLevel, actor_id: context?.principal ?? "taric-core", before_hash: old ? hash(json(old)) : null, after_hash: hash(json(committed)), changed_fields: Object.keys(committed).filter((key) => !old || json(old[key]) !== json((committed as Record<string, unknown>)[key])) }, normalized.id));
             (await this.sql.run("INSERT INTO record_versions(id,commit_seq,engagement_id,trust_level,body) VALUES(?,?,?,?,?)", normalized.id, event.commit_seq, normalized.engagement_id, trustLevel, json(committed)));
             const result = { ...committed, commit_seq: event.commit_seq };
             if (idempotencyKey)
@@ -3231,9 +3233,29 @@ export class AuthorityStore {
         if (!attempt || attempt.engagement_id !== input.engagement_id || attempt.owner_host !== input.principal || Number(attempt.generation) !== input.generation || attempt.lease_expires_at !== row.lease_expires_at || !["claimed", "running", "checkpointed", "blocked"].includes(String(attempt.status)) || attemptBody.task_session_ref !== input.session_id)
             throw new ContractValidationError("stale_version", "Artifact Attempt is missing, expired, or fenced");
     }
-    async transitionWorkRun(runId: string, generation: number, hostId: string, status: "running" | "checkpointed" | "blocked" | "completed" | "failed" | "cancelled"): Promise<Awaited<Record<string, unknown>>> {
+    async transitionWorkRun(
+        runId: string,
+        generation: number,
+        hostId: string,
+        status: "running" | "checkpointed" | "blocked" | "completed" | "failed" | "cancelled",
+        options: { engagement_id?: string; idempotency_key?: string } = {},
+    ): Promise<Awaited<Record<string, unknown>>> {
         return (await this.transaction(async () => {
+            const operation = "work.transition";
+            const principal = hostId;
+            const engagementId = options.engagement_id ?? "";
+            const requestHash = hash(json(stablePayload({ work_run_id: runId, generation, status })));
+            if (options.idempotency_key) {
+                const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", options.idempotency_key)) as any;
+                if (prior) {
+                    if (prior.request_hash !== requestHash || prior.operation !== operation || prior.principal !== principal || prior.engagement_id !== engagementId)
+                        throw new ContractValidationError("idempotency_conflict", "idempotency key is bound to another request");
+                    return JSON.parse(prior.result) as Record<string, unknown>;
+                }
+            }
             const row = (await this.sql.get("SELECT * FROM work_runs WHERE run_id=?", runId)) as any;
+            if (!row || (options.engagement_id !== undefined && row.engagement_id !== options.engagement_id))
+                throw new ContractValidationError("conflict", "work run not found in this engagement");
             const now = (await this.sql.now());
             if (!row || row.owner_host !== hostId || Number(row.generation) !== generation || !row.lease_expires_at || row.lease_expires_at <= now) {
                 throw new ContractValidationError("stale_version", "work run transition is fenced by an expired lease, owner, or generation");
@@ -3256,7 +3278,9 @@ export class AuthorityStore {
                 attempt.ended_at = now;
             (await this.sql.run("UPDATE attempts SET status=?,body=?,updated_at=? WHERE attempt_id=? AND run_id=? AND generation=?", status, json(attempt), now, attemptId, runId, generation));
             (await this.sql.run("UPDATE work_runs SET status=?,body=?,updated_at=? WHERE run_id=? AND generation=? AND owner_host=?", status, json(body), now, runId, generation, hostId));
-            (await this.nextEvent("work_run.transition", { attempt_id: attemptId, generation, from: priorStatus, to: status, host_id: hostId }, runId));
+            (await this.nextEvent("work_run.transition", { attempt_id: attemptId, generation, from: priorStatus, to: status, host_id: hostId, idempotency_key: options.idempotency_key }, runId));
+            if (options.idempotency_key)
+                (await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", options.idempotency_key, operation, principal, engagementId, requestHash, json(body)));
             return body;
         }));
     }

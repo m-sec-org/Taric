@@ -10,7 +10,7 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | Operator CLI (`cli.operator`) | JSON operations, stderr failures, explicit process principal | Run only inside the trusted host/operator boundary. Default role is operator, not a model credential. |
 | Model MCP (`mcp.stdio_model_tools`) | stdio `2024-11-05`, exactly six tools | No admission, host-state, raw content, resources subscription, Tasks or HTTP listener. |
 | Node proxy | `taric proxy`, one fixed host principal and Engagement, authenticated Unix socket | Real Bun client can call it; no Bun in-process Core/SQLite support and no remote RPC server. |
-| Pi (`pi_native_adapter`) | Pinned `@earendil-works/pi-coding-agent` 1.1.0 / `7c10bd4` | Native capability depends on per-instance registration, tool support and run callbacks/binding. |
+| Pi (`pi_native_adapter`) | Pinned `@earendil-works/pi-coding-agent` 1.4.0 / `4a08025` | Native capability depends on per-instance registration, tool support and run callbacks/binding. |
 | Pi lifecycle (`pi.session_lifecycle`) | `session_start`, shutdown observer | Static support does not establish live instance health. |
 | Pi Context (`pi.context_injection`) | `context` and `before_agent_start` map to Context Pack injection | Returns different host message shapes for the two hooks. |
 | Pi workflow (`pi.proposal_checkpoint_action_result_hooks`) | Bound proposal tool, checkpoint/action/result/error paths | Pi has no native events named proposal/checkpoint/action/result/error; see concrete hook mapping below. |
@@ -30,9 +30,9 @@ Adopt a dependency-complete path. Adding fewer features does not relax the ident
 | Path | Initialize | Callers and operations | Host work and resulting trust |
 |---|---|---|---|
 | A: read existing memory | Operator initializes Engagement/scope; bind each reader principal to it | model MCP context.query/resource.query/evidence.query; trusted host uses Core query | Host selects scope, consumes pagination/omissions; existing authorized memory only. |
-| B: candidates | A + real observation/evidence capture and admission client | model proposal.submit; host capture.observation; writer/operator admission.evaluate, or host with explicit admit grant | Submit→pending L0; admission→L1 if accepted. Host must inspect both outer ok and data.ok, and keep candidates distinct from verified facts. |
+| B: candidates | A + real observation/evidence capture, coverage tracking and admission client | model proposal.submit; host capture.observation/coverage.record; writer/operator admission.evaluate, or host with explicit admit grant | Submit→pending L0; admission→L1 if accepted. Host must inspect both outer ok and data.ok, and keep candidates distinct from verified facts. |
 | C: verified Finding | B + pinned evidence/input/policy and separate reviewers | reviewer review.submit; writer/operator admission.promote_l2 | Host separates reviewers, attests identities and obtains approvals; Core gates L2. A default host cannot promote. |
-| D: run recovery | A + WorkItem, current owner/Attempt/generation and lease | host work.claim/renew/reclaim/resume, checkpoint.commit, action host operations | Host schedules/stops tools, maintains leases, validates checkpoint and reconciles unknown actions. Taric returns blocked/replan_required when premises fail. |
+| D: run recovery | A + WorkItem, current owner/Attempt/generation and lease | host work.claim/renew/reclaim/transition/resume, checkpoint.commit, action host operations | Host schedules/stops tools, maintains leases, validates checkpoint and reconciles unknown actions. Taric returns blocked/replan_required when premises fail. |
 | E: original content | Explicit durable content root/ACL and session binding; run-bound mode adds D | host/operator artifact.session.bind and store.begin/append/commit; explicit content_read for bytes | Host captures, scans/redacts, retains, backs up and safely serves payloads. Model views remain references and bounded metadata. |
 
 For real governed Finding wiring, the executable [trusted Node fixture](../packages/core/test/trusted-node-governance.test.mjs) uses separate operator/host/model/reviewer/writer principals through public dispatch. It covers Resource→Observation→Evidence→Claim→Finding, L1, independent review and L2; its tool output/reviews are synthetic. It is not external host or human-review certification.
@@ -120,7 +120,7 @@ The resolver defaults ID to operator-local unless a model role/ID was explicitly
 
 ## Bun in-process embedding
 
-Profile selection, artifact packaging, API `1.1.0` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
+Profile selection, artifact packaging, API `1.2.0` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
 
 A Bun host embeds the authority in-process over the driver contract instead of proxying to a Node process. Bun has no `node:sqlite` builtin, so import the reference driver package and construct the store directly:
 
@@ -178,7 +178,7 @@ Apply schema before startup, generate current live conformance evidence in isola
 
 ### Pi
 
-Static descriptor support is pinned to Pi 1.1.0/7c10bd4. `createPiExtension` is the simple factory and calls registration without a PiRuntimeBinding; for checkpoint/action/result capabilities, create an adapter and pass actual host callbacks/run facts to register:
+Static descriptor support is pinned to Pi 1.4.0/4a08025. `createPiExtension` is the simple factory and calls registration without a PiRuntimeBinding; for checkpoint/action/result capabilities, create an adapter and pass actual host callbacks/run facts to register:
 
 ```js
 import { createPiAdapter } from "@taric/core";
@@ -223,6 +223,8 @@ Use MCP only for model operations. Missing host work, capture, checkpoint or act
 
 `adapter.status` reads configuration for the three built-in hosts, compares version/commit to the manifest, and reports instance_registration_state/runtime_health_state as not_observed. It does not inspect another process's hooks. Live adapter `status()` separates implementation_state, runtime_state, authorization_state, evidence_state, quality_release_state and per-capability status. `service_connected` means a call was attempted, not a continuous health probe. Missing bindings or mock/skipped/failed/mismatched evidence cannot establish the corresponding enabled native support. Quality pending remains separate from technical registration.
 
+`quality.full_statistical_evaluation` remains disabled unless the trusted runtime supplies `TARIC_QUALITY_RELEASE_REPORT` and an independently provisioned `TARIC_QUALITY_RELEASE_REPORT_SHA256` for the exact report bytes. Core checks that pin plus the report's implementation, schema and policy digests before changing only the quality entry in `capability.status`; absent, stale, failed or incomplete evidence stays disabled. The release verifier uses the current Core implementation digest for this binding. Keep the report pin in deployment-controlled configuration and update it only with the reviewed release artifact.
+
 `taric adapter install/remove/config` only edits built-in adapter entries in the local config file; it does not install framework packages or hooks. health reports local configuration/Core contact, and version reports contracts. Arbitrary adapter IDs are not accepted by these management commands.
 
 ## P1a operation boundary
@@ -231,6 +233,7 @@ Use MCP only for model operations. Missing host work, capture, checkpoint or act
 |---|---|---|
 | Context/record reads | Six-tool MCP subset or scoped trusted client | Bounded selected metadata; ordinary host RPC 1 MiB line bound. Context helper scanBudget is not a tool/CLI option. |
 | Capture/proposal/admission | Host capture/proposal; admission needs admit capability | pending or accepted L1; default host/proxy cannot admit. |
+| WorkRun/coverage writes | Host `work.transition` binds identity to its principal and fences on generation/lease; host/operator `coverage.record` uses principal authorization and record-version CAS | Atomic audited WorkRun/Attempt transition or idempotent L1 coverage-cell create/CAS update; coverage cells are not run-bound, and MCP does not expose these host writes. |
 | Review/L2 | Independently authenticated reviewer and writer/operator | Pinned review/provenance and L2 gate; separate from model credentials. |
 | Artifact metadata/upload | host/operator content capability | 64 MiB decoded chunk contract applies to Core, CLI file stream or separately started binary listener; ordinary JSON-RPC cannot carry that base64 envelope. |
 | Original content read | Separate content_read grant | Direct read is always explicit raw access; list/output require include_content. RPC raw response ≤512 KiB, list/output ≤16 items, content-page total ≤128 KiB. |
@@ -251,7 +254,7 @@ Projection output uses explicit field allowlists and L2 filtering, with local Gi
 
 host.state is host/operator-only, limit 1–1000 (default 100), with per-category completeness, scoped opaque watermark and read_time. It reports bounded L1/Conflict/Impact/unknown-action/expired-lease/freshness aggregates. Freshness scans only a limited sample, so incomplete totals are lower bounds; no continuation or reliable events are provided. Time expiry can change a poll without a commit. Use [the abortable polling example](taric-api.md#host-state-polling); reconnect failed service handles and keep retry delay within the deployment's chosen budget.
 
-Resources subscription remains disabled because [the recorded local polling fixture](benchmarks/host-state-poll-v1.json) met its 1000ms budget. That result does not establish a network/production SLA or mean arbitrary backoff settings meet the same budget.
+Core in-process and authenticated adapter RPC expose optional bounded host subscriptions with `read_seq`-based polling/query recovery; signals are best-effort hints, not a persistent event stream. MCP resource subscriptions remain disabled. The [recorded local polling fixture](benchmarks/host-state-poll-v1.json) met its 1000ms budget, so a host should opt into notifications only when its measured polling cost or discovery budget requires them. That result does not establish a network/production SLA or mean arbitrary backoff settings meet the same budget.
 
 Operator audit.verify/audit.doctor and reconcile preview are observation paths. `audit.reconcile {}` consumes outbox and reconciles Artifact state; omission of action is not read-only. Explicit replay/rebuild/reconcile select repairs. See [single-host maintenance](authority-storage-runbook.md). Public migration/import is unsupported: historical materials enter through normal proposal/evidence governance, while database recovery uses an isolated operator-managed restore and matching spool.
 
@@ -274,6 +277,6 @@ Use Taric when durable scoped memory, governed Findings, lease-aware recovery or
 
 Record actual integration effort, failed attempts, Core calls, reviewer waits, retries, proxy restarts, CPU/RSS/latency, fixture/version and commands. The proxy report supplies synthetic local calls/timing, not engineering labor-hours, production reviewer time or ROI. Host observations can still be false, discovery incomplete and external action outcomes unknown; Taric checks its state/identity/governance contracts rather than proving target-system truth.
 
-The saved [clean-build report](benchmarks/capability-verification-v2.json) records 339 tests passed, zero failures/skips, technical_passed/runtime_verified true and release_state blocked at `base_commit` `c3db857`. It previously covered the workspace containing the `authority-sql/3` and host-integration changes committed as `2867b26`; subsequent source edits in this change invalidate that digest, so it is not current build evidence and a fresh run is required. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records 12 scenarios and a 24-table logical restore with audit 107→107. The [release record](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md) indexes T01–T14. Human annotation/baseline sample count is zero, so quality evidence stays pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
+The saved [clean-build report](benchmarks/capability-verification-v2.json) records an older baseline and is not current build evidence; run `scripts/verify-release.mjs` for the selected tree. [PostgreSQL v2](benchmarks/postgres-runtime-v2.json) records historical runtime scenarios. The current [quality release change](../openspec/changes/harden-taric-authority-runtime/) records the digest-bound evidence contract. Human annotation/baseline evidence remains pending. Historical 50k Context first-page reduction is 42.5%, below the 50% target, and is not a general 2s SLA.
 
 Archived changes record implementation decisions. They do not automatically enable a runtime, certify a third-party deployment, or remove pending quality gates.

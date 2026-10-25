@@ -3,22 +3,41 @@ import { createHash } from "node:crypto";
 /** Version of the deterministic, stratified quality report contract. */
 export const QUALITY_EVALUATION_VERSION = "quality-evaluation/1" as const;
 
+/** Confidence interval procedures used by every quality release report. */
+export const QUALITY_CONFIDENCE_INTERVAL_METHOD = "wilson_score_95_and_fixed_seed_bootstrap_percentile_95" as const;
+export type QualityConfidenceIntervalMethod = typeof QUALITY_CONFIDENCE_INTERVAL_METHOD;
+
+export interface QualityAnnotationAgreement {
+  /** Agreement statistic calculated from the independent human labels. */
+  metric: "cohen_kappa";
+  value: number;
+  sample_count: number;
+}
+
 /** Metadata of the labeled dataset, separate from caller-scored metric fields. */
 export interface QualityEvidenceProvenance {
   kind: "human_annotated" | "synthetic_fixture";
   dataset_version: string;
   strata_version: string;
   sample_digest: string;
-  annotators: readonly { id: string; role: "annotator" | "adjudicator" }[];
-  review_process: string;
-  time_range: { from: string; to: string };
-  human_baseline: { source_ref: string; protocol: string; blinded: boolean };
+  annotators?: readonly { id: string; role: "annotator" | "adjudicator" }[];
+  review_process?: string;
+  time_range?: { from: string; to: string };
+  human_baseline?: { source_ref: string; protocol: string; blinded: boolean };
+  /** Independent label agreement recorded alongside the human baseline. */
+  annotation_agreement?: QualityAnnotationAgreement;
+  /** The fixed methods used for all confidence intervals in this report. */
+  confidence_interval_method?: QualityConfidenceIntervalMethod;
 }
 
 function canonicalEvidence(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalEvidence);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalEvidence(item)]));
   return value;
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 /** Digest includes gold truth, human baseline, and system results, with stable
@@ -31,13 +50,21 @@ export function qualityProvenanceFailures(samples: readonly QualitySample[], pro
   if (!provenance) return ["human annotation and baseline provenance is missing"];
   const failures: string[] = [];
   if (provenance.kind !== "human_annotated") failures.push("synthetic fixtures do not establish human quality evidence");
-  if (!provenance.dataset_version?.trim() || !provenance.strata_version?.trim()) failures.push("dataset and strata versions are required");
+  if (!nonEmptyString(provenance.dataset_version) || !nonEmptyString(provenance.strata_version)) failures.push("dataset and strata versions are required");
   if (provenance.sample_digest !== qualitySampleDigest(samples)) failures.push("labeled sample digest does not match the report input");
-  if (!Array.isArray(provenance.annotators) || provenance.annotators.length < 2 || new Set(provenance.annotators.map((item) => item.id)).size !== provenance.annotators.length || provenance.annotators.some((item) => !item.id?.trim() || !["annotator", "adjudicator"].includes(item.role))) failures.push("independent annotator/adjudicator identities are required");
-  if (!provenance.review_process?.trim()) failures.push("annotation review process is required");
-  const from = Date.parse(provenance.time_range?.from); const to = Date.parse(provenance.time_range?.to);
+  const annotators = provenance.annotators;
+  const validAnnotators = Array.isArray(annotators) && annotators.length >= 2 && annotators.every((item) => Boolean(item) && typeof item === "object" && typeof item.id === "string" && item.id.trim() !== "" && ["annotator", "adjudicator"].includes(item.role));
+  if (!validAnnotators || new Set((annotators as readonly { id: string }[]).map((item) => item.id)).size !== annotators.length) failures.push("independent annotator/adjudicator identities are required");
+  if (!nonEmptyString(provenance.review_process)) failures.push("annotation review process is required");
+  const timeRange = provenance.time_range;
+  const from = timeRange && typeof timeRange === "object" && typeof timeRange.from === "string" ? Date.parse(timeRange.from) : Number.NaN;
+  const to = timeRange && typeof timeRange === "object" && typeof timeRange.to === "string" ? Date.parse(timeRange.to) : Number.NaN;
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) failures.push("annotation time range is invalid");
-  if (!provenance.human_baseline?.source_ref?.trim() || !provenance.human_baseline.protocol?.trim() || provenance.human_baseline.blinded !== true) failures.push("a blinded human baseline source and protocol are required");
+  const baseline = provenance.human_baseline;
+  if (!baseline || typeof baseline !== "object" || !nonEmptyString(baseline.source_ref) || !nonEmptyString(baseline.protocol) || baseline.blinded !== true) failures.push("a blinded human baseline source and protocol are required");
+  const agreement = provenance.annotation_agreement;
+  if (!agreement || typeof agreement !== "object" || agreement.metric !== "cohen_kappa" || !Number.isFinite(agreement.value) || agreement.value < -1 || agreement.value > 1 || agreement.sample_count !== samples.length) failures.push("annotation agreement must provide a bounded Cohen kappa covering every sample");
+  if (provenance.confidence_interval_method !== QUALITY_CONFIDENCE_INTERVAL_METHOD) failures.push("confidence interval method does not match the deterministic quality evaluator");
   return failures;
 }
 

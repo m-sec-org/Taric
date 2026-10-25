@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const files = ["readme.md"];
 const collect = (directory) => {
+  if (!existsSync(join(root, directory))) return;
+  if (!existsSync(join(root, directory))) return;
   for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {

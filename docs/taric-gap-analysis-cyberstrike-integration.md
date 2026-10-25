@@ -3,7 +3,7 @@
 > 基于 CyberStrike 集成必要性推演 · 从「被需要」到「值得被需要」
 
 - 分析日期：2026-10-16
-- 分析对象：Taric 工作区源码（`packages/core/src` 10,158 行；schema 64 `$defs`；operation registry 50 项）
+- 分析对象：Taric 工作区源码的历史快照（当时记录为 `packages/core/src` 10,158 行、schema 64 `$defs`、operation registry 50 项；不代表当前基线）
 - 推演宿主：[CyberStrike](https://github.com/CyberStrikeus/CyberStrike)（`main`，Bun monorepo，opencode fork，自主渗透测试 agent）
 - 分析方式：宿主侧源码逐项走读（agent 循环、会话/上下文、工具系统、记忆与覆盖模块约 30 个文件）+ 与 Taric 集成方案逐节对照 + 集成必要性推演
 - 配套阅读：[代码设计](taric-code-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[BreachWeave 差距分析](taric-gap-analysis-breachweave-integration.md)、[能力改进提案](taric-capability-improvement-proposal.md)
@@ -23,7 +23,7 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 
 ## 能力提升后的状态校正（2026-10-18）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
+本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和当前变更中的验证资产为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
@@ -33,7 +33,7 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 | 无交互时延测量 | Context、proxy、Artifact、维护和 host.state 已有版本化实测；50k Context 首屏降低 42.5%，未达 50% 候选目标，无通用 SLA。 |
 | 价值与质量未量化 | 人工标注/基线样本数仍为 0，质量发布 blocked；无 ROI、等效安全比例或第三方宿主认证结论。 |
 
-综合[技术验收](benchmarks/capability-verification-v2.json)339 项测试全部通过；PostgreSQL 12 个 live 场景通过。质量证据 pending、`release_state=blocked`。这里的实施完成不代表正文所有建议被采用，未交付方向不因归档而启用。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)记录旧基线 339 项测试；当前候选报告记录 Core 350/350、PG 单 authority 12 个 runtime 场景以及 clean consumer/profile/restart 门禁。质量证据仍因人工标注/基线样本缺失 blocked；本文的宿主推演和外部项目状态不构成当前 Taric 认证。
 
 ## 目录
 

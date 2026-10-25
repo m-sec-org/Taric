@@ -1,13 +1,13 @@
 # 先补齐可验证的接入闭环，再按测量结果扩展 Taric 能力
 
-- 更新日期：2026-10-18
+- 更新日期：2026-10-25
 - 状态：实施完成并已归档；正文保留 2026-10-17 的设计基线与建议语气，当前合同以接入/API/运维文档为准，具体完成情况见下表。
-- 评审基线：Taric `c3db857e937c04293eb08e258ca98c8e24a2b897`，以及当前工作区中的两份集成推演。
+- 评审基线：本文保留 `c3db857e937c04293eb08e258ca98c8e24a2b897` 的历史设计讨论；当前实现和测试以候选 release report 为准。
 - 讨论入口：以本文的建议编号开展评审；来源为 [BreachWeave 推演](taric-gap-analysis-breachweave-integration.md)与 [CyberStrike 推演](taric-gap-analysis-cyberstrike-integration.md)。
 
-## 实施状态（2026-10-18）
+## 实施状态（2026-10-25）
 
-[归档任务](../openspec/changes/archive/2026-10-18-taric-capability-improvement/tasks.md)已完成 30/30；[验收记录](../openspec/changes/archive/2026-10-18-taric-capability-improvement/release-report.md)给出 T01～T14 的实现与测试索引。以下结果取自已保存证据，本次文档更新未重新采样性能或重新认证第三方宿主。
+[既有任务](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/tasks.md)已完成；[当前验收记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)给出最新实现与测试索引。以下结果取自候选证据，本次文档更新未重新采样性能或重新认证第三方宿主。
 
 | 决策 | 当前交付与证据 |
 |---|---|
@@ -17,10 +17,10 @@
 | I-04 能力状态 | 自定义 adapter ID 已开放；package/distribution/version/commit 分列，实例能力合成实现、运行绑定、授权、认证证据与质量状态，未知 native 版本不获认证。 |
 | I-05 有界读取 | 固定 read_seq/read_time 的 keyset、v2 加密 cursor 与有界 resume 已实现；[50k 测量](benchmarks/authority-scale-v3.json)首屏 3.08s 对比 5.36s 降低 42.5%，未达到 50% 候选目标，无通用 2s SLA。 |
 | I-06 原文与维护 | CLI 文件流/独立 binary socket 支持 64 MiB decoded chunk，普通 RPC 仍 1 MiB；[原文实测](benchmarks/artifact-transport-v2.json)、[维护实测](benchmarks/maintenance-concurrency-v2.json)与崩溃故障测试已交付。无显式 fsync/断电保证。 |
-| I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，未触发 resources subscription，订阅保持 disabled。 |
+| I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；Core in-process 与 authenticated adapter RPC 提供 best-effort bounded subscription，并以 query/read_seq 恢复；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，MCP resources subscription 仍 disabled。 |
 | I-08 导入边界 | 公开 `snapshot.import` 在 dispatch/Core/CLI 明确拒绝，内部隔离 restore 不构成宿主迁移 API；旧材料通过正常 proposal/evidence 治理接入。 |
 
-[干净构建报告](benchmarks/capability-verification-v2.json)记录 339 项测试全部通过、零失败/跳过，技术完成与运行时验证通过；其 `base_commit` 为 `c3db857`。该报告曾与包含 `authority-sql/3` 布局和宿主接入改动的工作区摘要相符；本轮后续源码改动已使该摘要失效，不能作为当前树的构建证据，须重跑 `scripts/verify-release.mjs`。[PostgreSQL v2](benchmarks/postgres-runtime-v2.json)记录 12 个场景通过及独立逻辑恢复 24 张表一致、审计序列 107→107。人工标注/基线样本数为 0，质量证据仍 pending，`release_state=blocked`；技术完成不等于质量发布通过。Bun 原生驱动、远程传输、MCP Tasks 和订阅均未因此成为受支持能力。
+[历史干净构建报告](benchmarks/capability-verification-v2.json)记录了旧基线 339 项测试，不能作为当前树的构建证据。[当前候选 release report](../openspec/changes/harden-taric-authority-runtime/release-report.json)记录 350/350 Core、clean consumer、proxy restart/replay、profile manifest 与 OrbStack PostgreSQL runtime 门禁；工作树为 dirty，质量证据因人工标注/基线样本为 0 而 blocked。Bun driver 已在当前候选中验证，远程传输、MCP Tasks、MCP resources subscription 和第三方宿主仍按 profile 单独判定。
 
 ## Abstract / 摘要
 
@@ -47,7 +47,7 @@
 
 ### 2. 已经完成的硬化不能重新包装成新增能力
 
-[既有硬化发布报告](../openspec/changes/archive/2026-10-17-harden-taric-authority-runtime/release-report.md)已经记录 writer 分配 UUIDv7、提交前校验、显式 L2 promotion、持久 cursor key、统一启动入口与共享 Core 后端验收。当前 [runtime-service.ts](../packages/core/src/runtime-service.ts)也确实在 CLI/MCP 共同的启动路径上消费编译实现、schema、policy 摘要绑定的 PostgreSQL 证据。
+[既有硬化实现](../openspec/changes/harden-taric-authority-runtime/)已经记录 writer 分配 UUIDv7、提交前校验、显式 L2 promotion、持久 cursor key、统一启动入口与共享 Core 后端验收。当前 [runtime-service.ts](../packages/core/src/runtime-service.ts)也确实在 CLI/MCP 共同的启动路径上消费编译实现、schema、policy 摘要绑定的 PostgreSQL 证据。
 
 后续改进应对这些合同做接入与回归验证，而不是再设计一套 resolver、身份生成器或 PostgreSQL 治理服务。保存的发布报告区分“实现完成”和“质量发布证据待补齐”，这一纪律应继续保留。当前机器是否仍有健康 PostgreSQL、旧报告能否匹配当前构建，必须由当前只读 readiness 决定，不能引用旧报告中的部署状态代替检查。
 
@@ -355,8 +355,8 @@ Bun driver 是否实施由 Node 代理的实际限制决定；订阅是否实施
 | 实例能力、认证范围和文档生成输入 | [compatibility.ts](../packages/core/src/compatibility.ts)与 adapter 实际 binding 结果 |
 | Context/cursor 与恢复合同 | [context-recovery.md](context-recovery.md)、[context.ts](../packages/core/src/context.ts) |
 | SQLite 大读、operator 维护与 benchmark | [authority-storage-runbook.md](authority-storage-runbook.md)、[benchmark-authority.mjs](../scripts/benchmark-authority.mjs) |
-| Artifact transport、峰值、故障与耐久性 | [artifact-content-storage spec](../openspec/specs/artifact-content-storage/spec.md)、[benchmark-artifacts.mjs](../scripts/benchmark-artifacts.mjs) |
+| Artifact transport、峰值、故障与耐久性 | [Taric API](taric-api.md)、[benchmark-artifacts.mjs](../scripts/benchmark-artifacts.mjs) |
 | 多主机显式激活与证据匹配 | [postgres-runtime-readiness.md](postgres-runtime-readiness.md)、[runtime-service.ts](../packages/core/src/runtime-service.ts) |
-| 技术完成和质量发布状态 | [硬化发布报告](../openspec/changes/archive/2026-10-17-harden-taric-authority-runtime/release-report.md)及后续独立发布产物 |
+| 技术完成和质量发布状态 | [硬化变更](../openspec/changes/harden-taric-authority-runtime/)及后续独立发布产物 |
 
 两份推演保留为来源材料，后续评审引用本文 I-01～I-08 与 T01～T14 的裁决和验收范围，不再把原报告中未经验证的优先级、比例和必要性判断直接当作 Taric 的对外承诺。

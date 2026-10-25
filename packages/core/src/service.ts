@@ -7,12 +7,13 @@ import { uuidv7 } from "./identity.js";
 import { buildContextPack, ContextBudgetError, type ContextPack } from "./context.js";
 import { InvalidCursorError } from "./cursor-key.js";
 import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
-import { ContractValidationError, schemaValidator, validateContract, validateProposalEnvelope } from "./validation.js";
+import { ContractValidationError, schemaValidator, UUID_V7_PATTERN, validateContract, validateProposalEnvelope } from "./validation.js";
 import { API_CONTRACT_VERSION, coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
-import { createAccessDecisionObservation, createControlObservation, type AccessDecisionObservationInput, type ControlObservationInput, coverageGateSnapshot } from "./coverage.js";
+import { createAccessDecisionObservation, createControlObservation, validateCoverageCellInput, type AccessDecisionObservationInput, type ControlObservationInput, type CoverageCellInput, coverageGateSnapshot } from "./coverage.js";
 import { ArtifactContentStore, ARTIFACT_CHUNK_BYTES, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { loadPinnedQualityReleaseActivation } from "./quality-release-activation.js";
 export { API_CONTRACT_VERSION };
 export type PrincipalRole = "model" | "host" | "reviewer" | "writer" | "operator";
 /** principal 只能由 transport 创建，不能由请求 body 自行声明权限。 */
@@ -82,7 +83,7 @@ const deferred = {
     "storage.restore": "evolve-engagement-memory",
 } as const;
 const modelAllowed = new Set(["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.submit", "proposal.list", "checkpoint.propose", "action.recommend", "capability.status"]);
-const hostRequired = new Set(["work.claim", "work.renew", "work.reclaim", "checkpoint.commit", "action.host-decision", "action.host-result", "action.reconcile"]);
+const hostRequired = new Set(["work.claim", "work.renew", "work.reclaim", "work.transition", "checkpoint.commit", "action.host-decision", "action.host-result", "action.reconcile"]);
 const hostErrors = new Set(["error.report"]);
 const auditRequired = new Set(["audit.verify", "audit.doctor", "audit.reconcile", "snapshot.export", "engagement.init", "engagement.status", "capability.status"]);
 const hostScoped = new Set(["engagement.status", "context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.submit", "proposal.list", "action.recommend"]);
@@ -238,6 +239,18 @@ export interface CoreService {
         work_run_id: string;
         agent_id: string;
         ttl_ms?: number;
+    }): Promise<ApiResponse<Record<string, unknown>>>;
+    coverageRecord(principal: Principal, input: CoverageCellInput & {
+        cell_id?: string;
+        expected_version: number;
+        idempotency_key?: string;
+    }): Promise<ApiResponse<Record<string, unknown>>>;
+    workTransition(principal: Principal, input: {
+        engagement_id: string;
+        work_run_id: string;
+        generation: number;
+        status: "running" | "checkpointed" | "blocked" | "completed" | "failed" | "cancelled";
+        idempotency_key?: string;
     }): Promise<ApiResponse<Record<string, unknown>>>;
     auditReconcile(principal: Principal, input?: {
         action?: "preview" | "replay" | "rebuild" | "reconcile";
@@ -399,6 +412,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
     await store.ready;
     const artifactStore = new ArtifactContentStore(contentRoot, store);
     await artifactStore.initialize();
+    const qualityReleaseActivation = loadPinnedQualityReleaseActivation(process.env.TARIC_QUALITY_RELEASE_REPORT, process.env.TARIC_QUALITY_RELEASE_REPORT_SHA256);
     const api = {
         async init(engagement: {
             name?: string;
@@ -941,6 +955,61 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 };
             }));
         },
+        async coverageRecord(principal: Principal, input: CoverageCellInput & {
+            cell_id?: string;
+            expected_version: number;
+            idempotency_key?: string;
+        }) {
+            const response = authorize(principal, "coverage.record", input.engagement_id);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => {
+                const request = input as unknown as Record<string, unknown>;
+                const allowed = new Set([
+                    "engagement_id", "cell_id", "expected_version", "resource_ref", "resource_revision_ref", "test_category",
+                    "identity_ref", "operation", "parameter", "conditions", "status", "tested_at", "limitations", "evidence_refs",
+                    "control_observation_ref", "origin_reached", "external_result_state", "role", "tenant_ref", "path",
+                    "network_condition", "method", "not_applicable_reason", "counter_evidence_refs", "idempotency_key", "contract_version",
+                ]);
+                if (Object.keys(request).some((field) => !allowed.has(field)))
+                    throw new ContractValidationError("validation_error", "coverage record contains unsupported fields");
+                if (!Number.isSafeInteger(input.expected_version) || input.expected_version < 0)
+                    throw new ContractValidationError("validation_error", "expected_version must be a non-negative safe integer");
+                if (input.expected_version === 0 && input.cell_id !== undefined)
+                    throw new ContractValidationError("validation_error", "cell_id is assigned by Core for a new coverage cell");
+                if (input.expected_version > 0 && (typeof input.cell_id !== "string" || !UUID_V7_PATTERN.test(input.cell_id)))
+                    throw new ContractValidationError("validation_error", "updates require a UUIDv7 cell_id");
+                const { cell_id, expected_version, idempotency_key, contract_version: _contractVersion, ...cellInput } = input as CoverageCellInput & { cell_id?: string; expected_version: number; idempotency_key?: string; contract_version?: string };
+                validateCoverageCellInput(cellInput);
+                const existing = cell_id ? await store.get(cell_id) : undefined;
+                if (cell_id && (!existing || existing.kind !== "coverage" || existing.engagement_id !== input.engagement_id))
+                    throw new ContractValidationError("conflict", "coverage cell not found in this engagement");
+                const normalizedInput = {
+                    ...cellInput,
+                    conditions: [...new Set(cellInput.conditions ?? [])].sort(),
+                    evidence_refs: [...(cellInput.evidence_refs ?? [])],
+                    counter_evidence_refs: [...(cellInput.counter_evidence_refs ?? [])],
+                };
+                if (!existing) {
+                    const result = await store.createRecord({
+                        ...normalizedInput,
+                        schema_version: SCHEMA_VERSION,
+                        kind: "coverage",
+                        provenance: { host_id: principal.id, producer_id: principal.id, source_kind: "host" },
+                    }, "L1", idempotency_key, { operation: "coverage.record", principal: principal.id, engagement_id: input.engagement_id });
+                    return { ok: true as const, data: result as unknown as Record<string, unknown> };
+                }
+                const update = {
+                    ...Object.fromEntries(Object.entries(existing).filter(([field]) => !["version", "trust_level", "display_id", "commit_seq"].includes(field))),
+                    ...normalizedInput,
+                    id: existing.id,
+                    kind: "coverage",
+                    schema_version: SCHEMA_VERSION,
+                } as CanonicalRecord;
+                const result = await store.commit(update, "L1", idempotency_key, { operation: "coverage.record", principal: principal.id, engagement_id: input.engagement_id }, false, expected_version);
+                return { ok: true as const, data: result as unknown as Record<string, unknown> };
+            }));
+        },
         async coverageQuery(principal: Principal, input: Record<string, unknown>) {
             const response = authorize(principal, "coverage.query", typeof input.engagement_id === "string" ? input.engagement_id : undefined);
             if (!response.ok)
@@ -1029,6 +1098,38 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!run || run.engagement_id !== input.engagement_id)
                     return error("conflict", "work run not found");
                 return { ok: true as const, data: (await store.reclaimWorkRun(input.work_run_id, principal.id, input.agent_id, input.ttl_ms)) };
+            }));
+        },
+        async workTransition(principal: Principal, input: {
+            engagement_id: string;
+            work_run_id: string;
+            generation: number;
+            status: "running" | "checkpointed" | "blocked" | "completed" | "failed" | "cancelled";
+            idempotency_key?: string;
+        }) {
+            const response = authorize(principal, "work.transition", input.engagement_id);
+            if (!response.ok)
+                return response;
+            return (await safe(async () => {
+                const request = input as Record<string, unknown>;
+                const allowed = new Set(["engagement_id", "work_run_id", "generation", "status", "idempotency_key", "contract_version"]);
+                if (Object.keys(request).some((field) => !allowed.has(field)))
+                    return error("validation_error", "work transition contains unsupported fields");
+                if (typeof input.work_run_id !== "string" || !UUID_V7_PATTERN.test(input.work_run_id))
+                    return error("validation_error", "work_run_id must be a UUIDv7");
+                if (!Number.isSafeInteger(input.generation) || input.generation < 1)
+                    return error("validation_error", "generation must be a positive safe integer");
+                if (!["running", "checkpointed", "blocked", "completed", "failed", "cancelled"].includes(input.status))
+                    return error("validation_error", "status is not a legal WorkRun transition target");
+                if (input.idempotency_key !== undefined && (typeof input.idempotency_key !== "string" || !input.idempotency_key.trim() || input.idempotency_key.length > 256))
+                    return error("validation_error", "idempotency_key must be a non-empty string of at most 256 characters");
+                return {
+                    ok: true as const,
+                    data: await store.transitionWorkRun(input.work_run_id, input.generation, principal.id, input.status, {
+                        engagement_id: input.engagement_id,
+                        idempotency_key: input.idempotency_key,
+                    }),
+                };
             }));
         },
         async auditReconcile(principal: Principal, input: {
@@ -1369,15 +1470,25 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             }
             // 诊断必须与 compat manifest 同源，避免 CLI/MCP/Pi 各自维护支持名单。
         const postgresEnabled = (store as AuthorityStore & { manifest?: () => { runtime_state: string } }).manifest?.().runtime_state === "enabled";
-        const compatibilityManifest = postgresEnabled ? {
+        const compatibilityManifest = {
             ...TARIC_COMPATIBILITY_MANIFEST,
-            capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities.map((item) => item.id === "storage.postgresql" ? { ...item, runtime_state: "enabled" as const } : item),
-        } : TARIC_COMPATIBILITY_MANIFEST;
+            capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities.map((item) => {
+                if (item.id === "storage.postgresql" && postgresEnabled) return { ...item, runtime_state: "enabled" as const };
+                if (item.id === "quality.full_statistical_evaluation" && qualityReleaseActivation.activatable) return {
+                    ...item, state: "supported" as const, runtime_state: "enabled" as const, evidence_state: "verified" as const,
+                    evidence: [...item.evidence, "digest-pinned-quality-release-report"], follow_up_state: "none" as const,
+                    detail: "Stratified quality evaluation is enabled by a digest-pinned, current release report with complete human annotation provenance.",
+                    follow_up: undefined, follow_up_detail: undefined,
+                };
+                return item;
+            }),
+        };
         const unsupported = Object.fromEntries(compatibilityManifest.capabilities.filter((item) => item.state === "unsupported").map((item) => [item.id, item.follow_up ?? "complete-taric-runtime-gaps"]));
             return { ok: true as const, data: {
                     schema_version: SCHEMA_VERSION,
                     api_contract_version: API_CONTRACT_VERSION,
                 compatibility_manifest: compatibilityManifest,
+                    quality_release_evidence: qualityReleaseActivation,
                     // 支持名单必须来自统一操作注册表，避免 Core、CLI、MCP 与 Pi 各维护一份。
                     supported_operations: operationContracts.map((contract) => contract.operation),
                     unsupported_capabilities: { ...unsupported, ...deferred },
@@ -1586,7 +1697,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return error("authorization_error", "reviewer identity is bound to the authenticated principal");
             if (operation === "review.submit" && ["reviewer_capability", "reviewer_model", "prompt_digest", "ruleset_digest"].some((field) => Object.prototype.hasOwnProperty.call(request, field)))
                 return error("authorization_error", "reviewer attestation is assigned by the authenticated transport");
-            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit") {
+            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit" || operation === "work.transition" || operation === "coverage.record") {
                 const requestContract = operationContract(operation)!.request as ContractName;
                 let validate = operationRequestValidators.get(requestContract);
                 if (!validate) {
@@ -1596,7 +1707,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!validate || !validate(request))
                     return error("validation_error", `invalid ${operation} request`);
             }
-            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.query": "coverageQuery", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
             aliases["host.state"] = "hostState";
             const methodName = aliases[operation] ?? operation;
             if (operation === "admission.promote_l2")
@@ -1733,8 +1844,10 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
         return "review";
     if (["admission.evaluate", "admission.commit"].includes(operation))
         return "admit";
-    if (["work.claim", "work.renew", "work.reclaim", "work.resume", "error.report"].includes(operation))
+    if (["work.claim", "work.renew", "work.reclaim", "work.transition", "work.resume", "error.report"].includes(operation))
         return "work";
+    if (operation === "coverage.record")
+        return "propose";
     if (["checkpoint.commit"].includes(operation))
         return "checkpoint";
     if (["action.host-decision", "action.host-result", "action.reconcile"].includes(operation))

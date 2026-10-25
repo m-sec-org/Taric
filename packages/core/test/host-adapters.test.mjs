@@ -97,7 +97,7 @@ test("Pi lifecycle callbacks reject cross-engagement and forged host attribution
   (await store.close());
 });
 
-test("Pi 1.1 hooks use explicit host bindings for proposal, checkpoint, and action result paths", async () => {
+test("Pi 1.4 hooks use explicit host bindings for proposal, checkpoint, and action result paths", async () => {
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
   const engagement_id = uuidv7();
