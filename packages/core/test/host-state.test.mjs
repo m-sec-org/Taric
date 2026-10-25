@@ -59,7 +59,7 @@ test("host.state evaluates lease expiry at read time without an intervening comm
     const recommended = await ctx.store.recordActionIntent({ run_id: run.run_id, generation: run.generation, mode: "llm_recommend", target: "target", method: "GET /", rationale: "check", status: "recommended", host_id: ctx.host.id });
     await ctx.store.recordActionIntent({ action_id: recommended.action_id, run_id: run.run_id, generation: run.generation, mode: "llm_recommend", status: "authorized", host_decision_ref: "decision", host_id: ctx.host.id });
     await ctx.store.recordActionIntent({ action_id: recommended.action_id, run_id: run.run_id, generation: run.generation, mode: "llm_recommend", status: "unknown", host_id: ctx.host.id });
-    await ctx.store.commit({ id: uuidv7(), engagement_id: ctx.engagement_id, kind: "claim", proposition: "time-bound", expires_at: new Date(Date.now() + 50).toISOString() }, "L2");
+    await ctx.store.commit({ id: uuidv7(), engagement_id: ctx.engagement_id, kind: "claim", proposition: "time-bound", expires_at: new Date(Date.now() + 500).toISOString() }, "L2");
     const before = await ctx.service.dispatch("host.state", ctx.host, { engagement_id: ctx.engagement_id, limit: 10 });
     assert.equal(before.ok, true);
     assert.equal(before.data.aggregates.expired_leases, 0);

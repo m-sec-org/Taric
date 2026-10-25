@@ -47,10 +47,16 @@ const run = (id, command, args, cwd = directory) => {
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   const passed = result.status === 0;
   process.stderr.write(`verify-release: ${id} ${passed ? "passed" : "failed"}\n`);
-  steps.push({ id, passed, elapsed_ms: performance.now() - start, command: [command, ...args].join(" "), output_digest: digest(output), ...(passed ? {} : { output: output.slice(-256000) }) });
+  steps.push({ id, passed, elapsed_ms: performance.now() - start, command: [command, ...args].join(" "), output_digest: digest(output), output: output.slice(-256000) });
   if (id.startsWith("tests:")) {
     const number = (key) => Number(new RegExp(`^# ${key} (\\d+)$`, "m").exec(output)?.[1] ?? 0);
     if (id === "tests:hermes") counts.push({ package: "hermes", tests: Number(/Ran (\d+) tests/.exec(output)?.[1] ?? 0), pass: passed ? Number(/Ran (\d+) tests/.exec(output)?.[1] ?? 0) : 0, fail: passed ? 0 : 1, skipped: 0 });
+    else if (id === "tests:driver-bun-sqlite") {
+      const pass = Number(/^[ \t]*(\d+) pass[ \t]*$/m.exec(output)?.[1] ?? 0);
+      const fail = Number(/^[ \t]*(\d+) fail[ \t]*$/m.exec(output)?.[1] ?? 0);
+      const skipped = Number(/^[ \t]*(\d+) skip[ \t]*$/m.exec(output)?.[1] ?? 0);
+      counts.push({ package: "driver-bun-sqlite", tests: pass + fail + skipped, pass, fail, skipped });
+    }
     else counts.push({ package: id.slice(6), tests: number("tests"), pass: number("pass"), fail: number("fail"), skipped: number("skipped") });
   }
   return passed;
@@ -92,7 +98,7 @@ try {
   const implementation_complete = runtime_verified;
   const blockers = [
     ...(!technical_passed ? ["One or more required technical checks failed"] : []),
-    ...(!runtime_verified ? ["Complete passing live PostgreSQL runtime verification is required to establish task 6.2 completion"] : []),
+    ...(!runtime_verified ? ["Complete passing live PostgreSQL runtime verification is required to establish multi-host runtime verification and release readiness"] : []),
     ...(!quality.passed ? ["Representative human annotation and baseline evidence is pending; synthetic fixture cannot establish quality"] : []),
   ];
   const report = { version: "taric-capability-verification/1", base_commit, source_digest: sourceDigest, build_digest: built ? buildDigest(directory) : null, schema_digest: digest(JSON.stringify(coreSchema)), policy_digest: policyDigest(), fixture_digest: digest(readFileSync(fixturePath)), configuration: { runtimes: runtimeVersions, host: { platform: process.platform, arch: process.arch, cpu_model: cpus()[0]?.model ?? null, cpu_count: cpus().length, total_memory_bytes: totalmem() }, checkout: "current source exported into an empty temporary directory", fixture_path: "packages/core/test/fixtures/memory-quality-v1.json", fixture_sample_count: samples.length, spec_count: readdirSync(join(root, "openspec/specs"), { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync(join(root, "openspec/specs", entry.name, "spec.md"))).length, operation_count: operationContracts.length, schema_definition_count: Object.keys(coreSchema.$defs).length, live_postgresql: liveRequested }, technical_passed, runtime_verified, implementation_complete, release_state: !technical_passed ? "failed" : implementation_complete && quality.passed ? "passed" : "blocked", checks: steps, test_counts: counts, capabilities: TARIC_COMPATIBILITY_MANIFEST.capabilities, quality, shared_authority: shared, postgres_runtime: live ?? null, blockers };
