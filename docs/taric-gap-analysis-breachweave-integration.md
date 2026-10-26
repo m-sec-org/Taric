@@ -6,7 +6,7 @@
 - 分析对象：Taric `c3db857`（历史 HEAD 工作区源码；本文不是当前实现基线）
 - 推演宿主：[BreachWeave](https://github.com/m-sec-org/BreachWeave)（`pentest` 分支，Bun monorepo，多角色渗透测试协作平台）
 - 分析方式：宿主侧集成可行性推演（非纸面评审） + Taric 源码逐项走读 + MCP 现行规范与工作组章程核对
-- 配套阅读：[代码设计](taric-code-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[接入指南](agent-integration.md)、[当前硬化变更](../openspec/changes/harden-taric-authority-runtime/)
+- 配套阅读：[当前设计](taric-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[接入指南](agent-integration.md)、[历史硬化变更](../openspec/changes/harden-taric-authority-runtime/)
 
 **方法论说明**：本报告的差距不是通过规格对照发现的，而是通过**尝试把 Taric 接入一个真实存在、且未参与 Taric 设计的宿主**发现的。这决定了差距的性质——它们绝大多数不在 Taric 的能力内部，而在「一个有意愿接入的团队能否走通」。
 
@@ -14,18 +14,18 @@
 
 ## 能力提升后的状态校正（2026-10-25）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和当前变更中的验证资产为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
+本文保留 2026-10-16 的推演、代码基线、行号与建议。原正文中的“当前”“未实现”“不支持”均限定为当时状态，不作为当前待办或当前实现判断；§1–8 是历史分析和建议，不是实施路线。当前状态以[接入指南](agent-integration.md)、[API 合同](taric-api.md)、源码与测试为准。本轮 `1.0.0` 工作区于 2026-10-26 通过 build/typecheck/matrix/npm test：Core 341 pass、9 PG live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过；5 个 `1.0.0` tarball clean consumer 通过。没有匹配当前源码摘要的 PostgreSQL live/runtime activation report，也未认证真实第三方宿主、远程 gateway 或容器 spool。文中外部项目与 MCP 工作组快照未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
-| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite` 进程内驱动已在隔离 tarball consumer 中验证。Registry 发布和第三方宿主认证仍未完成。 |
+| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite` 进程内驱动已在隔离 tarball consumer 中验证。五个 `1.0.0` tarball consumer 通过；包仍标记 private，registry 发布和第三方宿主认证不在此验证范围。 |
 | 宿主 ID 封闭 | 自定义 adapter ID 已开放，认证仍按 package/distribution/version/commit 与实际实例绑定判断。 |
 | 无最小接入路径 | A～E 依赖闭环与独立 Node 治理示例已交付。 |
-| 无状态通知 | Core in-process 与 authenticated adapter RPC 已实现 bounded best-effort host subscription，并使用 query/read_seq 恢复；MCP resources subscription 与 Tasks 仍未交付。本机轮询 fixture 满足 1000ms 预算，不要求所有部署启用通知。 |
+| 无状态通知 | Core in-process 与 authenticated adapter RPC 已实现 bounded best-effort host subscription，并使用 query/read_seq 恢复；MCP resources subscription 与 Tasks 仍未支持。本机轮询 fixture 满足 1000ms 预算，不要求所有部署启用通知。 |
 | 存量导入 | 公开 snapshot.import 明确 unsupported；旧材料走正常 proposal/evidence，不提供通用历史迁移。 |
-| 远程拓扑 | 本机 Unix socket 与 PostgreSQL 单 authority profile 已验证；双进程多主机和通用远程 host RPC 仍未验证/交付。 |
+| 远程拓扑 | 本机 Unix socket 已做重启/重放验证；本轮没有匹配 `1.0.0` 源码摘要的 PostgreSQL live report。双进程多主机和远程网络部署仍未验证，不能由本机 socket 结果外推。 |
 
-历史综合[技术验收](benchmarks/capability-verification-v2.json)记录旧基线 339 项测试；当前实现请以[候选 release report](../openspec/changes/harden-taric-authority-runtime/release-report.json)为准：Core 350/350、PG 单 authority 12 个 runtime 场景通过，质量证据仍因人工基线缺失 blocked。本文中的代码行号、Bun/推送/宿主差距均保留为历史推演，不等于当前未完成项。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)和候选 release report 绑定旧源码基线，均不作为本轮 `1.0.0` PostgreSQL runtime 证据。当前本地验证计数见本节开头；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文原始代码行号、Bun/推送/宿主差距保留为历史推演，不等于当前未完成项。
 
 ## 目录
 

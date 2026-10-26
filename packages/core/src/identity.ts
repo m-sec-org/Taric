@@ -30,6 +30,6 @@ export class DisplayIdAllocator {
   get nextSequence(): number { return this.#next; }
 }
 
-export function schemaMetadata(coreVersion = "0.1.0"): SchemaMetadata {
+export function schemaMetadata(coreVersion = "1.0.0"): SchemaMetadata {
   return { schema_version: "1.0.0", core_version: coreVersion, created_at: new Date().toISOString() };
 }

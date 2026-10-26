@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { API_CONTRACT_VERSION, AUTHORITY_STORAGE_CONTRACT_VERSION, TARIC_COMPATIBILITY_MANIFEST } from "../dist/index.js";
+import { schemaMetadata } from "../dist/identity.js";
 import { operationContracts, SCHEMA_VERSION } from "@taric/schemas";
 
 const root = resolve(new URL("../../..", import.meta.url).pathname);
@@ -14,9 +15,10 @@ test("published compatibility matrix covers current contracts, package closure, 
   assert.equal(matrix.schema_version, SCHEMA_VERSION);
   assert.equal(matrix.api_contract_version, API_CONTRACT_VERSION);
   assert.equal(matrix.storage_contract_version, AUTHORITY_STORAGE_CONTRACT_VERSION);
+  assert.equal(schemaMetadata().core_version, "1.0.0");
   assert.deepEqual(matrix.operations.map(({ operation }) => operation), operationContracts.map(({ operation }) => operation));
   assert.ok(matrix.operations.every(({ request_schema, response_schema, errors }) => request_schema && response_schema && Array.isArray(errors)));
-  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "0.1.0");
+  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "1.0.0");
   assert.ok(matrix.drivers.some(({ name, runtime, exports }) => name === "@taric/driver-bun-sqlite" && runtime === "bun" && exports.includes(".")));
   assert.deepEqual(Object.keys(matrix.certified_hosts), Object.keys(TARIC_COMPATIBILITY_MANIFEST.hosts));
 });

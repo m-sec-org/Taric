@@ -1,8 +1,10 @@
 # Taric 宿主同步适配：设计与实现方案
 
 > **版本**：v1（2026-10-22）
-> **状态**：历史设计稿，主要条目已在 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 中实施并验证。下文保留原设计和实现前的源码判断；当前合同以 [API 边界](taric-api.md)、[接入指南](agent-integration.md) 和 [当前候选发布报告](../openspec/changes/harden-taric-authority-runtime/release-report.md) 为准。
+> **状态**：历史设计稿，主要条目已在 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 中实现。下文各节“现状”与实施顺序均是设计时基线，不是当前差距/待办；归档报告也绑定 pre-1.0.0 源码，不代表当前发布验证。当前合同以 [API 边界](taric-api.md)、[接入指南](agent-integration.md) 和 [代码设计](taric-design.md) 为准。
 > **背景**：[Taric面向渗透测试智能体的集成方案](Taric面向渗透测试智能体的集成方案.md) §14 与 BreachWeave 宿主工作区输入文档《Taric外置记忆集成差距分析与建议方案.md》（v4，未随 Taric 仓库分发）的分析表明：BreachWeave 集成中最昂贵的宿主侧工程，其成本多数来自 Taric 的**通用性缺口**而非 BreachWeave 的特殊性。
+
+> **当前状态（2026-10-26）**：Taric `1.0.0` 工作区 build/typecheck/matrix/npm test 通过（Core 341 pass、9 个 PG live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11）；五个 `1.0.0` tarball clean consumer 和文档链接检查通过。分页、WorkItem model projection、coverage 同快照、Core/RPC bounded subscription、admission-bound review、显式授权的 Artifact 单 descriptor ingestion、Bun driver、开放 adapter ID/Pi 认证集合及兼容矩阵均已实现并有测试。MCP resources/Tasks、npm registry 发布、与当前源码摘要匹配的 PostgreSQL live activation report、真实第三方宿主、远程 gateway 和容器 spool 挂载仍不在已验证范围。旧候选 release report 和下方设计时行号不得替代当前证据。
 > **本方案的约束（不可违反）**：Taric 保持**独立且通用的外置记忆插件**定位——
 > 1. 每项改动必须能以"任意宿主接入都需要"的语言立项，BreachWeave 只是首个消费者与验证宿主；
 > 2. 宿主域概念（WSTG 字典、渗透工具、CTF/项目语义等）**禁止进入 core**；`test_category` 等保持为不透明字符串字段；
@@ -66,7 +68,7 @@
 
 ## 2. T-A 驱动可移植性与包发布面
 
-### 2.1 现状（源码核验）
+### 2.1 设计时现状（源码核验，历史基线）
 
 | 事实 | 位置 |
 |---|---|
@@ -83,7 +85,7 @@
 
 **(a) 导出驱动契约**：`index.ts` 增补导出 `AuthoritySqlDriver`、`SqliteAuthorityDriver`、`PostgresAuthorityDriver`、`SqlRunResult`、`SqlMetrics`、`SqlMetricsSnapshot`、`SqlTransactionMode`（`PostgresQueryable` 已由 index.ts:25 导出，无需重复）。
 
-**(b) 包发布面**：`packages/core/package.json` 增加 `exports` map（至少 `.` 与 `./storage-contract`）；`private` 改为可发布（npm 公开或组织内部 registry，二选一由发布策略决定）；构建产物 `dist/` 保持现有 tsc 输出。**注意两点**：其一，这是 BreachWeave 进程内嵌入的前置条件——当前 private 包无法作为依赖引入；其二，`@taric/schemas` 同为 `private: true`（core 的运行时依赖，workspace 版本 `0.1.0`），**必须与 core 一同发布**，否则跨仓 `npm install @taric/core` 无法解析依赖。`@taric/cli` / `@taric/mcp` 保持 private（不在嵌入依赖闭包内）。
+**(b) 包发布面**：设计时建议为 Core 增加 `exports` map 并确定分发渠道。该设计稿当时记录 `@taric/schemas@0.1.0`；当前版本为 `1.0.0`。Core/Schemas/Bun driver 的 exports 已实现，五个 `1.0.0` tarball 已在独立 consumer 验证。包清单仍为 private，因此 registry 发布尚未发生；本地 tarball 安装验证不要求设为 public，也不等于 registry 可安装。
 
 **(c) Bun 参考驱动**：新包 `packages/driver-bun-sqlite/`（命名 `@taric/driver-bun-sqlite`；**目录必须平铺在 `packages/` 下**——根 workspaces 是 `["packages/*"]` 单层 glob，`packages/drivers/bun-sqlite` 两层路径不会被识别），实现 `BunSqliteAuthorityDriver implements AuthoritySqlDriver`：
 
@@ -119,9 +121,9 @@
 
 ## 3. T-B WorkItem 资源引用与调度查询
 
-### 3.1 现状
+### 3.1 设计时现状（历史基线）
 
-`WorkItem`（`packages/schemas/src/types.ts`）现有字段：`title/scope_ref?/target_version?/status/acceptance_criteria[]/goal?/acceptance?/depends_on?: Uuid[]/risk_class?/risk_budget?`——没有目标资源字段；集成方案 §6.2 明确"不接受 target_resource_refs"并要求宿主自建调度元数据；引用类别映射在 `validation.ts:96-117`（如 `depends_on` 在 106 行）。
+原设计快照中的 `WorkItem` 尚无资源引用字段。当前 schema 支持经引用完整性校验的 `resource_refs`，`work.query` 提供有界查询与 model-safe projection；这些引用是调度提示，不是目标资源锁，互斥、限速和 worker 调度仍属宿主职责。下方 T-B 设计细节保留该能力的历史实现方案。
 
 ### 3.2 设计
 
@@ -309,7 +311,7 @@ Taric 只提供确定性的审阅输入与治理接口，不运行或调用模�
 ### D2：宿主契约开放（RM-2 落地）
 
 - **宿主 ID 开放已完成，不再是工作项**：`AdapterHostId` 已是开放 `string`（`adapter.ts:14`，注释明确"extension points, rather than an allow-list"），`isValidAdapterId`（adapter.ts:199）与 `createCustomAdapterDescriptor`（adapter.ts:171）已实现并从 index.ts:10 导出。
-- 剩余工作只有**版本门**：`isSupportedPiVersion`（`pi-adapter.ts:19` 严格相等）→ **认证版本集合 + 未认证显式降级**：已认证版本（`SUPPORTED_PI_HOST` 列表化）→ 全能力；同 major 未认证 → 已知安全子集 + `not_certified` 标记；更远版本 → 最小能力集，而非清零。capability 报告区分"未认证"与"不支持"。
+- 设计时剩余的是版本认证门；当前源码已有 Pi 认证版本清单和未认证显式降级，compatibility manifest 对认证上限、`not_certified` 安全子集与 `unsupported` 诊断集作区分。未认证版本不因降级进入 `supported`。
 - 与能力提升提案对 RM-2 的既有裁决对齐（`docs/taric-capability-improvement-proposal.md`）："未测试版本不自动 supported；每个 package/fork/version/commit 单独取证；兼容区间必须有区间边界测试支持"。据此：降级 ≠ supported（未认证版本永不进入 `supported` 列表，capability 证据必须显式标 `not_certified`）；若声明版本区间，区间两端必须有边界测试。
 - 以新 dated openspec 变更承接（既有 `integrate-native-host-adapters` 已归档完结，`registry.ts:177` 的 followUpChanges 仅作历史索引，不重复打开）。
 

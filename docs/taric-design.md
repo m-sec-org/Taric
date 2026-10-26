@@ -25,21 +25,21 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前合同为 API `1.2.0`、schema `1.0.0`、Core/workspace package `0.1.0`、authority storage `authority-storage/3`。实现与测试状态以[当前候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)为准；报告绑定了 dirty worktree，不能称为 clean Git release。
+当前合同为 Taric/workspace package `1.0.0`、API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3`。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是本次 `1.0.0` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
 
 ## 2. 技术栈
 
 | 层 | 实际实现 |
 |---|---|
 | TypeScript | ESM、strict、target ES2022，`tsc` 分包构建 |
-| Node.js | Core 静态依赖 `node:sqlite`；已保存进程证据使用 Node 22.21.1；需要提供该模块的 Node 版本 |
+| Node.js | Node SQLite driver 在调用时才动态加载 `node:sqlite`；已验证 Node 22.21.1。使用 Bun 注入 Bun SQLite driver 时不加载 Node driver |
 | SQLite | `DatabaseSync`、WAL；对外为异步方法，同进程按数据库文件排队 |
 | PostgreSQL | `pg` 驱动，支持声明为 14～18；事务、服务端时钟与 schema 范围锁；布局 `authority-sql/4` |
 | Schema | JSON Schema 2020-12、Ajv 与 ajv-formats；72 个 `$defs`，包含基础类型、领域及请求/响应定义，不等于 72 种领域记录 |
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
 
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite` 进程内驱动；当前候选完成了该 package 的隔离 tarball 安装、导入和 Bun query 测试，不代表 registry 发布或第三方宿主认证。
+`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite` 进程内驱动；本次 `1.0.0` 包版本在本地隔离 consumer 中完成 tarball 安装、导入和 Bun query 验证，不代表 npm registry 发布或第三方宿主认证。
 
 ## 3. 仓库与代码结构
 
@@ -207,12 +207,12 @@ begin 创建 upload 与服务器分配 Artifact ID/version；append 按 ordinal 
 
 ## 6. 数据模型
 
-共同布局包含 24 张表，JSON 正文在 SQLite/PG 均以 text 保存：
+共同布局包含 25 张表，JSON 正文在 SQLite/PG 均以 text 保存：
 
 | 分组 | 表 |
 |---|---|
 | canonical/历史 | metadata、records、record_versions、object_refs |
-| 治理 | proposals、proposal_versions、reviews |
+| 治理 | proposals、proposal_versions、admission_review_packs、reviews |
 | 审计/恢复 | events、idempotency、outbox、operation_markers、reader_pins |
 | 运行 | work_runs、attempts、checkpoints、action_intents |
 | Artifact | artifact_sessions、artifact_catalog、artifact_chunks、artifact_catalog_watermarks、artifact_uploads、artifact_idempotency、artifact_publications、execution_catalog |
@@ -280,9 +280,9 @@ node scripts/check-doc-links.mjs
 node --test scripts/test/profile-verification.test.mjs
 ```
 
-重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。当前候选 workspace 测试为 Schemas 10/10、Core 350/350、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11，均零失败、零跳过；另通过 matrix、docs、profile manifest、clean consumer、proxy restart/replay 和 OrbStack PostgreSQL runtime 门禁。真实 PG 测试须显式配置 URL，Bun driver 测试须安装 Bun；跳过不等于验证通过。
+重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-26 的 workspace 测试运行结果为 Schemas 10/10、Core 341 pass / 9 skipped、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11；Core 跳过项要求配置 `TARIC_TEST_DATABASE_URL`。同次版本升级验证通过 build、typecheck、matrix、文档链接和 1.0.0 clean consumer。此前候选报告另含 proxy restart/replay 与 PostgreSQL runtime 证据，但绑定较早工作树，不能充当本次 1.0.0 release report。跳过不等于验证通过。
 
-[当前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。该候选工作树非 clean，质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
+[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。这些报告对应早期候选工作树，不代表本次 1.0.0 发布验证。质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
 
 ## 13. 已知差距与假设
 
@@ -291,7 +291,7 @@ node --test scripts/test/profile-verification.test.mjs
 - `host.state` 聚合/时间轮询及 Core in-process、adapter RPC bounded subscription 已实现，使用 query/read_seq 作为恢复保证；MCP resources subscription、MCP Tasks 和通用远程 host RPC 未交付。Bun SQLite driver 已提供，远程和容器 profile 仍需独立环境验收。
 - Context 有界不代表 snapshot/export/audit/work.resume 全部有界；字符预算不是 token 预算。
 - 默认 Artifact 仅声明 local_process_crash，不声明 fsync/断电耐久；PG 不同步 spool。
-- 公开 snapshot.import/migration/backup.restore/remote.push/full_quality_evaluation 仍 unsupported；底层恢复/callback/统计函数不自动变成公开 operation。
+- 公开 `snapshot.import`、`storage.backup` 和 `storage.restore` 会在 dispatch 返回 deferred/unsupported；`migration`、`backup.restore` 与 `remote.push` 不是公开 operation。质量统计算法已实现，但 `quality.full_statistical_evaluation` 默认 disabled，只有当前构建匹配的人工标注 release evidence 校验通过后才会动态启用；底层恢复/callback/统计函数不自动变成公开 operation。
 - Taric 不证明工具观察真实、发现完整、凭据安全或动作恰好执行一次；目标部署容量与人工质量需独立证据。
 
 ## 14. 附录

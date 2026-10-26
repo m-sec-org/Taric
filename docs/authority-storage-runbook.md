@@ -1,8 +1,8 @@
 # Single-host authority reads and maintenance
 
-Current capability contracts and saved validation results are summarized in the [current release record](../openspec/changes/harden-taric-authority-runtime/release-report.md). Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Saved benchmark reports are historical evidence and should be kept unchanged when collecting new samples.
+The package and schema contracts are listed in the [compatibility matrix](../compatibility-matrix.json). The saved runtime and benchmark reports cited below predate the 1.0.0 source and are historical measurements, not 1.0.0 release or deployment evidence. On 2026-10-26, the 1.0.0 workspace build, typecheck, matrix check, test suite, and clean tarball consumer passed; PostgreSQL live tests were not run. Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Keep saved benchmark reports unchanged when collecting new samples.
 
-> Last reviewed: 2026-10-18
+> Last reviewed: 2026-10-26
 
 CLI and MCP resolve the same persistent SQLite authority and content root. Set `TARIC_DB` and `TARIC_CONTENT_ROOT` explicitly when operating a separate deployment. The default runtime profile is `single_host_sqlite`; an explicit `multi_host_authority` profile must use the PostgreSQL runbooks instead. SQLite uses WAL and serializes write transactions. CLI, MCP, proxy and maintenance processes may open separate connections to the same local file; same-process driver queues do not coordinate separate processes. Shared files, NFS locks, Git repositories, or independent SQLite copies do not provide a multi-host backend.
 
@@ -67,7 +67,7 @@ SQL timers bracket driver operations; application-processing residual is total p
 
 The report separates commit/admission p95, first list page and continuation, snapshot materialization, export materialization, and context first-page/continuation costs. Snapshot/export remain O(N) materializations. The candidate Context path uses bounded keyset pages pinned to `read_seq`; each page records `read_stats` and enforces its scan budget. The three continuation samples also have an aggregate p50/p95, but do not establish a constant-time or constant-memory deployment guarantee. These synthetic local measurements do not establish throughput for a different host, dataset, or deployment, and do not supply quality-evaluation truth or recall evidence.
 
-See [context recovery](context-recovery.md) for key ownership, rotation, and restart behavior. The [authority-scale-v2-baseline.json](benchmarks/authority-scale-v2-baseline.json) is the preserved legacy Context baseline; [authority-scale-v3.json](benchmarks/authority-scale-v3.json) is the final bounded candidate run. Never treat the 500-row smoke fixture or historical v1/v2 measurements as final candidate evidence.
+See [context recovery](context-recovery.md) for key ownership, rotation, and restart behavior. The [authority-scale-v2-baseline.json](benchmarks/authority-scale-v2-baseline.json) is the preserved legacy Context baseline; [authority-scale-v3.json](benchmarks/authority-scale-v3.json) is the final bounded run in the pre-1.0.0 candidate experiment. Neither is a 1.0.0 release measurement. Never treat the 500-row smoke fixture or historical v1/v2 measurements as final candidate evidence.
 
 The historical [v1 run](benchmarks/authority-scale-v1.json) used Node 22.21.1, SQLite WAL, and an Intel i5-7287U host; `measured_at` is 2026-10-15T02:06:33Z. At 10k/50k fixtures, commit p95 was 9.3/20.2 ms and proposal-to-L1 p95 was 139.4/66.2 ms (100 samples each). The pinned sequences were 10403/50403. Snapshot materialization took 426/2019 ms; export took 1232/4978 ms with process peak RSS of 112/234 MiB. The 50k export serialized 21.3 MB. These are observations from that host and fixture, not bounds.
 

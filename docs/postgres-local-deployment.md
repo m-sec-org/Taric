@@ -1,8 +1,8 @@
 # Local PostgreSQL with OrbStack
 
-The latest saved [runtime verification](benchmarks/postgres-runtime-v2.json) passed all 12 scenarios on PostgreSQL 17.11 and an independent `pg_dump`/`pg_restore` check of 24 tables (audit sequence 107→107). This supplements the older availability check below; it does not establish that a container is currently healthy or that a saved report matches a rebuilt release. Generate a fresh report for the selected candidate and deployment when required.
+The saved [runtime verification](benchmarks/postgres-runtime-v2.json), generated 2026-10-17, passed all 12 scenarios on PostgreSQL 17.11 and an independent `pg_dump`/`pg_restore` check of 24 tables (audit sequence 107→107). It is pre-1.0.0 candidate evidence and must not be used to activate 1.0.0. The 1.0.0 workspace validation on 2026-10-26 did not run PostgreSQL live tests; nine Core PostgreSQL-gated tests were skipped because no live test database was configured. Generate and review a fresh report for the exact build and deployment before activation. A saved report does not establish that a container is currently healthy.
 
-> Last reviewed: 2026-10-18
+> Last reviewed: 2026-10-26
 
 `compose.postgres.yaml` starts one Taric-only PostgreSQL service on the active Docker context. It publishes **only** `127.0.0.1:55432`, uses the `taric-authority` Compose project, and persists data in the named volume `taric-authority-postgres-data`. It does not depend on or manage other development containers.
 
@@ -56,7 +56,7 @@ TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/tari
   node --test packages/core/test/postgres-live.test.mjs packages/core/test/runtime-conformance.test.mjs
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
   TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-  node scripts/verify-postgres-runtime.mjs --output docs/benchmarks/postgres-runtime-v2.json
+  node scripts/verify-postgres-runtime.mjs --output /tmp/taric-postgres-runtime-current.json
 ```
 
 Tests use isolated schemas inside this development database; do not point the test URL at production. A skipped live test is missing evidence. Container health alone does not enable runtime: see [PostgreSQL runtime readiness](postgres-runtime-readiness.md) for the separate gate.
@@ -84,12 +84,12 @@ export TARIC_AUTHORITY_PROFILE=multi_host_authority
 export TARIC_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric
 export TARIC_HOST_ID=local-orbstack
 export TARIC_LEASE_MODE=server_side
-export TARIC_RUNTIME_CONFORMANCE="$PWD/docs/benchmarks/postgres-runtime-v2.json"
+export TARIC_RUNTIME_CONFORMANCE='/secure/path/taric-postgres-runtime-current.json'
 export TARIC_CONTENT_ROOT="$PWD/.taric/content"
 node packages/cli/dist/bin.js capability.status
 ```
 
-Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Before accepting writes, confirm that the diagnostics report `runtime_state=enabled`, `backend=postgresql`, and server-side fencing. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates the saved activation evidence; rebuild and rerun verification. Keep the report and its permissions operator-controlled; runtime startup consumes it but never regenerates it.
+The path above must contain a newly generated report for the current build; the saved `postgres-runtime-v2.json` is stale for 1.0.0. Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Before accepting writes, confirm that the diagnostics report `runtime_state=enabled`, `backend=postgresql`, and server-side fencing. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates activation evidence; rebuild and rerun verification. Keep the report and its permissions operator-controlled; runtime startup consumes it but never regenerates it.
 
 ## Operate without losing data
 

@@ -1,11 +1,11 @@
 # Taric 宿主同步适配：终审评估报告
 
-> **版本**：v3（2026-10-24）
+> **版本**：v3 历史评审（2026-10-24；状态校正于 2026-10-26）
 > **审查对象**：[Taric 适配设计](taric-host-sync-adaptation-design.md)、BreachWeave 宿主工作区输入文档《Taric外置记忆集成差距分析与建议方案.md》（v4，未随 Taric 仓库分发）及本工作区实现。
-> **代码基线**：HEAD `73a6dfd` 加当前未提交工作区改动；本报告不代表已提交版本或正式发布物。
+> **代码基线**：HEAD `73a6dfd` 加当时未提交工作区改动；下文原评审结论不代表当前代码或正式发布物。
 > **范围**：Taric 侧设计与实现、所记录的容器验证和跨仓契约风险。未执行 BreachWeave 真实部署验收，不能据此宣称跨仓集成通过。
 
-> **后续状态（2026-10-25）**：本文是 2026-10-24 修复前的历史评审。其关于 Work/Coverage 分页、API 版本、lease 订阅唤醒、Artifact 单次读取、review pack 绑定及发布证据的阻断结论，已由 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 和 [当前候选发布报告](../openspec/changes/harden-taric-authority-runtime/release-report.md)更新。真实第三方宿主、容器挂载、远程 gateway 与双进程多主机仍按 profile 保持未验证；不要把本文原结论当作当前源码状态。
+> **状态校正（2026-10-26）**：本报告第 2–7 节的缺陷与门槛是修复前审查记录，不能作为当前未完成项。分页、API 合同版本、订阅租约唤醒、单次 descriptor 读取、review pack 固定绑定和各变更的差距报告已有实现与回归测试，见 [host-sync 历史验收报告](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md)。当前 `1.0.0` 工作区已完成 build、typecheck、矩阵校验和全量测试：Core 341 通过、9 个 PostgreSQL live 测试因未设置 `TARIC_TEST_DATABASE_URL` 跳过；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。独立 `1.0.0` clean consumer 与文档链接检查通过。该轮没有新的 PostgreSQL live/runtime release report；此前候选报告绑定的是不同源码摘要，不作当前 `1.0.0` PostgreSQL 证据。真实 BreachWeave、远程 gateway、容器 spool 挂载和双进程多主机仍未验收。
 
 ---
 
@@ -26,72 +26,77 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 ## 2. 终审结论
 
-Taric 已实现大部分计划中的接口和能力，但当前工作区不能被认定为“本轮宿主同步适配能力集全部完成”，也不具备可复核的发布候选证据。对本轮公开的状态/API 能力，WorkItem/覆盖分页漏项和新增操作未推进 API 合同版本是发布阻断项；T-D 订阅若继续作为已支持公开能力，也必须修复时间驱动租约通知。T-A Bun 分发、T-E 文件摄取和 T-G review harness 是宿主选择启用的扩展，其缺口只阻断相应扩展的发布/启用声明，不应被表述为所有 Taric 部署都必须具备的能力。
+截至 2026-10-26，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过本地合同/回归测试；当前 `1.0.0` 树通过 build、typecheck、矩阵校验、workspace 测试和隔离 tarball consumer 验证。当前没有与 `1.0.0` 源码摘要匹配的 PostgreSQL live/runtime 报告，因此 PostgreSQL 多主机 profile 仍未验证；第三方宿主与容器部署也未验收。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
 
-就 BreachWeave 的 R 路线而言，Taric 的进程内集成前置条件尚未闭合。即使修完 Taric 问题，BreachWeave 仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。当前比较准确的状态是：**独立插件基线尚未完成收口；BreachWeave 嵌入扩展不可宣称通过；Taric 不承担宿主的模型和执行职责。**
+就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.0` tarball consumer 验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。当前没有匹配 `1.0.0` 的 PostgreSQL live/runtime 报告，包仍为 private、未发布至 npm registry。故本地基线已验证，但 PostgreSQL 多主机和 BreachWeave 嵌入 profile 未认证；Taric 不承担宿主的模型和执行职责。
 
-本报告不以主观百分比衡量完成度；“已实现”只表示实现存在，不等于设计验收、发布契约或真实宿主集成已经通过。
+本报告不以主观百分比衡量完成度；表中的实现状态、当前工作区验证、部署 profile 认证和真实宿主集成是不同结论，不互相替代。
 
 ### 2.1 审查范围与证据
 
-设计共列出 11 项能力：T-A/B/C/D/E/H/F/G 与 D1/D2/D4。本次将它们区分为核心插件能力和宿主嵌入扩展。代码核对覆盖 dispatch、持久化、授权、文件传输、订阅、包清单及对应测试。原审核记录的测试结果如下；凡未保存命令、完整日志或环境摘要的项目，应视为该工作区报告的结果，而非可独立复跑的审计工件。
+设计共列出 11 项能力：T-A/B/C/D/E/H/F/G 与 D1/D2/D4。本节保留 2026-10-24 原审核的范围；当前工作区验证摘要见本节表格，profile 认证另见下文。历史报告中的测试计数和容器结果不属于 1.0.0 运行结果。
 
 | 验证面 | 原审核记录 | 证据强度与边界 |
 |---|---|---|
-| macOS `npm test` | exit 0；核心 317 项中 308 通过、9 项因未设置 `TARIC_TEST_DATABASE_URL` 跳过 | 未覆盖实时 PostgreSQL；需保留完整命令和日志以便复核 |
-| Node Linux 容器全量测试 | Node 24.22.1，`node:24-alpine`，exit 0 | 镜像使用可变 tag；报告未给出 digest 和逐包摘要 |
-| Bun 驱动 conformance / 专项 / 嵌入冒烟 | Bun 1.3.14，10 pass / 0 fail；12 场景 conformance 报告已归档 | benchmark 文件可追溯；仍是驱动与嵌入验证，不等同 BreachWeave 真实集成 |
-| Unix socket 端到端冒烟 | 18/18 通过，覆盖文件摄取、查询、覆盖、通知和多 principal | 未标出脚本路径、容器 digest、完整输出；目前无法从报告单独复现 |
-| PostgreSQL、多主机运行时 | 未执行，9 项数据库测试跳过 | 不能据 SQLite 结果宣称 PostgreSQL 或多主机认证通过 |
-| BreachWeave 真实宿主验收 | 未执行 | 权限、包安装、重启恢复、跨进程协作及挂载路径均未验证 |
+| `1.0.0` 当前工作区：build/typecheck/矩阵/全量测试 | 通过；Core 341 pass、9 PG tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 pass | 本地实现与测试证据，不等同 PostgreSQL live、远程/多机或第三方宿主认证 |
+| 独立 `1.0.0` clean consumer | 通过；从 tarball 安装并验证包消费 | 验证本地 tarball 分发；不表示 npm registry 已发布 |
+| 文档链接 | 当前检查通过 | 只验证链接目标存在，不判断外部系统当前状态 |
+| PostgreSQL live / 多主机 | 本轮 9 个 live 测试跳过，且没有匹配 `1.0.0` 摘要的新 runtime 报告 | 当前 profile 未验证；此前候选报告不能替代当前构建的匹配证据 |
+| BreachWeave 真实宿主、远程 gateway、容器挂载 | 未执行 | 权限、真实调度/工具/动作、跨进程协作与挂载行为仍需对应宿主验收 |
 
-测试通过只能说明相应样例通过，不能抵消下文确认的代码路径缺陷或尚未验证的契约。
+本轮本地测试通过说明对应样例在当前工作区通过；它不证明第三方宿主、网络/容器部署、PostgreSQL 多主机或生产容量已经认证。
 
 ## 3. 能力与跨仓目标对照
 
 | Taric 项 | 结论 | 对 BreachWeave R 路线的影响 |
 |---|---|---|
-| T-A 驱动可移植性与发布面 | **嵌入扩展部分完成**：驱动契约、exports 和 Bun 驱动已在工作区；`@taric/core`、`@taric/schemas`、`@taric/driver-bun-sqlite` 仍为 private，未验证干净跨仓安装 | 不影响 Taric 通过 RPC/宿主自管存储作为独立插件运行；若 BreachWeave 选择 C1 进程内嵌入，则必须完成正式分发和安装验证，或保留可复现桥接回退 |
-| T-B `resource_refs` / `work.query` | **核心接口存在，正确性未通过**：分页存在跳项；该接口只表达任务资源关联和查询提示，不提供调度、agent 启动或跨 WorkItem 资源锁 | Taric 保持状态服务边界。BreachWeave 自己负责单写者/串行调度或其他原子协调；多调度器并发时不能把 query + claim 当成资源互斥保证 |
-| T-C `coverage.gate` / `coverage.query` | **核心接口部分完成**：dispatch、角色限制和投影已实现；gate 判定与 visibility 摘要来自两次读取 | Taric 提供覆盖状态和可关闭条件的计算结果；operator/宿主决定是否关闭或继续执行。并发更新时应统一快照或声明独立读取水位 |
-| T-D 宿主订阅信号 | **核心提示能力部分完成**：`delta` 水位通知、去抖、重鉴权和 RPC 通知帧存在；时间驱动租约主题不可靠，其他主题边沿/重复语义未闭合；`l1_backlog` 当前是“存在任意 L1”，不是设计所说的“越阈值” | Taric 只发送无内容状态提示，不启动 agent、不调度任务。宿主仍需通过权威查询/轮询恢复状态，不能把信号当作状态事实 |
-| T-E `artifact.ingest_file` | **可选 Artifact 扩展部分完成**：一次性流入库流程存在；路径检查与后续打开/删除之间有竞态，源文件读两遍，真实进程中断恢复未验证 | 宿主完全外部管理 Artifact 时，T-E 不构成独立插件基线门槛。启用时 Taric 只负责绑定 spool 边界、opaque 字节完整性、幂等和失败语义；`delete_source` 只执行宿主/operator 对本次操作的明确授权。凭据、脱敏、保留期限和删除策略由宿主/operator 负责 |
-| T-H 派生证据来源门 | **核心治理能力已实现，宿主启用未验证**：默认关闭；`operator` 来源通过 `source_kind: host` 表达 | Taric 以非 LLM 策略检查来源，不运行模型、不生成归纳结论。BreachWeave 必须显式配置策略并验证捕获链保留可信来源 |
-| T-G `taric review` | **参考扩展部分完成，模型模式越界**：CLI 可生成审阅包和提交 review，但证据快照及策略摘要未与实际审阅输入绑定；`--model` 路径会从 Taric CLI 调用外部 provider | admission 与 `review.submit` 可作为 Taric 治理接口；模型调用必须由宿主/operator 驱动。Taric 可提供确定性审阅材料与提交契约，不应承担 reviewer 模型调用、模型池或 verdict 决策 |
-| T-F 多 principal 网关 | **可选传输扩展已实现并有测试** | 主要服务多进程/远程或桥接回退；不属于 Taric 独立插件基线，也不是进程内嵌入的必要条件 |
-| D1 / D2 / D4 | **宿主适配扩展已核对**：Pi 认证版本、未认证降级和 Taric 版本矩阵存在 | Taric 不要求所有宿主使用 Pi；D4 的 BreachWeave CI 消费端和宿主/容器/Taric 三方配对尚未验收 |
+| T-A 驱动可移植性与分发 | 驱动契约、exports、Bun driver 已实现；`1.0.0` clean consumer 通过 tarball 安装验证。npm registry 发布仍未完成 | Bun 本地嵌入具备本地验证资产；不等同 registry 发布，也未验证 BreachWeave 消费与真实运行 |
+| T-B `resource_refs` / `work.query` | 字段、dispatch、model projection 和 keyset 分页已实现并有回归测试；资源引用仍是提示，不是资源锁/调度器 | 宿主负责 worker 生命周期、全局资源互斥、限速和动作执行 |
+| T-C `coverage.gate` / `coverage.query` | dispatch、角色、投影已实现；gate 与 visibility 使用同一维护读取快照及水位 | 返回状态与关闭条件，不替宿主关闭 Engagement 或授权动作 |
+| T-D 宿主订阅信号 | Core 与 authenticated adapter RPC 提供有界 best-effort 通知、重鉴权、阈值/时间驱动租约提示、背压和轮询恢复 | 信号不是事实流或调度命令；MCP resources subscription 仍未支持，生产发现延迟无 SLA |
+| T-E `artifact.ingest_file` | 可选实现已做绑定根校验、单 descriptor 读取、hash、幂等发布和失败测试；当前 Node/Bun 不支持身份条件 unlink，因此即使显式要求也保留源文件 | 宿主可改用外部 Artifact；Taric 不管凭据、脱敏、保留期或一般删除策略。容器挂载行为未验证 |
+| T-H 派生证据来源门 | 来源门与 `source_kind` 治理已实现；策略需显式配置 | 源码/合同测试不等于 BreachWeave 捕获链已启用或第三方来源真实 |
+| T-G `taric review` | 确定性 pack 固定 admission 证据快照/policy 并由服务端校验；CLI 只导出或转交外部结果，不运行模型/provider | reviewer 选择、人工/模型审阅、verdict 与 SLA 属于宿主/operator |
+| T-F 多 principal gateway | 本地 gateway/RPC 能力已实现并有测试 | 远程网络部署、撤销与跨机重连 profile 未验证 |
+| D1 / D2 / D4 | Pi 1.4.0 认证清单、开放自定义 adapter ID、兼容矩阵生成均已存在 | 未认证版本仍按降级/unsupported 处理；BreachWeave CI 的三方配对消费未验证 |
 
 BreachWeave v4 的 A1/A2（结构化 Scope/ROE 与 WSTG/ASM 覆盖字典）是授权渗透上线的 P0 宿主要求，按通用性边界不属于 Taric core，也不在本报告的代码审查范围内。Taric 侧适配通过不能替代这两项宿主验收；在真实授权目标上运行前，必须另行证明越界拦截和覆盖字典配置有效。
 
-**对 v2 审核结论的边界修正**：原报告把 T-A 包发布、T-E Artifact 文件直取、T-G review harness 等扩展缺口并入统一的“Taric 未完成/不可发布”结论，范围过宽；这些应按是否纳入某个部署 profile 分别判定。更重要的是，T-G 的 `--model` provider 调用虽在 CLI 层实现、模型可能运行于远端服务，但调用编排仍由 Taric 发起，和“Taric 自身不运行模型”的产品边界不符。应将模型调用移交宿主；Taric 保留 admission 固定输入读取、审阅材料导出和 `review.submit` 等确定性契约。Human review CLI 是否保留属于可选的人工作业界面，不应被描述为 Taric 必需职责。`artifact.ingest_file` 的 `delete_source` 也只能表示宿主/operator 对本次搬运的明确授权清理，不得演变为 Taric 自行决定的内容删除或保留策略。
+**历史结论修正**：原 v2 对 T-A/T-E/T-G 缺口的范围判断过宽。当前仍须按 profile 判定：本地实现和 tarball consumer 有证据，registry/第三方宿主/容器挂载仍未验证。T-G 已移除模型/provider 调用，只接受外部结果并校验 admission 绑定；Artifact `delete_source` 是逐次授权，但运行时无法证明安全条件删除时保留源文件。
 
 ## 4. 本轮能力集的缺陷与条件门槛
 
-### P1：分页在扫描预算耗尽时可能跳过匹配项
+以下缺陷是 2026-10-24 审核时的发现，后续已进入实现和回归测试，不是当前待办。原复现说明保留用于解释修复动机。
+
+### 历史缺陷：分页在扫描预算耗尽时可能跳过匹配项（已修复）
 
 `workItemsPage` 和 `coverageCellsPage` 都把过滤放在 500 行扫描窗口之后。当前逻辑在 `more === true` 时无条件把游标锚定到最后扫描行；如果该窗口内匹配数超过 `page_size`，未返回的匹配记录会被游标越过，后续页永远不可见。原报告的 560 行、120 条命中、页长 50 的例子成立。
 
-**修复要求**：若当前扫描窗口包含超过页长的匹配项，锚定最后一个已返回匹配项；否则锚定最后扫描项，以便稀疏或零命中页仍向前推进。不能简单地在所有预算耗尽场景都锚定最后返回项，否则空结果页可能没有游标，或反复扫描同一批未命中行。回归用例应同时覆盖“单窗口内超页长命中”“稀疏匹配跨多个窗口”“空匹配但仍有后续行”，并断言完整遍历无重复、无遗漏。
+当前 `work.query` 和 `coverage.query` 采用有界 keyset 分页；密集、稀疏和空匹配窗口均按规则推进游标，对应 query/pagination 测试已通过。原 560 行示例只描述修复前实现。
 
-### 扩展项：复核 harness 没有固定实际审阅输入
+### 历史扩展缺陷：复核 harness 没有固定实际审阅输入（已修复）
 
 `packages/cli/src/review.ts` 通过一次普通 `query`（最多 1000 条、未跟随游标）查找被引证据，没有读取 admission 生成的 `fixed_proposal_evidence_snapshot`；`review.submit` 只提交提案 `input_hash`，未提交实际证据快照 hash。服务端因此可能按提交时的权威状态处理 review，而 harness 展示给 reviewer 的证据集合并非该次治理决定所绑定的集合。策略摘要也由 CLI 默认值或参数提供，没有证明来自该提案 admission。
 
-**修复要求**：这不是 Taric 独立插件基线的阻断项。若发布或采用 `taric review` 参考扩展，应从对应 admission 结果读取固定快照，完整解析其中引用及版本，审阅包标出并绑定 snapshot hash 与 admission policy digest，提交时由服务端校验。证据在生成审阅包后变化时必须拒绝提交或要求重新生成审阅包。覆盖超 1000 条引用和策略变更窗口。reviewer 的模型、人审和最终 verdict 仍由宿主/operator 提供。
+当前 `review.pack` 从 admission 固定输入构建完整审阅包并绑定 proposal/evidence snapshot/policy digest；`review.submit` 在写入前校验绑定。超过 1,000 条引用和替换后陈旧拒绝已有测试。CLI 只导出材料或转交外部结果，不调用模型/provider；reviewer 生命周期仍由宿主/operator 管理。
 
-### P1（公开合同）/扩展门槛（T-A）：分发面与 API 合同版本未兑现
+### 历史发布缺口：分发面与 API 合同版本未兑现（合同已演进，registry 发布仍未完成）
 
-`private: true` 阻止包按 registry 正式发布；core 的运行依赖 `@taric/schemas` 也为 private，Bun 驱动包同样如此。exports map 和 workspace 测试并不能证明 BreachWeave 可以通过设计所说的包依赖完成进程内嵌入。公开 npm 并非唯一选择，但必须确定一种可安装、可复现的分发方式并在干净项目验证完整依赖闭包。这里是进程内嵌入 profile 的阻断项，不是 Taric 通过 RPC 或由宿主源码集成时的独立插件基线阻断项。
+API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 Bun driver 已提供所需 exports。`1.0.0` tarball 已在独立 consumer 安装和运行通过。包清单仍保留 private，因此这不表示 npm registry 发布，也不表示 BreachWeave 的真实进程内集成已验收。
 
-同时，新增的 `work.query`、`coverage.gate/query`、`artifact.ingest_file` 等合同仍对应 `API_CONTRACT_VERSION = 1.0.0`，与设计 §1 的 minor 版本演进要求冲突。需更新版本及 compatibility matrix，并验证旧/新合同协商行为。若决定暂不发布包，应把设计改为明确的源码集成或 Node 桥回退，并重新界定 T-A 验收，不能保留“跨仓嵌入已解锁”的结论。
+仍需区分本地 tarball consumer 与 registry 发布，也需区分通用包消费验证与第三方宿主认证。
 
-### 条件性 P1：`lease_expiry` 不是时间驱动信号
+### 历史缺陷：`lease_expiry` 不是时间驱动信号（已修复）
+
+当前订阅调度器按租约时间安排唤醒；fake-clock 测试验证无数据库提交时提示仍会触发，且不推进 `read_seq`。下列问题描述和修复要求仅记录修复前状态。
 
 订阅轮询器仅在 `dataVersion()` 改变后调度投递。租约到期本身不写数据库；没有其他提交时，系统不会重新评估 `subscriptionTopicStates()`，因此静默窗口内租约可到期而没有通知。其他非 `delta` 主题在状态持续为真时也可能随每个无关提交重复发送。
 
 **修复要求**：如果 Taric 继续公开并声明支持该主题，需定义“临近到期”提前量与“到期/被 reclaim”的独立语义，用到期时间安排唤醒或采用有上限的时间轮询，并按主题做边沿去重。验证无数据库写入、只有时间推进时仍触发；同时验证重新连接后的权威状态恢复。若不实现，应从首期已支持主题和完成声明中移除 `lease_expiry`，并明确宿主用权威查询/轮询恢复。此订阅通知仅提示宿主自行决定是否采取调度动作。
 
-## 5. 安全、接口和集成残余风险
+## 5. 历史安全与集成风险记录
+
+下表是 2026-10-24 评审留下的原始问题清单，不代表当前缺陷。适用的当前边界是：Taric 不承诺资源锁、通知不调度工作、Artifact 保持 opaque；第三方宿主、远程网络与容器挂载需要各自验收。
 
 | 级别 | 问题 | 影响与处理要求 |
 |---|---|---|
@@ -108,26 +113,25 @@ BreachWeave v4 的 A1/A2（结构化 Scope/ROE 与 WSTG/ASM 覆盖字典）是�
 
 ## 6. 低优先级维护项与审计材料
 
-以下项目不应与独立插件基线的阻断正确性问题混为一谈，但需排入后续维护或对应扩展发布：`activeWorkRuns` 的未使用接口与重复查询实现；Bun/Node 驱动并发逻辑复制；work/coverage 校验规则双份维护；principal role 和 Pi 版本的多处硬编码；`coverage.gate` 仍引用泛化 `apiSuccess` 而未使用已注册的专用结果契约；CLI 帮助未列 `gateway`/review harness；启用 T-E 时 `TARIC_INGEST_MAX_BYTES` 对 `0`/负值的配置报错语义；`review.ts` 未使用变量和 model 模式忽略 `--verdict` 等细节。每项应先确认真实调用与预期契约，再决定删除或统一来源。
+本节原列的内部维护项是 2026-10-24 的观察，不是当前缺陷清单；review model/provider 路径已移除。其余关于重复实现、硬编码或帮助输出的观察未在 `1.0.0` 发布验证中逐项复核，不据此断言目前仍存在。
 
-本批次 10 个归档变更目录均有 `specs/` delta，但均缺少设计要求的 `release-report.md`；任务勾选完成仍未形成逐项发布审计闭环。补齐每项实际合同变化、版本、测试环境、失败注入、已知偏差及发布结论，并核对现有 spec delta 与实现一致。不要只为满足目录形式复制通用文本，应让报告能追溯对应任务和测试工件。
+“10 个归档目录缺少 release-report”已过期：这些归档变更现有各自的差距/验收报告。历史报告绑定各自代码基线；不能将其视作 `1.0.0` 的验证产物。
 
 ## 7. 发布与集成验收门槛
 
-若要声明本轮设计列出的宿主同步适配能力集已经完成，至少需要：
+原清单是修复前门槛。Taric 对应实现现已通过当前本地工作区测试；仍未由当前证据覆盖的部署声明须单独补证：
 
-1. 修复分页漏项，并通过稀疏/密集/空页的完整遍历回归。
-2. 决定并推进 API 合同版本及矩阵，使新增操作可被宿主识别。
-3. 若保留 `lease_expiry` 订阅主题，修复时间触发并明确状态边沿和宿主恢复语义；否则从本轮交付能力中移除并明确权威轮询路径。
-4. 修正 `work.query` 模型面投影、coverage 快照一致性和通知背压；对驱动关闭生命周期风险完成可重复测试。
-5. 为 10 个归档变更补齐 `release-report.md`，核对已有 spec delta 与实现一致；保存 Node、Bun、端到端测试的命令、镜像 digest、日志和跳过项。
+1. PostgreSQL live / 多主机：生成与当前 `1.0.0` 源码摘要匹配的运行时报告，并覆盖双进程竞争及网络恢复。
+2. 真实宿主：验证 principal 映射、调度、工具、动作授权和重启生命周期。
+3. 远程 gateway / 容器 spool profile：在实际网络、身份撤销和挂载环境中验收。
+4. npm registry 发布：若要声明 registry 可用，发布包并由独立 consumer 从 registry 安装；本地 tarball 验证不替代此门槛。
 
 以下是可选扩展或特定宿主的附加门槛，而不是独立插件基线门槛：
 
-1. **BreachWeave Bun 进程内嵌入 profile**：确定可复现的 registry/内部包分发，完成 `@taric/core`、`@taric/schemas` 和 Bun 驱动的干净项目安装；验证 driver 初始化、principal 映射、D4 三方版本矩阵和真实宿主重启行为。
-2. **T-E opaque spool profile**：仅在宿主显式授权时启用；验证 session binding root、受控文件读取、字节 hash、幂等、失败恢复和源文件处理。Taric 不解析、不脱敏、不扫描，不接管凭据或保留期限；宿主也可选择完全外部管理 Artifact。
-3. **T-G review profile**：将 `--model` provider 调用移至宿主；Taric 提供 admission 固定证据快照、policy digest 和确定性审阅材料，review 提交由服务端校验其绑定。reviewer 模型、人审、verdict、SLA 由宿主/operator 负责。
+1. **BreachWeave Bun 进程内嵌入 profile**：本地 `1.0.0` tarball consumer 已通过；BreachWeave 自身的包消费、principal 映射、调度和重启仍需真实宿主验收。
+2. **T-E opaque spool profile**：Core 文件摄取合同已有测试；容器挂载、权限和重启需要宿主环境验收。当前 Node/Bun 条件 unlink 不可用时保留源文件；也可由宿主外部管理 Artifact。
+3. **T-G review profile**：确定性 pack/export/submit 已实现并测试；reviewer 模型、人审、verdict 和 SLA 仍由宿主/operator 负责。
 
 BreachWeave 侧另需用真实宿主验收启用后的 T-H 策略、agent 调度、工具调用和动作授权、资源并发约束、外部 Artifact 或授权 spool 选择、通知丢失后的恢复，以及可选 reviewer 流程。Taric 不承担这些宿主行为。若声明 PostgreSQL/多主机支持，再补实时 PostgreSQL 场景；SQLite 容器结果不外推为该能力认证。
 
-**最终判定**：本工作区的 Taric 独立插件实现处于“主要能力已形成、若干核心合同和正确性门槛未通过”状态；BreachWeave 的 Bun 嵌入、Artifact spool 和 review harness 处于各自扩展未闭合状态。未满足对应 profile 的门槛前，不应对外宣称该 profile 已完成；未完成真实 BreachWeave 宿主验收前，不应宣称 R 路线集成通过。Taric 的职责边界保持为状态、记忆和治理服务，不包含模型运行、agent 启动、工具执行或目标动作决策。
+**最终判定（2026-10-26）**：Taric `1.0.0` 当前工作区 build、typecheck、矩阵校验、全量测试、独立 tarball consumer 和文档链接检查通过。没有匹配当前源码的 PostgreSQL live/runtime 报告，也没有真实 BreachWeave、远程 gateway 或容器 spool 验收；这些 profile 不得宣称已验证。Taric 的职责边界仍是状态、记忆和治理服务，不包含模型运行、agent 启动、工具执行或目标动作决策。

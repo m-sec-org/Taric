@@ -6,7 +6,7 @@
 - 分析对象：Taric 工作区源码的历史快照（当时记录为 `packages/core/src` 10,158 行、schema 64 `$defs`、operation registry 50 项；不代表当前基线）
 - 推演宿主：[CyberStrike](https://github.com/CyberStrikeus/CyberStrike)（`main`，Bun monorepo，opencode fork，自主渗透测试 agent）
 - 分析方式：宿主侧源码逐项走读（agent 循环、会话/上下文、工具系统、记忆与覆盖模块约 30 个文件）+ 与 Taric 集成方案逐节对照 + 集成必要性推演
-- 配套阅读：[代码设计](taric-code-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[BreachWeave 差距分析](taric-gap-analysis-breachweave-integration.md)、[能力改进提案](taric-capability-improvement-proposal.md)
+- 配套阅读：[当前设计](taric-design.md)、[集成方案](Taric面向渗透测试智能体的集成方案.md)、[BreachWeave 差距分析](taric-gap-analysis-breachweave-integration.md)、[能力改进提案](taric-capability-improvement-proposal.md)
 
 **方法论说明**：本文档与 [BreachWeave 差距分析](taric-gap-analysis-breachweave-integration.md) 是**对照组**，不是重复。两者推演的是同一问题的两个不同阶段：
 
@@ -21,19 +21,19 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 
 ---
 
-## 能力提升后的状态校正（2026-10-18）
+## 能力提升后的状态校正（2026-10-26）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议，正文中的“当前”“未实现”仅指当时状态。以下表格是本轮实施后的裁决；实际接入以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和当前变更中的验证资产为准。未重新运行或认证第三方宿主，也未重新核验文中外部项目或 MCP 工作组状态。
+本文保留 2026-10-16 的推演、代码基线、宿主源码引用与建议。原正文中的“当前”“未实现”“没有”等状态判断均限定为当时基线，不是当前待办或 Taric 当前能力声明；第 1–8 节是历史定位分析，不是实施计划。当前合同以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[当前设计](taric-design.md)为准。本轮 `1.0.0` 工作区于 2026-10-26 通过 build/typecheck/matrix/npm test：Core 341 pass、9 个 PG live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过；五个 `1.0.0` tarball clean consumer 通过。没有匹配当前源码摘要的 PostgreSQL live/runtime activation report，也未认证 CyberStrike 等真实第三方宿主、远程 gateway 或容器 spool。CyberStrike 项目当前状态与 MCP 工作组进度未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
 | 缺少采用梯度与适用条件 | A～E 闭环、宿主职责、适用/不适用条件及成本模板已写入接入文档。 |
-| 缺少宿主代理 | taric proxy 与真实 Bun/Node 重启实测已交付；仍需宿主提供可信捕获和独立审核通道。 |
+| 缺少宿主代理 | `taric proxy` 与本机 Bun/Node client 重启实测已交付；仍需具体宿主提供可信捕获和独立审核通道。 |
 | 条件 fence 可由省略字段绕过 | 持久 host-session/run-bound 模式及 transport session 已实现；run-bound 不能通过省略请求字段降级，host-session 不承诺 lease 保证。 |
 | 无交互时延测量 | Context、proxy、Artifact、维护和 host.state 已有版本化实测；50k Context 首屏降低 42.5%，未达 50% 候选目标，无通用 SLA。 |
-| 价值与质量未量化 | 人工标注/基线样本数仍为 0，质量发布 blocked；无 ROI、等效安全比例或第三方宿主认证结论。 |
+| 价值与质量未量化 | 本轮质量发布证据仍缺人工标注样本/人类基线；没有 ROI、等效安全比例或第三方宿主认证结论。 |
 
-历史综合[技术验收](benchmarks/capability-verification-v2.json)记录旧基线 339 项测试；当前候选报告记录 Core 350/350、PG 单 authority 12 个 runtime 场景以及 clean consumer/profile/restart 门禁。质量证据仍因人工标注/基线样本缺失 blocked；本文的宿主推演和外部项目状态不构成当前 Taric 认证。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)与候选报告绑定旧源码基线，不作为本轮 `1.0.0` PostgreSQL 证据。当前本地验证计数见上；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文的宿主推演和外部项目状态不构成当前 Taric 认证。
 
 ## 目录
 
@@ -146,12 +146,12 @@ CyberStrike 是一个**面向攻击性安全的自主 AI 智能体**（README �
 
 ### 2.4 事实校正声明
 
-本文档区分「实测」与「推断」：
+本文档的历史推演区分「实测」与「推断」；其引用只支持 2026-10-16 的快照，不能当作当前代码定位：
 
 - **实测**：CyberStrike 的代码事实，全部附文件行号（见 §7.2）。
 - **实测**：Taric 的代码事实，附文件行号（见 §7.1）。
 - **推断**：必要性分级（§3）、优先级排序（§4、§5）。这些是基于两侧事实的判断，非代码可验证。
-- **一项实测到的不一致**：集成方案 §6.3 与 §8.1 均声明「Artifact 上传**必须**带 run fence（`work_run_id + attempt_id + generation` 三要素齐备）」，但实现为**条件可选**——`artifact-content-store.ts:422-425` 的 `assertFence` 在三要素**全不提供**时直接返回通过。详见 §4.4。
+- **历史发现，现已修复**：当时指出 run fence 可通过省略字段绕过。当前持久 `host-session`/`run-bound` 绑定、transport session 检查和 publication 恢复 fencing 已实现；run-bound 请求不能通过省略字段降级，host-session 则明确不承诺 WorkRun lease fencing。见 [API 合同](taric-api.md) §“Session and run attribution”及[当前设计](taric-design.md) §5.1。
 
 ---
 
@@ -458,7 +458,7 @@ BreachWeave 分析给出了「可移植运行时 > 开放宿主契约 > 事件/�
 
 | 事实 | 位置 |
 |---|---|
-| Core 源码 10,158 行 | `packages/core/src/**/*.ts`（实测统计） |
+| Core 源码 10,158 行 | 仅为 2026-10-16 历史快照的统计，不代表当前源码规模 |
 | schema `$defs`、operation 与模型工具合同 | `packages/schemas/schemas/v1/core.schema.json`；`packages/schemas/src/registry.ts`；`packages/mcp/src/server.ts` |
 | MCP 仅 6 个模型工具，无 Artifact 原文操作 | `packages/mcp/src/server.ts:3` |
 | `assertFence` 条件校验（三要素全缺则放行） | `packages/core/src/artifact-content-store.ts:422-425` |
@@ -468,10 +468,10 @@ BreachWeave 分析给出了「可移植运行时 > 开放宿主契约 > 事件/�
 | L0/L1/L2 召回过滤实现 | `packages/core/src/store.ts:435` |
 | `isRecalled` 生命周期过滤 | `packages/core/src/store.ts:1085-1106` |
 | 非目标清单（12 项）与安全不变量（5 项） | `packages/core/src/compatibility.ts` `TARIC_NON_GOALS` / `TARIC_SECURITY_INVARIANTS` |
-| p95 ≤2s 为发布门槛 | `docs/taric-code-design.md:430,609` |
+| 指定 mutation 路径 p95 ≤2s 的历史目标 | 旧版 `docs/taric-code-design.md`（已删除）行号 430/609；当前说明见 [`taric-design.md`](taric-design.md) §11，该目标不是通用读取 SLA |
 | 集成方案声明 Artifact「必须带 run fence」 | `docs/Taric面向渗透测试智能体的集成方案.md` §6.3、§8.1 |
 | 8 项宿主工程前提 | 同上 §10.4 |
-| 四个模型工具之外无写入路径（MCP tools/list 白名单） | `docs/taric-code-design.md` §7.3 |
+| MCP 模型面仅六个工具 | 旧版 `taric-code-design.md` §7.3（已删除）；当前 MCP 约束见 [`taric-api.md`](taric-api.md) §“Model-facing operations” |
 
 ### 7.2 CyberStrike 侧（推演宿主）
 
@@ -519,11 +519,11 @@ BreachWeave 分析给出了「可移植运行时 > 开放宿主契约 > 事件/�
 | 合规交付 / 取证级报告 | **高** | §3.2 证据链缺口（Taric 独有） |
 | 多 agent 并发攻击同一目标 | **高** | §2.2 并发原语完全缺失 |
 
-**结论**：必要性成立的部分是**具体的、分片的**；不成立的部分是**整体的、哲学的**。这与 BreachWeave 的「整体需要但接不上」形成互补样本。
+**结论（历史推演）**：必要性判断是针对当时描述的 CyberStrike 版本，不是对当前 CyberStrike 的产品建议或认证。其价值判断不得从旧宿主代码快照外推。
 
 ### 8.2 对 Taric 本身
 
-**Taric 已经把它最难的部分做对了**——BreachWeave 分析的这句判断在本次推演中得到强化而非削弱。CyberStrike 推演没有发现任何一处 Taric 核心机制的实质缺陷（§4.6）。
+**Taric 的核心机制结论须以当前证据为准**。本次历史推演未能覆盖所有 transport、生命周期或失败路径；之后的 host-sync 审核确实发现并跟进了分页、审阅输入绑定、订阅唤醒等缺陷，故本段不作为源码质量或完整性背书。
 
 **但本次推演发现了另一类风险：Taric 的能力越强，越容易陷入「完整性叙事」的陷阱。**
 

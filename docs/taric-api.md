@@ -1,6 +1,10 @@
-# Taric API Boundary v1.2
+# Taric API Boundary v1.2.0
 
 Core owns authority writes and governance. Hosts own model calls, workers, target tools, action authorization, reviewer identity, credentials, Artifact policy and retention. An accepted proposal/capture is not a verified Finding.
+
+The repository packages `taric`, `@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/hermes-plugin` and `@taric/mcp` declare version `1.0.0`. These package versions are separate from protocol and persisted-data versions: the public API contract is `1.2.0`, the record Schema is `1.0.0`, and the authority SQL format is `authority-sql/4`. The packages are currently marked private, so their repository versions do not imply npm registry publication.
+
+The 2026-10-26 repository verification passed build, typecheck, compatibility-matrix validation, and the workspace suites: schemas 10/10, Core 341 passed with 9 PostgreSQL-dependent tests skipped, CLI 29/29, MCP 12/12, Hermes 5/5, and Bun driver 11/11. An isolated, unlinked consumer installed and exercised `schemas`, `core`, Bun driver, CLI and MCP tarballs at `1.0.0`; the Hermes plugin is validated by its Python test suite. This verifies the selected local package artifacts, not a live multi-host PostgreSQL deployment or a third-party host process. No fresh full live PostgreSQL release report is recorded for this tree.
 
 ## Runtime startup and authority profiles
 
@@ -106,7 +110,7 @@ The current registry contains 57 supported operations. Roles below are the exact
 
 `admission.commit` is an implemented alias of `admission.evaluate`. `context.build/query` share the Context builder. `resource.query` and `evidence.query` both route to the generic record query: their names do not enforce `kind`; set `kind` explicitly when required.
 
-The unsupported declarations are `snapshot.import`, `migration`, `backup.restore`, `remote.push`, `full_quality_evaluation`. Dispatch additionally recognizes deferred `storage.backup/storage.restore`. `full_quality_evaluation` has no dispatch operation; `capability.status` can report it enabled only after runtime verification of an independently pinned report against the current implementation, schema, policy, sample and fixture digests. Internal snapshot restore and projection callbacks do not enable public operations.
+Public dispatch defers `snapshot.import`, `storage.backup` and `storage.restore`. `migration`, `backup.restore` and `remote.push` are not public operations; internal backend restore and projection callbacks do not add public operations. `full_quality_evaluation` is not an operation or capability ID: the related capability is `quality.full_statistical_evaluation`. Its algorithms exist, but it remains unsupported and disabled with pending evidence until a pinned release report verifies against the current implementation, schema, policy, sample and fixture digests.
 
 ## Model-facing operations
 
@@ -308,7 +312,7 @@ Catalog cursors are base64url scope/filter/keyset metadata, without Context's au
 | audit.reconcile `{}` | Mutates derived state: consumes outbox, reconciles Artifact; not a preview |
 | audit.reconcile replay/rebuild/reconcile | Explicit derived-state repair; reconcile also checks/repairs Artifact state |
 | snapshot.export | Operator sanitized JSON for one Engagement at optional as_of; full selected-record materialization |
-| snapshot.import | Unsupported before authority access/mutation; private backend restore is separate |
+| snapshot.import | Deferred by public dispatch before authority access/mutation; private backend restore is separate |
 
 Export includes the latest record version at the selected sequence, including L0/recalled canonical records omitted by ordinary recall, with sensitive fields removed. It does not include the proposal/review tables, arbitrary event history, all past versions, active lease state or payload files. `exportSnapshotJsonl` is a backend library method; public snapshot.export has no JSONL format switch. Neither export is a complete database backup or a public migration path.
 
@@ -382,4 +386,4 @@ try {
 }
 ```
 
-For the full Resource/Observation/Evidence/Claim/Finding, independent reviewer and writer sequence, use the public-boundary [trusted Node governance fixture](../packages/core/test/trusted-node-governance.test.mjs). Saved performance/runtime evidence and quality limitations are indexed in the [current release record](../openspec/changes/harden-taric-authority-runtime/release-report.md).
+For the full Resource/Observation/Evidence/Claim/Finding, independent reviewer and writer sequence, use the public-boundary [trusted Node governance fixture](../packages/core/test/trusted-node-governance.test.mjs). Saved performance/runtime evidence and quality limitations are indexed in the [candidate release record](../openspec/changes/harden-taric-authority-runtime/release-report.md). That report is bound to its recorded source digest and an unclean candidate tree; it is not evidence for later source edits such as the package-version update. Run `scripts/verify-release.mjs` against the selected tree to create fresh verification evidence.

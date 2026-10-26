@@ -12,10 +12,12 @@
 8. [Artifact 原文存储集成](#8-artifact-原文存储集成)
 9. [上下文供给策略](#9-上下文供给策略)
 10. [长周期大量资产任务能力评估（推演）](#10-长周期大量资产任务能力评估推演)
-11. [实施路线（五阶段接入与多主机验收）](#11-实施路线五阶段接入与多主机验收)
+11. [宿主采用与多主机验收路线（五阶段）](#11-宿主采用与多主机验收路线五阶段)
 12. [边界与注意事项](#12-边界与注意事项)
 13. [端到端示例（浓缩时序）](#13-端到端示例浓缩时序)
 14. [BreachWeave 集成案例（真实宿主映射）](#14-breachweave-集成案例真实宿主映射)
+
+> **当前状态（2026-10-26）**：本方案描述 Taric 能力和宿主验收边界；其中 §10 的推演、§11 的五阶段路线和 §14 的 BreachWeave 文件/版本映射，不是当前 Taric 的未完成实现清单。当前 `1.0.0` 工作区 build、typecheck、compatibility matrix、`npm test`、5 个 tarball clean consumer 与文档链接检查通过：Core 341 pass、9 个 PG live tests skipped，Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。本轮没有与当前源码摘要匹配的 PostgreSQL live/runtime activation report；历史 [PostgreSQL v2 报告](benchmarks/postgres-runtime-v2.json)不能启用 `1.0.0` 多主机 profile。质量统计能力仍因缺少人工标注样本/人类基线而 unsupported/pending。真实 BreachWeave、远程 gateway、容器 spool 和双进程多主机部署未验收。当前合同参见[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[代码设计](taric-design.md)。
 
 ## 1. 方案概述
 
@@ -38,7 +40,7 @@
 - **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理凭据生命周期。agent 调度、工具调用、动作授权、HITL 交互全部由宿主系统负责。
 - **零模型直写**：三类智能体（都是 LLM agent）对权威记忆只有"提案权"；权威写入、任务认领、工具执行、Artifact 落盘由宿主运行时以 host/operator 身份完成。观察者的纠偏同样是"提案 + 建议"，由宿主强制执行。
 
-多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存了十二类运行时场景通过的[PostgreSQL 验证报告](benchmarks/postgres-runtime-v2.json)，默认部署仍保持 PostgreSQL runtime disabled；只有显式配置、构建/schema/policy 匹配的验证报告和当前数据库/租约健康检查同时通过，才可启用。这份报告是指定环境的功能证据，真实宿主跨机协作与容量仍需按 §11 单独验收。
+多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)是 pre-1.0.0 历史证据，不能激活当前 `1.0.0` profile。本轮没有匹配当前源码摘要的 PostgreSQL live/runtime activation report；默认 PostgreSQL runtime disabled。只有当前实现、schema、policy 摘要匹配的隔离 conformance 证据及真实数据库/租约健康检查通过，才能按当前 profile 启用。真实跨机协作与容量仍需按 §11 单独验收。
 
 ## 2. 总体架构
 
@@ -338,11 +340,12 @@ README、Pi descriptor/registration、`adapter.status`、`capability.status` 和
    └─ Context Pack 固定 read_seq：Scope/ROE → 覆盖缺口 → L2 资源/关系 → 冲突/过期项 → 待办 WorkItem
 ② planner: proposal.submit（每任务一个，subject_type: "work_item"）
    content = { schema_version, kind: "work_item", title, status: "queued",
-               goal, acceptance_criteria[], risk_budget, scope_ref?, depends_on?,
+               goal, acceptance_criteria[], risk_budget, scope_ref?, depends_on?, resource_refs?,
                engagement_id }
-   （严格按 workItem schema 提交：不接受 target_resource_refs / worker_role /
-      constraints 等自由字段；任务角色与资源约束应写入 goal/acceptance_criteria，
-      或在宿主调度器中维护。不传 content.id，canonical UUIDv7 由 Core 分配）
+   （严格按 WorkItem schema 提交：支持经验证的 resource_refs 作为调度提示；
+      不接受 target_resource_refs / worker_role / constraints 等自由字段。
+      resource_refs 不构成目标资源锁，互斥与调度仍由宿主实现。不传 content.id，
+      canonical UUIDv7 由 Core 分配）
 ③ 宿主（非 LLM）: admission.evaluate
    ├─ Core 校验结构、引用、归属、来源与版本；宿主另行检查验收、任务语义重复和调度约束
    ├─ 通过 → WorkItem 进入权威任务池（L1）
@@ -470,7 +473,7 @@ operator 使用 `audit.doctor` 诊断 authority 与当前宿主 spool；`audit.r
 ### 7.1 并发资源池映射
 
 - 宿主的"并发资源池 N"直接映射为 **N 个并发 WorkRun**；每个执行者同一时刻至多持有一个活跃租约。
-- 任务分派的**无冲突判定在宿主调度器**完成：WorkItem schema 本身没有 `target_resource_refs`；宿主应把目标资源写入任务内容或独立的调度元数据，并基于该映射与其依赖闭包（`depends_on` / Relation 的 depends_on）判断不相交，才允许同时进入在跑集合。
+- 任务分派的**无冲突判定在宿主调度器**完成：WorkItem 可带经引用校验的 `resource_refs`，但它是查询/调度提示，不是目标资源锁。宿主应结合该映射与依赖闭包（`depends_on` / Relation 的 depends_on）执行互斥、限速和动作授权，才允许任务并行。
 - Taric 提供的并发原语在分派器失效时兜底：
 
 | 原语 | 保证 | 兜底场景 |
@@ -668,7 +671,9 @@ admission.promote_l2      → L2 需独立（高风险要求异构）reviewer；
 - **度量指标**：漏报率（金标资产集）、L1 积压时长分布、resume 成功率、未授权 L2 = 0、纠偏闭环时延。
 - **纳入门槛**：以上作为 §11 P5 阶段的验收项，未通过则长周期大量资产能力判定不成立。
 
-## 11. 实施路线（五阶段接入与多主机验收）
+## 11. 宿主采用与多主机验收路线（五阶段）
+
+以下阶段描述采用 Taric 的宿主侧工作流和验收，不是 Taric 仍未实现的代码阶段。工作区测试通过不等于某个真实宿主或部署 profile 已验收。
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
@@ -760,34 +765,36 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 
 ## 14. BreachWeave 集成案例（真实宿主映射）
 
-本节以 [BreachWeave](https://github.com/m-sec-org/BreachWeave) 作为**未参与 Taric 设计的第三方宿主**，把 §4～§11 的抽象契约落到具体文件、进程与数据结构上。它是集成参考实现的任务书，不是已完成验收的声明；任何“已接入”结论仍需按 §11.1 在真实部署上验收。
+本节以 [BreachWeave](https://github.com/m-sec-org/BreachWeave) 当时的公开仓库和工作区快照作为第三方宿主样本，记录具体文件、进程与数据映射；该宿主未在本轮重新走读。下列代码行、运行时和集成差距均属历史推演，不能直接当作 BreachWeave 当前代码状态。本文仓库没有真实 BreachWeave 部署验收；任何已接入结论仍需按 §11.1 在真实部署上验收。
 
 ### 14.1 推演基线与宿主画像
 
 | 项 | BreachWeave 现状（源码核验） | 对 Taric 集成的含义 |
 |---|---|---|
-| 运行时 | Bun monorepo；`bun run web` / `bun build --compile` 产出容器内 Linux 二进制 | Bun 无 `node:sqlite`，`@taric/core` **不能进程内嵌入**；必须走 Node 桥 |
+| 运行时（历史基线） | Bun monorepo；当时由 `bun run web` / `bun build --compile` 产出容器内 Linux 二进制 | 当时 Taric Core 依赖 Node SQLite，Bun 进程内嵌不可行。当前已提供独立 `@taric/driver-bun-sqlite`；1.0.0 tarball consumer 通过，但该宿主没有实际 Bun 内嵌验收。 |
 | 角色架构 | `Manager/Planner/Solver/Observer`；Solver 是 Docker 容器内的 `pi-coding-agent` 会话 | 规划者/执行者/观察者三类 LLM 天然对应 §1.1 |
 | Solver 通信 | 宿主机 ↔ 容器 stdin/stdout JSONL RPC（`runtime.ts:783-881`）；容器内还有一条 `host_bridge_request` 通道回宿主机（`host-bridge-client.ts:20-48`） | stdio 已被宿主自有协议占用，**MCP stdio 不能复用该流**；容器内需要独立进程 |
 | 共享记忆 | 项目级 `Memory`（`fact/evidence/failure/note/hint`）与 `Idea`（`pending/testing/verified/failed/skipped`），一条一 JSON 文件 + 目录锁 | 结构上接近 Taric 的 Observation/Evidence/Claim/TestHypothesis，但**无准入、无信任分级、无证据硬门** |
 | 资产状态 | `{ asset, asset_hash, scanned: boolean }`；报告提交即 `scanned = true`，全量 `scanned` 即项目完成（`store.ts:29-33`、`store.ts:479-483`、`manager.ts:1260-1281`） | 覆盖矩阵的最小映射对象；`scanned` 必须升级为 `CoverageCell` |
 | 并发控制 | 目录锁 + 60s 陈旧锁强删（`store.ts:139-172`） | 无租约、无 generation、无 CAS；由 Taric 补齐 |
-| 模型生态 | `@mariozechner/pi-coding-agent@^0.65`（与 Taric 锁定的 `@earendil-works/pi-coding-agent@1.4.0` 是不同命名空间） | **原生 Pi adapter 不可用**；只能走 MCP + host 通道 |
-| 容器基础镜像 | Kali + Node 20（`runtime/assets/Dockerfile:124-125`） | Node 20 不提供 `node:sqlite`；容器内 MCP 侧车需升级到 Node 22.21.1（Taric 验证版本） |
+| 模型生态（历史基线） | 当时观察到 `@mariozechner/pi-coding-agent@^0.65` 与 Taric 锁定的分发不同 | 不据此断言该宿主当前仍使用此版本；Taric 原生 Pi 认证只适用于 compatibility manifest 明列的 package/distribution/version/commit，具体组合需单独认证。 |
+| 容器基础镜像（历史基线） | 当时观察到 Kali + Node 20（该宿主快照的 `Dockerfile` 行号见原报告） | Node 20 与 22 的运行行为需在真实镜像验证。当前 Bun SQLite driver 不要求用 Node SQLite；不能再据旧 Node 版本推出容器内 MCP 必须升级到某个版本。 |
 
-基线提交：BreachWeave `6957a55`（`pentest` 分支，2026-10-09），Taric 当前 HEAD 工作区。
+历史基线提交：BreachWeave `6957a55`（`pentest` 分支，2026-10-09），Taric 当时工作区。该基线不代表任一仓库当前 HEAD。
 
-### 14.2 拓扑选择：Node 桥，而不是 Bun 内嵌
+### 14.2 拓扑选项：Node 桥与 Bun 内嵌的当前边界
 
-三种候选拓扑的可行性（均以当前源码为准）：
+原方案把 Node 桥作为当时唯一可运行路线。当前 Taric 提供 Bun SQLite driver 和多 principal gateway；下表说明当前可选拓扑及尚未认证的宿主路径：
 
 | 拓扑 | 做法 | 结论 |
 |---|---|---|
-| A. Bun 进程内嵌 Core | `import { openRuntimeService } from "@taric/core"` | **不可行**：`sql-driver.ts:3` 硬依赖 `node:sqlite`，Bun 解析失败 |
-| B. Node 桥进程 + 本机受认证 socket（**推荐**） | 独立 Node 22.21.1 进程内嵌 Core，持有 host/operator/writer/reviewer principal；Bun 侧只发 RPC | 可行；可同时服务多个 solver、多个 principal，且不把 DB/凭据暴露给模型 |
-| C. `taric proxy` | CLI 代理固定单一 host principal（`proxy.ts:15-19`） | 可用但**不够**：单 principal 无法表达 reviewer/writer/operator 分离，也不能为每个 run 建立独立 run-bound 会话所有权 |
+| A. Bun 进程内嵌 Core | `@taric/core` + `@taric/driver-bun-sqlite`，经 `openRuntimeService` 配置驱动 | 当前代码可用；五个 tarball 的独立 consumer 验证通过。BreachWeave 尚未验证包消费、权限和重启。 |
+| B. Node 桥进程 + 本机受认证 socket | Node Core、Unix socket RPC；多 principal 可选用 `taric gateway` token resolver | 本机 proxy restart/replay 已验证；gateway 合同有测试。具体宿主配置、token 生命周期及跨进程运行仍未验收。 |
+| C. `taric proxy` | CLI proxy 固定单一 host principal；多角色需分开可信入口或使用 gateway | 对单 host principal 本机桥接有验证；自身不表达 reviewer/writer/operator 多身份。transport session 可供 host-session/run-bound 归属，不替代宿主身份映射。 |
 
-推荐拓扑 B：
+在未完成真实宿主验收前，不对某一拓扑作 BreachWeave 适用性结论。Node gateway 是已验证本机 transport 的选择之一；Bun driver 是可选进程内能力。
+
+下图保留当时 Node bridge 方案作为可读的参考拓扑，不表示它是当前唯一可行方案；`taric gateway` 可解析多 principal，单 principal `taric proxy` 则仅代表 host 身份。
 
 ```text
 ┌─────────────────────── 宿主机（Bun）───────────────────────┐
@@ -840,7 +847,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 约束与现状差异：
 
 - BreachWeave 的 Observer 当前通过 `challenge_memory_add` **直接写**项目共享记忆（`tools.ts:299-309` → `host-bridge-handler.ts:161-171` → `manager.ts:1345-1350`），宿主只做非空/枚举校验。接入 Taric 后这条路径必须改成**提案**：Observer 的结论是“对执行轨迹的判断”，不是工具字节，因此应提交 `claim` / `test_hypothesis` / `negative_observation` 提案，由 host admission 进入 L1；幻觉无法再直接进入共享层。
-- `reviewer` 的 attestation 只能由受信任传输在构造 principal 时提供（`adapter.ts:475-484`）；当前 CLI 入口固定传 `undefined`（`cli.ts:95`），因此 **reviewer 必须由 bridge 进程内创建**，不能靠 CLI 环境变量声明。
+- `reviewer` 的 attestation 必须来自宿主的可信配置/传输，不能由模型结果自报。当前 review CLI 可从可信环境配置读取 reviewer ID/attestation，并只转交宿主/operator 准备的外部结果；旧稿“CLI 固定传 undefined、reviewer 必须在 bridge 内创建”是历史实现判断。gateway resolver 也可将 token 映射到身份与 session，凭据保管仍由宿主负责。
 - 多项目 Planner 的横切视图：Taric 的 `context.query` 按 Engagement 绑定且 principal 固定（`service.ts:1211`）。BreachWeave 的 Planner 一次看 3 个活跃项目，因此有两种落地方式，二选一：
   1. **推荐**：bridge 以 operator 身份分别读取各 Engagement，拼成一份宿主侧快照注入 Planner；Planner 输出结构化 WorkItem 建议，由 bridge 写入对应 Engagement。代价是 Planner 不再是严格的 Taric model principal，但归属仍由宿主代写，审计真实。
   2. 每项目一个 Planner model 进程，跨项目调度退回宿主的确定性调度器。
@@ -852,7 +859,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 | Challenge 项目 | `Engagement` + `Scope` | operator `engagement.init` | 一个项目一个 Engagement，禁止跨项目共享 |
 | URL / IP 资产 | `Resource`（`asset_type: endpoint/host`）+ `ResourceRevision` | host `proposal.submit(resource)` → `admission.evaluate` | `asset_hash` 保留为 `identity` 的稳定字段，但不再是唯一真相 |
 | `scanned: boolean` | `CoverageCell.status` | host `proposal.submit(coverage)` → admission | `not_tested/positive/blocked/inconclusive/...` 替代布尔；项目完成改用覆盖闸门 |
-| `coverage_gaps`（标量 0–100） | 覆盖矩阵 + `evaluateCoverageGate` | bridge 读取 cells 后调用导出的 `evaluateCoverageGate`（`index.ts` 导出） | 不再折叠为分数；`not_tested`/`blocked` 强制可见 |
+| `coverage_gaps`（标量 0–100） | 覆盖矩阵 + `coverage.gate` / `coverage.query` | host/operator 经公开 dispatch 获取 gate 与分页 cells | 不再折叠为分数；`not_tested`/`blocked` 强制可见。Gate 是状态结果，不代替宿主关闭 Engagement。 |
 | `MemoryEntry.kind = fact` | `Observation` / `Claim` | host `capture.observation`（工具字节）/ model `proposal.submit(claim)` | fact 必须区分“工具观察到”与“模型归纳” |
 | `kind = evidence` | `Evidence`（引用 content_ref） | host `proposal.submit(evidence)` | 必须挂 Artifact 引用，不接受裸字符串 |
 | `kind = failure` | `NegativeObservation` | host `proposal.submit(negative_observation)` → admission | 需 method/conditions/limitations/baseline 或 control，schema 强制 |
@@ -943,11 +950,11 @@ operator   audit.verify / snapshot.export / 导出原文
 | P4 观察纠偏 + 质量门槛 | 独立 reviewer + writer 晋升；覆盖闸门替换 `scanned` | 高危 Finding 无独立复核不进 L2；`can_close=false` 时项目不结束 |
 | P5 规模与韧性 | 多项目/多机 PG；故障注入 | 按 §10.4 八项前提与 §11.1 报告 |
 
-### 14.8 已核验的阻断项与边界
+### 14.8 历史宿主基线差距与当前 Taric 状态
 
-以下均来自两侧源码走读，不是推测；集成前必须逐项处置。
+以下记录来自 2026-10-09 两侧源码快照，保留用于复现当时的集成分析；其中 Taric 实现差距已变化，BreachWeave 侧代码判断没有在本轮重新验证。
 
-| # | 事实 | 影响与处置 |
+| # | 历史事实（2026-10-09） | 当时的影响与处置 |
 |---|---|---|
 | 1 | `packages/core/src/sql-driver.ts:3` 硬依赖 `node:sqlite`；Bun 无此内置模块 | 必须使用 Node bridge（§14.2 B）；不要在 Bun 内尝试 polyfill |
 | 2 | BreachWeave 镜像 Node 20（`Dockerfile:124-125`） | 容器内 `taric-mcp` 无法运行；升级镜像并重新验证 |
@@ -962,6 +969,8 @@ operator   audit.verify / snapshot.export / 导出原文
 | 11 | Artifact JSON-RPC 单行上限 1 MiB，普通 RPC 原文读 ≤512 KiB（`adapter-rpc.ts:11-13,198-207`） | 大文件用 `storage_mode: external` + `host_ref`，或 bridge 内直接调用 Core |
 | 12 | `evaluateCoverageGate` 是库函数而非 dispatch 操作（`coverage.ts:167`，`index.ts` 导出） | bridge 读取 cells 后本地计算，或后续单独扩展操作面 |
 | 13 | 现有 `computeChallengeCompleted` 与 `scanned` 是唯一完成判据 | 必须整体替换；新旧两套完成语义并存会产生“报告说完成、矩阵说未测”的矛盾 |
+
+当前 Taric 状态校正：Bun SQLite driver 与 exports 已交付，独立 `1.0.0` tarball consumer 验证通过；`work.query` 与 `coverage.gate/query` 已进入 dispatch 并有 keyset/projection/同快照合同；`work.transition` 是公开操作；`artifact.ingest_file` 可在显式授权的绑定会话根内单 descriptor 读取并校验字节；review pack 固定 admission 输入，review CLI 不调用 provider。MCP 模型接口仍只有六个工具，不暴露 host-only 调度、审核或 Artifact 操作。以上是 Taric 本地能力和测试边界，不是 BreachWeave 当前版本的适配结论。
 
 另外三条不属于 Taric 缺陷、但集成时必须由 BreachWeave 承担的责任：
 

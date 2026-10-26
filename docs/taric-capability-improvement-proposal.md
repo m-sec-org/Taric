@@ -1,13 +1,13 @@
 # 先补齐可验证的接入闭环，再按测量结果扩展 Taric 能力
 
-- 更新日期：2026-10-25
-- 状态：实施完成并已归档；正文保留 2026-10-17 的设计基线与建议语气，当前合同以接入/API/运维文档为准，具体完成情况见下表。
-- 评审基线：本文保留 `c3db857e937c04293eb08e258ca98c8e24a2b897` 的历史设计讨论；当前实现和测试以候选 release report 为准。
+- 更新日期：2026-10-26
+- 状态：提案已实施并归档；正文中的建议、优先级与实施顺序是历史设计记录，不是当前待办。当前合同以接入/API/运维文档为准。
+- 评审基线：本文保留 `c3db857e937c04293eb08e258ca98c8e24a2b897` 的历史设计讨论。当前 `1.0.0` 本地验证摘要见下表；历史 release report 不代表本轮源码验证。
 - 讨论入口：以本文的建议编号开展评审；来源为 [BreachWeave 推演](taric-gap-analysis-breachweave-integration.md)与 [CyberStrike 推演](taric-gap-analysis-cyberstrike-integration.md)。
 
-## 实施状态（2026-10-25）
+## 当前实现与验证状态（2026-10-26）
 
-[既有任务](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/tasks.md)已完成；[当前验收记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)给出最新实现与测试索引。以下结果取自候选证据，本次文档更新未重新采样性能或重新认证第三方宿主。
+[既有任务](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/tasks.md)已完成。以下状态对照当前源码、测试、兼容矩阵和已保存验证资产；本次文档更新没有重新采样性能或认证第三方宿主。
 
 | 决策 | 当前交付与证据 |
 |---|---|
@@ -17,10 +17,10 @@
 | I-04 能力状态 | 自定义 adapter ID 已开放；package/distribution/version/commit 分列，实例能力合成实现、运行绑定、授权、认证证据与质量状态，未知 native 版本不获认证。 |
 | I-05 有界读取 | 固定 read_seq/read_time 的 keyset、v2 加密 cursor 与有界 resume 已实现；[50k 测量](benchmarks/authority-scale-v3.json)首屏 3.08s 对比 5.36s 降低 42.5%，未达到 50% 候选目标，无通用 2s SLA。 |
 | I-06 原文与维护 | CLI 文件流/独立 binary socket 支持 64 MiB decoded chunk，普通 RPC 仍 1 MiB；[原文实测](benchmarks/artifact-transport-v2.json)、[维护实测](benchmarks/maintenance-concurrency-v2.json)与崩溃故障测试已交付。无显式 fsync/断电保证。 |
-| I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；Core in-process 与 authenticated adapter RPC 提供 best-effort bounded subscription，并以 query/read_seq 恢复；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，MCP resources subscription 仍 disabled。 |
+| I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；Core in-process 与 authenticated adapter RPC 提供 best-effort bounded subscription，并以 query/read_seq 恢复；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，MCP resources subscription 仍未支持。 |
 | I-08 导入边界 | 公开 `snapshot.import` 在 dispatch/Core/CLI 明确拒绝，内部隔离 restore 不构成宿主迁移 API；旧材料通过正常 proposal/evidence 治理接入。 |
 
-[历史干净构建报告](benchmarks/capability-verification-v2.json)记录了旧基线 339 项测试，不能作为当前树的构建证据。[当前候选 release report](../openspec/changes/harden-taric-authority-runtime/release-report.json)记录 350/350 Core、clean consumer、proxy restart/replay、profile manifest 与 OrbStack PostgreSQL runtime 门禁；工作树为 dirty，质量证据因人工标注/基线样本为 0 而 blocked。Bun driver 已在当前候选中验证，远程传输、MCP Tasks、MCP resources subscription 和第三方宿主仍按 profile 单独判定。
+本轮 `1.0.0` 验证在 2026-10-26 通过 build、typecheck、兼容矩阵校验和 `npm test`：Core 341 pass、9 个 PostgreSQL live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。五个 `1.0.0` tarball 在独立 consumer 安装与验证通过，文档链接检查 278/0。该轮没有与当前源码摘要匹配的 PostgreSQL live/runtime activation report；旧候选报告不作为本轮 PostgreSQL 证据。质量统计能力仍因缺少人工标注样本与人类基线而 unsupported/pending。远程 gateway、MCP Tasks、MCP resources subscription 和第三方宿主仍按 profile 单独判定。
 
 ## Abstract / 摘要
 
@@ -272,7 +272,7 @@ Triggers & Events 工作组章程也不是已交付协议；本方案不实现 w
 
 不能直接照抄报告中的 `source_kind: import`食谱：虽然 schema 有该枚举，当前 service 会把 proposal provenance 的来源绑定为 model/host。若要保留历史材料来源，应先明确可信 transport provenance 与材料 provenance 的区别；本次不为了导入新增特殊信任路径，也不允许内容自报覆盖 transport 身份。
 
-当前 registry 的 `snapshot.import`需要与本次支持边界对齐：后续实施将其移出对外受支持操作清单，或明确返回 `unsupported_capability`，同步 CLI/文档/测试。隔离 conformance 和灾备验证可保留内部逻辑恢复工具，但不把它公开包装为宿主状态导入、完整审计恢复或一般事件重放。现有 canonical ID/版本保留的恢复场景，不得借机开放为普通创建接口。
+**历史建议，已实施**：当时建议将 `snapshot.import` 移出公开支持面并返回 `unsupported_capability`；当前 registry 将其列为 unsupported，Core dispatch 在 authority mutation 前拒绝。隔离 backend backup/restore/conformance 不等于宿主历史导入 API，也不提供一般事件重放。canonical ID/版本保留只用于受限恢复场景，不是普通创建入口。见[API 合同的 unsupported operations](taric-api.md#operation-inventory)。
 
 ## Rationale / 理由与取舍
 

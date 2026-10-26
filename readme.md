@@ -8,13 +8,13 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 
 ## 当前合同与验证状态
 
-- API contract `1.2.0`，schema `1.0.0`，Core/workspace packages `0.1.0`，authority storage contract `authority-storage/3`。
+- Taric/workspace packages `1.0.0`，API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
 - Schema registry 暴露 57 个 operations；CLI 白名单为 49 项（包括本地 `artifact.store.append-file` helper），MCP 仅暴露 6 个模型工具。这些入口的权限和操作集合不同，不能互相推导。
-- 当前候选 release report 的 workspace 测试为 Schemas 10/10、Core 350/350、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11，均为零失败、零跳过。报告的 `source_tree_clean` 为 false，因此是 dirty-worktree 候选证据，不是 clean Git release。
-- 已验证 profile：Node Core/CLI、本地 Bun SQLite driver、Node CLI 到 Bun RPC 的本机桥接、OrbStack PostgreSQL 单 authority。双进程多主机、第三方宿主部署、远程 gateway 和容器 Artifact 挂载仍为 `not_verified`；npm registry 分发标记为 `unsupported`。
-- 质量评估算法已实现；当前 pinned fixture 为 30 条 synthetic samples、人工标注样本为 0。质量 capability 保持 disabled，release report 因缺真实人工基线而 blocked，不影响同步适配代码的技术完成状态。
+- 本轮 `1.0.0` 工作区验证（2026-10-26）：build、typecheck、兼容矩阵、文档链接均通过；Schemas 10/10、Core 341 通过且 9 项因未配置 PostgreSQL 跳过、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11；隔离 consumer 成功安装并运行五个 `1.0.0` tarball。未生成本次 `1.0.0` PostgreSQL live release report。
+- 此前候选 release report 记录 Core 350/350 且含 PostgreSQL 单 authority readiness，但绑定旧 dirty worktree，不是本次 `1.0.0` 发布证据。PostgreSQL 14–18 已有实现；当前部署必须用匹配当前构建的 activation evidence 才能启用。双进程多主机、第三方宿主部署、远程 gateway 和容器 Artifact 挂载仍为 `not_verified`；npm registry 分发仍未支持，workspace 包保留 `private: true`。
+- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于本次 `1.0.0` 的 release report。
 
-当前候选报告及 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)。
+此前候选报告及其 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)；二者均绑定旧工作树。
 
 
 ## 设计边界
@@ -46,7 +46,7 @@ Taric 支持三种动作协作模式：
 - Taric 不扫描或脱敏宿主数据。
 - Taric 不发起目标系统请求。
 - Taric 不授权高风险动作。
-- 当前 SQLite 驱动仍是同步 `node:sqlite`。Core 方法返回 Promise，但底层 SQL 和部分文件阶段仍同步，长时间操作会阻塞调用进程。
+- 默认 Node SQLite driver 使用同步 `node:sqlite`。Core 方法返回 Promise，但底层 SQL 和部分文件阶段仍同步，长时间操作会阻塞调用进程；注入 Bun SQLite driver 不会加载 Node SQLite driver。
 - 当前 Context Pack 预算使用序列化后的字符数估算。它不是模型 Token 计数。
 - `packages/mcp` 当前只实现模型工具：`context.query`、`resource.query`、`evidence.query`、`proposal.submit`、`checkpoint.propose`、`action.recommend`。
 - Pi 1.4.0 的 proposal/checkpoint/action/result/error hooks 在受测 native adapter contract 范围内已支持；实际可用能力取决于该 adapter 实例完成注册，其中 checkpoint 和 host result 还要求对应 callback 与有效 WorkRun binding。此合同测试不等于外部宿主进程或生产环境认证。DeepSeek Harness 0.2.0-rc.2 / Cordis 4.0.4 和 Hermes 0.19.0 仅在 compatibility manifest 声明的生命周期范围内支持，未覆盖的能力回退 CLI/MCP。
@@ -94,24 +94,24 @@ packages/
   mcp/           可运行的 stdio MCP server；只暴露模型受限工具
   hermes-plugin/ Hermes 0.19.0 生命周期插件，通过认证 Core RPC 接入
 docs/
-  taric-code-design.md 设计说明
+  taric-design.md 设计说明
   taric-api.md    API 边界
   agent-integration.md Agent 接入指南
-  openspec/      活动变更、归档变更与候选发布证据
+openspec/         活动变更、归档变更与候选发布证据
 ```
 
 `packages/cli` 提供 JSON 命令、配置发现、authority/deployment 诊断和 adapter 管理；`packages/mcp` 提供 stdio JSON-RPC server。Hermes 插件不替换 Hermes MemoryProvider，也不直接打开 authority 数据库。DeepSeek、Hermes 和共享 PostgreSQL authority 的实际覆盖范围由 compatibility manifest 和运行时 readiness 报告决定。
 
-版本和 operation 清单以 [`compatibility-matrix.json`](compatibility-matrix.json) 与 [`packages/schemas/src/registry.ts`](packages/schemas/src/registry.ts) 为准。Core 常用入口为 `createCoreServiceForPath`、`createCoreService`、`openRuntimeService` 和 `CoreService.dispatch`；分页、coverage snapshot、WorkRun transition、订阅与 Artifact 的函数索引见[代码设计](docs/taric-code-design.md)及[API 边界](docs/taric-api.md)。
+版本和 operation 清单以 [`compatibility-matrix.json`](compatibility-matrix.json) 与 [`packages/schemas/src/registry.ts`](packages/schemas/src/registry.ts) 为准。Core 常用入口为 `createCoreServiceForPath`、`createCoreService`、`openRuntimeService` 和 `CoreService.dispatch`；分页、coverage snapshot、WorkRun transition、订阅与 Artifact 的函数索引见[代码设计](docs/taric-design.md)及[API 边界](docs/taric-api.md)。
 
 ## 环境要求
 
-- Node.js 22 或更新版本。
+- Node.js 22（当前验证版本为 22.21.1）或更新版本。
 - npm 11 或兼容版本。
 - Python 3，用于运行 Hermes 插件测试。
-- PostgreSQL 14–18，仅在启用 `multi_host_authority` profile 时需要。
+- PostgreSQL 14–18，仅在启用 `multi_host_authority` profile 时需要；该 profile 还要求匹配当前构建的 activation evidence 和健康的 schema/lease 状态。
 
-Node.js 22 的 `node:sqlite` API 可能显示实验性警告。确认你的运行环境接受此限制。
+Node SQLite driver 在 Node 22.21.1 上经过验证，`node:sqlite` 可能显示实验性警告。Core 延迟加载该 driver；Bun 进程内接入可注入 `@taric/driver-bun-sqlite`。
 
 ## 安装和验证
 
@@ -119,20 +119,20 @@ Node.js 22 的 `node:sqlite` API 可能显示实验性警告。确认你的运�
 
 ```bash
 npm ci
-npm run typecheck
 npm run build
+npm run typecheck
 npm run verify:matrix
 npm test
 node scripts/check-doc-links.mjs
 node --test scripts/test/profile-verification.test.mjs
 ```
 
-带完整当前候选门禁（需本机 OrbStack PostgreSQL 已启动）可运行：
+生成一份新的完整候选验证报告（需本机 OrbStack PostgreSQL 已启动）可运行：
 
 ```bash
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
 TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-node scripts/verify-release.mjs --output openspec/changes/harden-taric-authority-runtime/release-report.json
+node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.0.json
 ```
 
 `npm test` 会运行各 workspace 的 Node 测试和 Hermes 插件的 Python 测试。单独运行 Hermes 插件测试：
@@ -201,7 +201,7 @@ const service = await createCoreServiceForPath("./data/taric.sqlite");
 
 ## 文档章节
 
-- [代码设计：架构、数据模型、接口函数与测试索引、Artifact 和发布门槛](docs/taric-code-design.md)
+- [代码设计：架构、数据模型、接口函数与测试索引、Artifact 和发布门槛](docs/taric-design.md)
 - [API 边界：模型、宿主、恢复和投影合同](docs/taric-api.md)
 - [Agent 接入指南：CLI、MCP、Pi、Hermes 和 DeepSeek](docs/agent-integration.md)
 - [authority 存储 runbook：单机维护、doctor 和基准](docs/authority-storage-runbook.md)

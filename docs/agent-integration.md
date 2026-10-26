@@ -9,7 +9,7 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | SQLite authority | Persistent single-host default, WAL and shared Core governance | CLI/MCP/proxy can open the same local file; SQLite coordinates separate processes. Do not put the file on shared multi-host storage. |
 | Operator CLI (`cli.operator`) | JSON operations, stderr failures, explicit process principal | Run only inside the trusted host/operator boundary. Default role is operator, not a model credential. |
 | Model MCP (`mcp.stdio_model_tools`) | stdio `2024-11-05`, exactly six tools | No admission, host-state, raw content, resources subscription, Tasks or HTTP listener. |
-| Node proxy | `taric proxy`, one fixed host principal and Engagement, authenticated Unix socket | Real Bun client can call it; no Bun in-process Core/SQLite support and no remote RPC server. |
+| Node proxy | `taric proxy`, one fixed host principal and Engagement, authenticated Unix socket | Bun can call the local socket or embed Core with the Bun SQLite driver below; this proxy itself exposes no remote HTTP/TCP server. |
 | Pi (`pi_native_adapter`) | Pinned `@earendil-works/pi-coding-agent` 1.4.0 / `4a08025` | Native capability depends on per-instance registration, tool support and run callbacks/binding. |
 | Pi lifecycle (`pi.session_lifecycle`) | `session_start`, shutdown observer | Static support does not establish live instance health. |
 | Pi Context (`pi.context_injection`) | `context` and `before_agent_start` map to Context Pack injection | Returns different host message shapes for the two hooks. |
@@ -20,8 +20,10 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | Artifact (`artifact.task_session_content`) | Opt-in bound session spool and explicit original-content reads | host/operator content_read is a separate grant; PG does not replicate payload files. |
 | Relation/impact (`graph.relation_impact`) | Versioned revision, typed edges, three-way patch, bounded impact | Revalidation WorkItems do not start workers. |
 | Git/scanner (`git.remote_push`, `secrets.external_scanner`) | Engagement-authorized projection callbacks with real scan/push evidence | Not public remote.push operations; remote push requires a private repository, access control and retention policy. |
-| Quality (`quality.full_statistical_evaluation`) | Statistical algorithms implemented | Human annotation/baseline provenance pending; quality release remains blocked. |
-| Public snapshot import/replay | Unsupported | Private backend restore/conformance is not a host migration API. |
+| Quality (`quality.full_statistical_evaluation`) | Statistical algorithms implemented | Human annotation/baseline provenance is pending; capability remains unsupported and disabled until current pinned release evidence is complete. |
+| Public snapshot import/migration | `snapshot.import` is deferred; no public migration operation | Backend restore is an operator recovery path, not a host migration API. |
+
+Host rows pin package/distribution versions and contracts tested by Taric. Adapter tests use local host API, Cordis and RPC fixtures; they do not certify a live third-party host process or its health. `adapter.status` reports instance registration and runtime health as `not_observed` because it cannot inspect another process.
 
 ## Adoption paths and host contract
 
@@ -90,7 +92,7 @@ node packages/cli/dist/bin.js engagement.init '{"name":"local-demo","scope":{"al
 
 Use the returned data.id as TARIC_ENGAGEMENT_ID. The [API synthetic example](taric-api.md#executable-synthetic-example) runs L0→L1 plus an Artifact round-trip in a fresh temporary persistent authority and checks each business result.
 
-### Trusted Node and Bun proxy
+### Node proxy and Bun client
 
 In the trusted host process, configure an existing Engagement and a private socket directory:
 
@@ -131,7 +133,7 @@ const store = new AuthorityStore(new BunSqliteAuthorityDriver(dbPath));
 const service = await createCoreService(store, contentRoot);
 ```
 
-`openRuntimeService`'s sqlite path constructs the node:sqlite driver itself; Bun hosts use the direct construction above. Core loads `node:sqlite` lazily, so the full `@taric/core` import works under Bun. Driver acceptance evidence: the twelve authority runtime scenarios plus the driver-specific suite pass on Bun 1.3.13 — see [bun-driver-conformance-v1](benchmarks/bun-driver-conformance-v1.json) and the [driver guide](authority-driver-guide.md). The Node bridge proxy remains the documented fallback topology.
+`openRuntimeService`'s sqlite path constructs the node:sqlite driver itself; Bun hosts use the direct construction above. Core loads `node:sqlite` lazily, so the full `@taric/core` import works under Bun. On Bun 1.3.13, `npm test --workspace @taric/driver-bun-sqlite` passes 11 tests across the conformance, embedding-smoke and driver-specific suites. The saved [bun-driver-conformance-v1 report](benchmarks/bun-driver-conformance-v1.json) records the 12 authority runtime scenarios; that report does not contain the other 10 test results. This is repository-level driver evidence, not certification of a third-party Bun host or a power-loss durability guarantee. See the [driver guide](authority-driver-guide.md). The Node bridge proxy is an alternative topology.
 
 ## Runtime Configuration
 
@@ -248,7 +250,7 @@ Native chunks are files under artifacts/YYYY/MM/DD/<id-prefix>/<artifact-id>/vNN
 
 Context and authority list cursors bind an authority/root key, but use different v2 AES-GCM/v1 HMAC formats; Artifact catalog cursors are scoped keyset metadata, not Context snapshots. work.resume still materializes session Artifact metadata. Full export and audit remain scale-dependent; do not assume Context optimization bounds every operation.
 
-Projection output uses explicit field allowlists and L2 filtering, with local Git checkpoints enabled by default. Remote push requires a private repository, access and retention configuration, Engagement authorization, a real secrets-scan result, and a push callback. Its scanner only handles projected files, not task-session payloads. snapshot.export is an operator inspection path and can contain selected L0/recalled canonical metadata; it is not ordinary model context. Public snapshot.import is unsupported.
+Projection output uses explicit field allowlists and L2 filtering, with local Git checkpoints enabled by default. Remote push requires a private repository, access and retention configuration, Engagement authorization, a real secrets-scan result, and a push callback. Its scanner only handles projected files, not task-session payloads. snapshot.export is an operator inspection path and can contain selected L0/recalled canonical metadata; it is not ordinary model context. Public `snapshot.import` remains deferred.
 
 ## Host state polling and maintenance
 
