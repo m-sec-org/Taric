@@ -177,7 +177,7 @@ begin 创建 upload 与服务器分配 Artifact ID/version；append 按 ordinal 
 | 独立 binary RPC | header ≤16 KiB；4-byte BE header 长度 + JSON + 精确 raw body；≤2 活跃上传，64 KiB 接收块、每上传队列 2 块，有背压 |
 | 普通 RPC raw read | decoded ≤512 KiB；Artifact list/output 总是最多 16 项，带内容另限 128 KiB |
 
-`taric proxy` 只启动普通 JSON socket；binary socket 须由可信 Node 宿主单独调用 `listenArtifactBinaryRpc`，没有自动生成的第二 socket/HTTP 服务。
+`taric proxy` 只启动普通 Unix JSON socket。可选 `taric gateway` 可同时启动 Unix socket、TLS TCP JSON-RPC 和 HTTPS `/rpc` listener，并将请求送入同一个 CoreService；HTTPS 不支持连接式通知，客户端通过 authority reads 恢复。网络 `artifact.session.bind` 将 session 映射到 gateway contentRoot 下的服务端目录并忽略调用方 root，远程 `artifact.ingest_file` 被拒绝。Core 的 binary Artifact listener 仍只支持 Unix socket，不会被 gateway 暴露成网络上传端点。
 
 ```text
 <session-root>/
@@ -244,7 +244,7 @@ MCP 支持 `initialize/tools/list/tools/call`，返回协议 `2024-11-05` 与 `{
 | content_read | 环境值为 true 或 config.content_read_enabled=true；环境 false 不覆盖配置 true；MCP server 不保留额外 grants |
 | transport session | TARIC_SESSION_ID 仅由 proxy 消费，普通 CLI/MCP 不读取 |
 | adapter config | TARIC_ADAPTER_CONFIG 或 ~/.taric/adapters.json，只管理三个内置 adapter 的配置 |
-| socket/token | proxy 使用 TARIC_CORE_SOCKET、TARIC_ADAPTER_TOKEN（≥32 字符）与 Engagement；Hermes 当前也只实现 Unix socket |
+| socket/token/network gateway | proxy 使用 TARIC_CORE_SOCKET、TARIC_ADAPTER_TOKEN（≥32 字符）与 Engagement；可选 gateway 使用固定 token-to-principal 表，TLS TCP/HTTPS 需 PEM key/certificate，细节见宿主接入指南；Hermes client 仍使用 Unix socket |
 
 PG 的 dbPath 仍参与默认 contentRoot 推导，但不打开 SQLite；部署应显式指定每 host 独立持久内容根。详细可运行配置见[接入指南](agent-integration.md#runtime-configuration)。
 
@@ -280,7 +280,7 @@ node scripts/check-doc-links.mjs
 node --test scripts/test/profile-verification.test.mjs
 ```
 
-重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-26 的 workspace 测试运行结果为 Schemas 10/10、Core 341 pass / 9 skipped、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11；Core 跳过项要求配置 `TARIC_TEST_DATABASE_URL`。同次版本升级验证通过 build、typecheck、matrix、文档链接和 1.0.0 clean consumer。此前候选报告另含 proxy restart/replay 与 PostgreSQL runtime 证据，但绑定较早工作树，不能充当本次 1.0.0 release report。跳过不等于验证通过。
+重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-26 的 workspace 测试在配置 live PostgreSQL 后通过：Schemas 10/10、Core 351/351（无跳过）、CLI 32/32、MCP 12/12、Hermes 5/5、Bun driver 11/11。build、typecheck、matrix 和隔离 `1.0.0` clean consumer 也通过。当前 PG 12 场景及独立逻辑 restore 通过；额外的双 host 容器 bridge 网络 lease/reclaim 和容器 bind-mounted spool 检查通过。它们不代表跨物理机/网络恢复或真实第三方宿主验收。此前候选报告绑定较早工作树，仍只作为历史证据。
 
 [此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。这些报告对应早期候选工作树，不代表本次 1.0.0 发布验证。质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
 

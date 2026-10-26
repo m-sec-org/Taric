@@ -1,4 +1,9 @@
 import { createServer, type Server, type Socket } from "node:net";
+import { createServer as createTlsServer, type TlsOptions } from "node:tls";
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { access, chmod, mkdir, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { CoreService, Principal } from "./service.js";
@@ -7,7 +12,9 @@ import { ContractValidationError } from "./validation.js";
 import { ARTIFACT_CHUNK_BYTES, ARTIFACT_DEPLOYMENT_PROFILE, type ArtifactBinaryAppendStreamInput } from "./artifact-content-store.js";
 
 export interface AdapterRpcOptions {
-  socket_path: string;
+  socket_path?: string;
+  tls_tcp?: { host: string; port: number; key: TlsOptions["key"]; cert: TlsOptions["cert"]; max_connections?: number };
+  network_content_root?: string;
   token: string;
   /** 单 principal 模式的 listener 身份；提供 resolvePrincipal 时可省略。 */
   principal?: Principal;
@@ -15,6 +22,22 @@ export interface AdapterRpcOptions {
    * 全部校验；请求体永不自选身份。未提供时 listener 保持单 principal 行为。 */
   resolvePrincipal?: (declared: { role: import("./service.js").PrincipalRole; principal_id: string; engagement_id?: string }, token: string) => Principal | Promise<Principal>;
 }
+export interface AdapterHttpsRpcOptions {
+  host: string;
+  port: number;
+  key: TlsOptions["key"];
+  cert: TlsOptions["cert"];
+  resolvePrincipal(token: string): Principal | undefined | Promise<Principal | undefined>;
+  network_content_root?: string;
+  path?: string;
+  max_connections?: number;
+  max_concurrent_requests?: number;
+  request_timeout_ms?: number;
+}
+export const NETWORK_RPC_MAX_CONNECTIONS = 128;
+export const NETWORK_RPC_MAX_CONCURRENT_REQUESTS = 64;
+export const NETWORK_RPC_REQUEST_TIMEOUT_MS = 30_000;
+export const NETWORK_RPC_IDLE_TIMEOUT_MS = 30_000;
 export interface ArtifactBinaryRpcOptions extends AdapterRpcOptions { header_max_bytes?: number; queue_chunks?: number; }
 const RPC_LINE_MAX_BYTES = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_line_max_bytes;
 const RPC_ARTIFACT_READ_MAX_BYTES = ARTIFACT_DEPLOYMENT_PROFILE.json_rpc_artifact_read_max_decoded_bytes;
@@ -31,15 +54,63 @@ async function waitForSocket(path: string): Promise<void> {
 export async function listenAdapterRpc(service: CoreService, options: AdapterRpcOptions): Promise<{ server: Server; close(): Promise<void> }> {
   if (!options.token || options.token.length < 32) throw new ContractValidationError("validation_error", "adapter RPC token must contain at least 32 characters");
   if (!options.resolvePrincipal && (!options.principal || options.principal.role !== "host" || !options.principal.engagement_id)) throw new ContractValidationError("authorization_error", "adapter RPC requires an engagement-scoped host principal or a principal resolver");
+  const network = options.tls_tcp;
+  if (Boolean(options.socket_path) === Boolean(network)) throw new ContractValidationError("validation_error", "adapter RPC requires exactly one Unix socket or TLS TCP endpoint");
+  if (network && (!network.host.trim() || !Number.isInteger(network.port) || network.port < 1 || network.port > 65535 || !network.key || !network.cert)) throw new ContractValidationError("validation_error", "TLS TCP adapter endpoint is invalid");
+  if (network && options.network_content_root !== undefined && !options.network_content_root.trim()) throw new ContractValidationError("validation_error", "TLS TCP network_content_root is invalid");
+  if (network && network.max_connections !== undefined && (!Number.isInteger(network.max_connections) || network.max_connections < 1 || network.max_connections > NETWORK_RPC_MAX_CONNECTIONS)) throw new ContractValidationError("validation_error", "TLS TCP max_connections is outside the supported bound");
   const principal = options.principal ? registerTransportPrincipal({ ...options.principal, transport_verified: true as const }) : undefined;
-  await mkdir(dirname(options.socket_path), { recursive: true, mode: 0o700 });
-  await unlink(options.socket_path).catch((cause: NodeJS.ErrnoException) => { if (cause.code !== "ENOENT") throw cause; });
+  const socketPath = options.socket_path;
+  if (socketPath) {
+    await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
+    await unlink(socketPath).catch((cause: NodeJS.ErrnoException) => { if (cause.code !== "ENOENT") throw cause; });
+  }
   const sockets = new Set<Socket>();
-  const server = createServer((socket) => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); handleSocket(socket, service, principal, options.token, options.resolvePrincipal); });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(options.socket_path, () => { server.off("error", reject); resolve(); }); });
-  await waitForSocket(options.socket_path);
-  await chmod(options.socket_path, 0o600);
-  return { server, close: async () => { const stopped = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); for (const socket of sockets) socket.destroy(); await stopped; await unlink(options.socket_path).catch(() => undefined); } };
+  const onConnection = (socket: Socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    if (network) socket.setTimeout(NETWORK_RPC_IDLE_TIMEOUT_MS, () => socket.destroy());
+    handleSocket(socket, service, principal, options.token, options.resolvePrincipal, Boolean(network), options.network_content_root);
+  };
+  const server = network
+    ? createTlsServer({ key: network.key, cert: network.cert, minVersion: "TLSv1.2", maxVersion: "TLSv1.3", handshakeTimeout: 10_000 }, onConnection)
+    : createServer(onConnection);
+  if (network) server.maxConnections = network.max_connections ?? NETWORK_RPC_MAX_CONNECTIONS;
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    const listening = () => { server.off("error", reject); resolve(); };
+    if (network) server.listen({ host: network.host, port: network.port }, listening);
+    else server.listen(socketPath!, listening);
+  });
+  if (socketPath) { await waitForSocket(socketPath); await chmod(socketPath, 0o600); }
+  return { server, close: async () => { const stopped = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); for (const socket of sockets) socket.destroy(); await stopped; if (socketPath) await unlink(socketPath).catch(() => undefined); } };
+}
+
+/** Stateless HTTPS JSON-RPC endpoint for remote hosts. */
+export async function listenAdapterHttpsRpc(service: CoreService, options: AdapterHttpsRpcOptions): Promise<{ server: HttpsServer; close(): Promise<void> }> {
+  const route = options.path ?? "/rpc";
+  const maxConnections = options.max_connections ?? NETWORK_RPC_MAX_CONNECTIONS;
+  const maxConcurrent = options.max_concurrent_requests ?? NETWORK_RPC_MAX_CONCURRENT_REQUESTS;
+  const requestTimeout = options.request_timeout_ms ?? NETWORK_RPC_REQUEST_TIMEOUT_MS;
+  if (!options.host.trim() || !Number.isInteger(options.port) || options.port < 1 || options.port > 65535 || !options.key || !options.cert || typeof options.resolvePrincipal !== "function") throw new ContractValidationError("validation_error", "HTTPS adapter endpoint is invalid");
+  if (options.network_content_root !== undefined && !options.network_content_root.trim()) throw new ContractValidationError("validation_error", "HTTPS network_content_root is invalid");
+  if (!route.startsWith("/") || route.includes("?") || route.includes("#")) throw new ContractValidationError("validation_error", "HTTPS adapter path is invalid");
+  if (!Number.isInteger(maxConnections) || maxConnections < 1 || maxConnections > NETWORK_RPC_MAX_CONNECTIONS || !Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > NETWORK_RPC_MAX_CONCURRENT_REQUESTS || !Number.isInteger(requestTimeout) || requestTimeout < 100 || requestTimeout > NETWORK_RPC_REQUEST_TIMEOUT_MS) throw new ContractValidationError("validation_error", "HTTPS adapter limits exceed the supported bounds");
+  let activeRequests = 0;
+  const sockets = new Set<Socket>();
+  const server = createHttpsServer({ key: options.key, cert: options.cert, minVersion: "TLSv1.2", maxVersion: "TLSv1.3", handshakeTimeout: 10_000 }, (request, response) => {
+    void handleHttpsRequest(service, options, route, maxConcurrent, requestTimeout, request, response, () => activeRequests, (value) => { activeRequests = value; });
+  });
+  server.on("connection", (stream) => { const socket = stream as Socket; sockets.add(socket); socket.once("close", () => sockets.delete(socket)); });
+  server.maxConnections = maxConnections;
+  server.headersTimeout = 10_000;
+  server.requestTimeout = requestTimeout;
+  server.keepAliveTimeout = 5_000;
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ host: options.host, port: options.port }, () => { server.off("error", reject); resolve(); });
+  });
+  return { server, close: async () => { const stopped = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); for (const socket of sockets) socket.destroy(); await stopped; } };
 }
 
 /**
@@ -49,14 +120,16 @@ export async function listenAdapterRpc(service: CoreService, options: AdapterRpc
  */
 export async function listenArtifactBinaryRpc(service: CoreService, options: ArtifactBinaryRpcOptions): Promise<{ server: Server; close(): Promise<void> }> {
   if (!options.token || options.token.length < 32) throw new ContractValidationError("validation_error", "Artifact RPC token must contain at least 32 characters");
+  if (!options.socket_path) throw new ContractValidationError("validation_error", "Artifact RPC requires a Unix socket path");
+  const socketPath = options.socket_path;
   if (!options.principal || options.principal.role !== "host" || !options.principal.engagement_id) throw new ContractValidationError("authorization_error", "Artifact RPC requires an engagement-scoped host principal");
   const principal = registerTransportPrincipal({ ...options.principal, transport_verified: true as const });
   const headerMax = options.header_max_bytes ?? ARTIFACT_DEPLOYMENT_PROFILE.binary_transport_header_max_bytes;
   const queueChunks = options.queue_chunks ?? ARTIFACT_DEPLOYMENT_PROFILE.receive_queue_chunks;
   if (!Number.isSafeInteger(headerMax) || headerMax < 1 || headerMax > ARTIFACT_DEPLOYMENT_PROFILE.json_metadata_max_bytes || !Number.isSafeInteger(queueChunks) || queueChunks < 1 || queueChunks > ARTIFACT_DEPLOYMENT_PROFILE.receive_queue_chunks)
     throw new ContractValidationError("validation_error", "invalid Artifact transport queue/header bounds");
-  await mkdir(dirname(options.socket_path), { recursive: true, mode: 0o700 });
-  await unlink(options.socket_path).catch((cause: NodeJS.ErrnoException) => { if (cause.code !== "ENOENT") throw cause; });
+  await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
+  await unlink(socketPath).catch((cause: NodeJS.ErrnoException) => { if (cause.code !== "ENOENT") throw cause; });
   const sockets = new Set<Socket>();
   // Clients half-close after the declared body; keep the response side open
   // while the bounded stream append finishes and publishes its result.
@@ -69,10 +142,10 @@ export async function listenArtifactBinaryRpc(service: CoreService, options: Art
     socket.once("close", () => sockets.delete(socket));
     handleArtifactBinarySocket(socket, service, principal, options.token, headerMax, queueChunks);
   });
-  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(options.socket_path, () => { server.off("error", reject); resolve(); }); });
-  await waitForSocket(options.socket_path);
-  await chmod(options.socket_path, 0o600);
-  return { server, close: async () => { const stopped = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); for (const socket of sockets) socket.destroy(); await stopped; await unlink(options.socket_path).catch(() => undefined); } };
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, () => { server.off("error", reject); resolve(); }); });
+  await waitForSocket(socketPath);
+  await chmod(socketPath, 0o600);
+  return { server, close: async () => { const stopped = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); for (const socket of sockets) socket.destroy(); await stopped; await unlink(socketPath).catch(() => undefined); } };
 }
 
 class ByteQueue implements AsyncIterable<Uint8Array> {
@@ -120,6 +193,103 @@ export function writeRpcNotification(socket: Socket, signal: { topic: string; en
     return;
   }
   void writeRpcLine(socket, line).catch(() => socket.destroy());
+}
+
+function httpRpcError(response: ServerResponse, status: number, id: string | number | null, code: number, message: string, applicationCode?: string): void {
+  const payload = JSON.stringify({ jsonrpc: "2.0", id, error: { code, message, ...(applicationCode ? { data: { code: applicationCode } } : {}) } });
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload), ...(status === 401 ? { "www-authenticate": 'Bearer realm="taric"' } : {}) });
+  response.end(payload);
+}
+
+class HttpBodyLimitError extends Error {}
+async function readHttpJsonBody(request: IncomingMessage): Promise<unknown> {
+  const lengthHeader = request.headers["content-length"];
+  if (lengthHeader !== undefined && (!/^\d+$/.test(lengthHeader) || Number(lengthHeader) > RPC_LINE_MAX_BYTES)) throw new HttpBodyLimitError();
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const part of request) {
+    const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part);
+    bytes += chunk.length;
+    if (bytes > RPC_LINE_MAX_BYTES) throw new HttpBodyLimitError();
+    chunks.push(chunk);
+  }
+  if (lengthHeader !== undefined && bytes !== Number(lengthHeader)) throw new Error("invalid request length");
+  return JSON.parse(Buffer.concat(chunks, bytes).toString("utf8")) as unknown;
+}
+
+async function dispatchAdapterOperation(service: CoreService, principal: Principal, operation: string, request: Record<string, unknown>, network: boolean, networkContentRoot?: string): Promise<unknown> {
+  if (network && operation === "artifact.ingest_file") return { ok: false, error: { code: "unsupported_capability", message: "path-based Artifact ingestion is local to the Core host; use bounded Artifact transfer or an external reference" } };
+  if (network && operation === "artifact.session.bind") {
+    if (!networkContentRoot || typeof request.session_id !== "string" || !request.session_id.trim()) return { ok: false, error: { code: "unsupported_capability", message: "remote Artifact session binding requires a gateway-managed content root" } };
+    const bindingKey = `${principal.id}\0${request.engagement_id}\0${request.session_id}`;
+    request = { ...request, root: join(networkContentRoot, "remote-sessions", createHash("sha256").update(bindingKey).digest("hex")) };
+  }
+  const readsArtifactContent = operation === "artifact.content.read" || (operation === "artifact.content.list" && request.include_content === true) || (operation === "artifact.session.output" && request.include_content === true);
+  const requestedMax = request.max_response_bytes;
+  if (readsArtifactContent && requestedMax !== undefined && (typeof requestedMax !== "number" || !Number.isSafeInteger(requestedMax) || requestedMax < 1 || requestedMax > RPC_ARTIFACT_READ_MAX_BYTES))
+    return { ok: false, error: { code: "validation_error", message: "ordinary JSON-RPC Artifact reads are limited to 512 KiB decoded per response" } };
+  let boundedRequest = readsArtifactContent ? { ...request, max_response_bytes: requestedMax ?? RPC_ARTIFACT_READ_MAX_BYTES } : request;
+  if (operation === "artifact.content.list" || operation === "artifact.session.output") boundedRequest = { ...boundedRequest, page_size: Math.min(typeof request.page_size === "number" ? request.page_size : RPC_ARTIFACT_PAGE_ITEMS_MAX, RPC_ARTIFACT_PAGE_ITEMS_MAX) };
+  if (readsArtifactContent && operation !== "artifact.content.read") boundedRequest.max_response_bytes = Math.min(typeof boundedRequest.max_response_bytes === "number" ? boundedRequest.max_response_bytes : RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES, RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES);
+  return await service.dispatch(operation, principal, boundedRequest);
+}
+
+async function handleHttpsRequest(
+  service: CoreService,
+  options: AdapterHttpsRpcOptions,
+  route: string,
+  maxConcurrent: number,
+  requestTimeout: number,
+  request: IncomingMessage,
+  response: ServerResponse,
+  getActive: () => number,
+  setActive: (value: number) => void,
+): Promise<void> {
+  let id: string | number | null = null;
+  const requestTarget = request.url ?? "/";
+  if (requestTarget !== route) { httpRpcError(response, 404, id, -32600, "not found"); request.resume(); return; }
+  if (request.method !== "POST") { response.setHeader("allow", "POST"); httpRpcError(response, 405, id, -32600, "method not allowed"); request.resume(); return; }
+  if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") { httpRpcError(response, 415, id, -32600, "content type must be application/json"); request.resume(); return; }
+  const authorizationHeaders = request.rawHeaders.reduce<number>((count, header, index) => count + (index % 2 === 0 && header.toLowerCase() === "authorization" ? 1 : 0), 0);
+  const authorization = request.headers.authorization;
+  const match = authorizationHeaders === 1 && typeof authorization === "string" ? /^Bearer ([^\s]+)$/.exec(authorization) : null;
+  let resolved: Principal | undefined;
+  if (match && match[1].length >= 32) {
+    try { resolved = await options.resolvePrincipal(match[1]); } catch { resolved = undefined; }
+  }
+  if (!resolved) { httpRpcError(response, 401, id, -32001, "authorization_error", "authorization_error"); request.resume(); return; }
+  if (getActive() >= maxConcurrent) { response.shouldKeepAlive = false; httpRpcError(response, 503, id, -32000, "gateway capacity is busy", "unavailable_host"); request.resume(); return; }
+  setActive(getActive() + 1);
+  const timer = setTimeout(() => request.destroy(new Error("request timeout")), requestTimeout);
+  timer.unref();
+  try {
+    const input = await readHttpJsonBody(request) as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
+    if (!input || typeof input !== "object" || Array.isArray(input)) { httpRpcError(response, 400, id, -32600, "invalid request"); return; }
+    const validId = input.id === undefined || input.id === null || (typeof input.id === "string" && input.id.length <= 128) || (typeof input.id === "number" && Number.isSafeInteger(input.id));
+    if (typeof input.id === "string" && input.id.length <= 128 || typeof input.id === "number" && Number.isSafeInteger(input.id) || input.id === null) id = input.id;
+    if (input.jsonrpc !== "2.0" || typeof input.method !== "string" || !validId) { httpRpcError(response, 400, id, -32600, "invalid request"); return; }
+    if (input.method === "taric.subscribe" || input.method === "taric.unsubscribe") {
+      const payload = JSON.stringify({ jsonrpc: "2.0", id, result: { ok: false, error: { code: "unsupported_capability", message: "HTTP request/response transport does not support connection-bound subscriptions; query host state after reconnect" } } });
+      response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload) }); response.end(payload); return;
+    }
+    if (input.method !== "taric.dispatch" || !input.params || typeof input.params !== "object" || Array.isArray(input.params)) { httpRpcError(response, 400, id, -32600, "invalid request"); return; }
+    const params = input.params as Record<string, unknown>;
+    if (Object.keys(params).some((key) => !["operation", "request"].includes(key)) || typeof params.operation !== "string" || !params.request || typeof params.request !== "object" || Array.isArray(params.request)) { httpRpcError(response, 400, id, -32600, "dispatch params must contain only operation and request"); return; }
+    const principal = registerTransportPrincipal({ ...resolved, transport_verified: true as const });
+    let result: unknown;
+    try { result = await dispatchAdapterOperation(service, principal, params.operation, params.request as Record<string, unknown>, true, options.network_content_root); }
+    catch { result = { ok: false, error: { code: "internal_error", message: "internal error" } }; }
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
+    if (Buffer.byteLength(payload) > RPC_LINE_MAX_BYTES) { httpRpcError(response, 413, id, -32600, "response exceeds the 1 MiB JSON-RPC limit", "validation_error"); return; }
+    response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload) }); response.end(payload);
+  } catch (cause) {
+    if (response.headersSent || response.destroyed) return;
+    if (cause instanceof HttpBodyLimitError) { response.shouldKeepAlive = false; httpRpcError(response, 413, id, -32600, "request body exceeds the 1 MiB JSON-RPC limit", "validation_error"); request.resume(); return; }
+    httpRpcError(response, 400, id, -32700, "invalid JSON request");
+  } finally {
+    clearTimeout(timer);
+    setActive(Math.max(0, getActive() - 1));
+  }
 }
 
 function handleArtifactBinarySocket(socket: Socket, service: CoreService, principal: Principal, token: string, headerMax: number, queueChunks: number): void {
@@ -188,7 +358,7 @@ function handleArtifactBinarySocket(socket: Socket, service: CoreService, princi
   });
   socket.resume();
 }
-function handleSocket(socket: Socket, service: CoreService, principal: Principal | undefined, token: string, resolvePrincipal?: AdapterRpcOptions["resolvePrincipal"]) {
+function handleSocket(socket: Socket, service: CoreService, principal: Principal | undefined, token: string, resolvePrincipal?: AdapterRpcOptions["resolvePrincipal"], network = false, networkContentRoot?: string) {
   socket.setEncoding("utf8"); let buffer = "";
   // 多 principal 模式：resolver 存在时连接必须先 taric.identify 且身份随后冻结；
   // 单 principal 模式行为不变（listener principal 即连接身份）。
@@ -218,6 +388,7 @@ function handleSocket(socket: Socket, service: CoreService, principal: Principal
       catch { await writeRpcLine(socket, `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "invalid request" } })}\n`); continue; }
       try {
         if (!input || typeof input !== "object" || Array.isArray(input)) { await writeRpcLine(socket, `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request" } })}\n`); continue; }
+        if (input.id !== undefined && input.id !== null && !(typeof input.id === "string" && input.id.length <= 128) && !(typeof input.id === "number" && Number.isSafeInteger(input.id))) { await writeRpcLine(socket, `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request" } })}\n`); continue; }
         const params = input.params;
         if (input.method === "taric.identify") {
           if (!resolvePrincipal) {
@@ -280,20 +451,8 @@ function handleSocket(socket: Socket, service: CoreService, principal: Principal
         } else if (input.method !== "taric.dispatch" || !params || params.token !== (resolvePrincipal ? identifiedToken : token) || typeof params.operation !== "string" || !params.request || typeof params.request !== "object" || Array.isArray(params.request)) {
           response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error" } };
         } else {
-          const request = params.request as Record<string, unknown>;
-          const readsArtifactContent = params.operation === "artifact.content.read" || (params.operation === "artifact.content.list" && request.include_content === true) || (params.operation === "artifact.session.output" && request.include_content === true);
-          const requestedMax = request.max_response_bytes;
-          if (readsArtifactContent && requestedMax !== undefined && (typeof requestedMax !== "number" || !Number.isSafeInteger(requestedMax) || requestedMax < 1 || requestedMax > RPC_ARTIFACT_READ_MAX_BYTES)) {
-            response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "validation_error", message: "ordinary JSON-RPC Artifact reads are limited to 512 KiB decoded per response" } } };
-          } else {
-            let boundedRequest = readsArtifactContent ? { ...request, max_response_bytes: requestedMax ?? RPC_ARTIFACT_READ_MAX_BYTES } : request;
-            if (params.operation === "artifact.content.list" || params.operation === "artifact.session.output") {
-              boundedRequest = { ...boundedRequest, page_size: Math.min(typeof request.page_size === "number" ? request.page_size : RPC_ARTIFACT_PAGE_ITEMS_MAX, RPC_ARTIFACT_PAGE_ITEMS_MAX) };
-            }
-            if (readsArtifactContent && params.operation !== "artifact.content.read") boundedRequest.max_response_bytes = Math.min(typeof boundedRequest.max_response_bytes === "number" ? boundedRequest.max_response_bytes : RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES, RPC_ARTIFACT_PAGE_CONTENT_MAX_BYTES);
-            const result = await service.dispatch(params.operation, connectionPrincipal!, boundedRequest);
-            response = { jsonrpc: "2.0", id: input.id ?? null, result };
-          }
+          const result = await dispatchAdapterOperation(service, connectionPrincipal!, params.operation, params.request as Record<string, unknown>, network, networkContentRoot);
+          response = { jsonrpc: "2.0", id: input.id ?? null, result };
         }
       } catch {
         response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "internal_error", message: "internal error" } } };

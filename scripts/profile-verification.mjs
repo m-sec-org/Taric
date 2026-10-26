@@ -6,16 +6,17 @@ export function buildProfileVerificationManifest({ checks, runtimeVerified, sour
   const sqliteConsumer = gates.get("clean-consumer") === true;
   const localBridge = gates.get("proxy-restart-replay") === true;
   const postgres = gates.get("postgresql-runtime") === true && runtimeVerified === true;
+  const remoteGateway = gates.get("remote-gateway-live") === true;
   const profiles = [
     { id: "single-host-node-core", state: profileState(sqliteConsumer), evidence: ["clean-consumer"], detail: "Local tarball install, Core migration, close, restart and read through the public Core package." },
     { id: "single-host-cli", state: profileState(sqliteConsumer), evidence: ["clean-consumer"], detail: "Packed CLI binary operates on a persistent isolated SQLite authority." },
     { id: "single-host-bun-sqlite-driver", state: profileState(sqliteConsumer), evidence: ["clean-consumer"], detail: "Packed Bun SQLite driver imports and executes a live in-memory query." },
     { id: "local-node-cli-bun-rpc-bridge", state: profileState(localBridge), evidence: ["proxy-restart-replay"], detail: "Local Unix socket bridge survives two proxy restarts with query/read recovery and idempotent replay." },
     { id: "postgresql-single-authority", state: profileState(postgres), evidence: ["postgresql-runtime"], host_count: postgresHostCount, detail: "OrbStack PostgreSQL live runtime conformance and independent backup/restore; this run used one authority host." },
-    { id: "postgresql-two-process-multi-host", state: "not_verified", evidence: [], detail: "No independent concurrent host processes or network interruption/reconnect profile was run." },
-    { id: "third-party-native-hosts", state: "not_verified", evidence: [], detail: "Pinned adapter contract tests do not establish a live external host deployment." },
-    { id: "remote-gateway", state: "not_verified", evidence: [], detail: "No remote network bridge, token revocation, or cross-machine reconnect profile was run." },
-    { id: "container-artifact-spool-mount", state: "not_verified", evidence: [], detail: "No bind-mounted container spool replacement/permission/restart profile was run." },
+    { id: "postgresql-two-container-multi-host", state: "not_verified", evidence: ["verify-multi-host-postgres-live"], detail: "Two host containers on one workstation passed lease/reclaim and stale-generation checks; distinct physical hosts and network interruption/reconnect remain unverified." },
+    { id: "third-party-native-hosts", state: "not_verified", evidence: [], detail: "Pi 1.4.0 loads the Taric extension in a live RPC process; complete host workflow and other native host runtimes are not certified." },
+    { id: "remote-gateway", state: profileState(remoteGateway), evidence: ["remote-gateway-live"], detail: "Loopback TLS TCP and HTTPS gateway requests, fixed token identities, request bounds, disconnect behavior, and Artifact boundaries are exercised; production network rollout is deployment-specific." },
+    { id: "container-artifact-spool-mount", state: "not_verified", evidence: ["verify-container-spool"], detail: "Two Node 22 containers passed a local bind-mounted spool replacement/content check; production host permissions and failure modes remain untested." },
     { id: "npm-registry-distribution", state: "unsupported", evidence: [], detail: "Workspace packages remain private; local tarball consumer verification is not registry publication." },
   ];
   return {
@@ -33,5 +34,5 @@ export function validateProfileVerificationManifest(manifest) {
     if (!profile || typeof profile.id !== "string" || !profile.id.trim() || ids.has(profile.id) || !allowed.has(profile.state) || !Array.isArray(profile.evidence) || typeof profile.detail !== "string" || !profile.detail.trim()) return false;
     ids.add(profile.id);
   }
-  return ["single-host-node-core", "local-node-cli-bun-rpc-bridge", "postgresql-single-authority", "postgresql-two-process-multi-host", "remote-gateway"].every((id) => ids.has(id));
+  return ["single-host-node-core", "local-node-cli-bun-rpc-bridge", "postgresql-single-authority", "postgresql-two-container-multi-host", "remote-gateway"].every((id) => ids.has(id));
 }

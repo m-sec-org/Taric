@@ -17,7 +17,7 @@
 13. [端到端示例（浓缩时序）](#13-端到端示例浓缩时序)
 14. [BreachWeave 集成案例（真实宿主映射）](#14-breachweave-集成案例真实宿主映射)
 
-> **当前状态（2026-10-26）**：本方案描述 Taric 能力和宿主验收边界；其中 §10 的推演、§11 的五阶段路线和 §14 的 BreachWeave 文件/版本映射，不是当前 Taric 的未完成实现清单。当前 `1.0.0` 工作区 build、typecheck、compatibility matrix、`npm test`、5 个 tarball clean consumer 与文档链接检查通过：Core 341 pass、9 个 PG live tests skipped，Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。本轮没有与当前源码摘要匹配的 PostgreSQL live/runtime activation report；历史 [PostgreSQL v2 报告](benchmarks/postgres-runtime-v2.json)不能启用 `1.0.0` 多主机 profile。质量统计能力仍因缺少人工标注样本/人类基线而 unsupported/pending。真实 BreachWeave、远程 gateway、容器 spool 和双进程多主机部署未验收。当前合同参见[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[代码设计](taric-design.md)。
+> **当前状态（2026-10-26）**：本方案描述 Taric 能力和宿主验收边界；其中 §10 的推演、§11 的五阶段路线和 §14 的 BreachWeave 文件/版本映射，不是当前 Taric 的未完成实现清单。当前 `1.0.0` build、typecheck、compatibility matrix、PostgreSQL 配置下的 `npm test` 与 5 个 tarball clean consumer 通过：Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 均无失败。PostgreSQL 17.11 当前源码 12 个 runtime scenario 和独立逻辑备份/恢复通过；两个 host 容器同机 lease/reclaim、两个容器间 spool mount 写入与读回也通过。报告位于验证机 `/tmp`。Pi 1.4.0 真实 RPC host 已加载 Taric extension（无模型/工具调用）；真实 BreachWeave 和完整第三方宿主工作流、跨物理机网络恢复仍未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。质量统计能力仍因缺少人工标注样本/人类基线而 unsupported/pending。当前合同参见[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[代码设计](taric-design.md)。
 
 ## 1. 方案概述
 
@@ -40,7 +40,7 @@
 - **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理凭据生命周期。agent 调度、工具调用、动作授权、HITL 交互全部由宿主系统负责。
 - **零模型直写**：三类智能体（都是 LLM agent）对权威记忆只有"提案权"；权威写入、任务认领、工具执行、Artifact 落盘由宿主运行时以 host/operator 身份完成。观察者的纠偏同样是"提案 + 建议"，由宿主强制执行。
 
-多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)是 pre-1.0.0 历史证据，不能激活当前 `1.0.0` profile。本轮没有匹配当前源码摘要的 PostgreSQL live/runtime activation report；默认 PostgreSQL runtime disabled。只有当前实现、schema、policy 摘要匹配的隔离 conformance 证据及真实数据库/租约健康检查通过，才能按当前 profile 启用。真实跨机协作与容量仍需按 §11 单独验收。
+多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)仍是 pre-1.0.0 历史证据，不能激活当前 `1.0.0` profile。2026-10-26 的独立 current-source live report 在本机 `/tmp/taric-postgres-runtime-20261026.json`，12 个 runtime scenario 和独立逻辑备份/恢复均通过；当前实现、schema、policy 摘要匹配的证据与部署 schema/租约健康检查仍是启用条件，默认 PostgreSQL runtime 保持关闭。两个独立 Node 容器在同一工作站通过 lease 竞争、owner 容器终止、reclaim 与旧 generation fencing 检查；真实跨物理机协作、网络中断恢复与容量仍需按 §11 验收。
 
 ## 2. 总体架构
 
@@ -92,7 +92,7 @@ flowchart TB
     CC --> SC["C 的任务会话 spool"]
 ```
 
-每台机器的受信任 Core 连接同一个 PostgreSQL authority（同一目标数据库/schema）；模型仅通过受限工具访问。MCP stdio 和现有 adapter Unix socket 是本机接入通道，跨机共享由 Core 到 PostgreSQL 的连接完成，不把它们当作现成的远程 RPC 服务。
+每台机器的受信任 Core 连接同一个 PostgreSQL authority（同一目标数据库/schema）；模型仅通过受限工具访问。MCP stdio 和 adapter Unix socket 是本机接入通道；可选 TLS TCP/HTTPS gateway 也可将宿主 API 请求转发给 gateway 所在主机的 Core。无论选择何种传输，跨主机正确性仍由各 Core 连接的 PostgreSQL authority 提供；gateway 不参与协调。
 
 | 共享对象 | 多主机效果 | 宿主需要完成的工作 |
 |---|---|---|
@@ -784,15 +784,15 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 
 ### 14.2 拓扑选项：Node 桥与 Bun 内嵌的当前边界
 
-原方案把 Node 桥作为当时唯一可运行路线。当前 Taric 提供 Bun SQLite driver 和多 principal gateway；下表说明当前可选拓扑及尚未认证的宿主路径：
+原方案把 Node 桥作为当时唯一可运行路线。当前 Taric 提供 Bun SQLite driver 和多 principal gateway，并支持可选 TLS TCP/HTTPS；下表说明当前可选拓扑及尚未认证的宿主路径：
 
 | 拓扑 | 做法 | 结论 |
 |---|---|---|
 | A. Bun 进程内嵌 Core | `@taric/core` + `@taric/driver-bun-sqlite`，经 `openRuntimeService` 配置驱动 | 当前代码可用；五个 tarball 的独立 consumer 验证通过。BreachWeave 尚未验证包消费、权限和重启。 |
-| B. Node 桥进程 + 本机受认证 socket | Node Core、Unix socket RPC；多 principal 可选用 `taric gateway` token resolver | 本机 proxy restart/replay 已验证；gateway 合同有测试。具体宿主配置、token 生命周期及跨进程运行仍未验收。 |
+| B. Node 桥进程 + gateway | Node Core；可选 Unix socket、TLS TCP 或 HTTPS，多 principal 由 `taric gateway` token resolver 映射 | 本机 gateway transport 有合同和 loopback 端到端测试；生产网络部署、具体宿主配置、token 轮换/撤销运维及跨机故障恢复仍未验收。 |
 | C. `taric proxy` | CLI proxy 固定单一 host principal；多角色需分开可信入口或使用 gateway | 对单 host principal 本机桥接有验证；自身不表达 reviewer/writer/operator 多身份。transport session 可供 host-session/run-bound 归属，不替代宿主身份映射。 |
 
-在未完成真实宿主验收前，不对某一拓扑作 BreachWeave 适用性结论。Node gateway 是已验证本机 transport 的选择之一；Bun driver 是可选进程内能力。
+在未完成真实宿主验收前，不对某一拓扑作 BreachWeave 适用性结论。TLS TCP/HTTPS 是已实现且经本机 loopback 测试的可选 transport；生产网络部署仍待环境验收。Bun driver 是可选进程内能力。
 
 下图保留当时 Node bridge 方案作为可读的参考拓扑，不表示它是当前唯一可行方案；`taric gateway` 可解析多 principal，单 principal `taric proxy` 则仅代表 host 身份。
 

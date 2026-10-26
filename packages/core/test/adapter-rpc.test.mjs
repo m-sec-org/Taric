@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
+import { request as httpsRequest } from "node:https";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthorityStore, createCoreService, createPrincipal, listenAdapterRpc, listenArtifactBinaryRpc, uuidv7 } from "../dist/index.js";
+import { AuthorityStore, createCoreService, createPrincipal, listenAdapterHttpsRpc, listenAdapterRpc, listenArtifactBinaryRpc, uuidv7 } from "../dist/index.js";
 
 async function request(socketPath, params) {
   return new Promise((resolve, reject) => {
@@ -49,6 +50,10 @@ test("adapter processes pipelined frames, retains partial requests and keeps the
     assert.deepEqual(received.map((row) => row.id), [1, 2, 3, null, 4, 5]);
     assert.equal(received[3].error.code, -32700); assert.equal(received[4].error.code, -32001);
     assert.equal(received[5].result.ok, true); assert.equal(socket.destroyed, false);
+    socket.write(`${frame("x".repeat(129))}\n${frame(6)}\n`);
+    await next(8);
+    assert.equal(received[6].error.code, -32600, "an overlong request ID is rejected before dispatch");
+    assert.equal(received[7].id, 6); assert.equal(received[7].result.ok, true);
   } finally { socket.destroy(); await listener.close(); (await store.close()); await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -76,6 +81,47 @@ test("ordinary adapter RPC rejects envelopes above the 1 MiB line bound", async 
     await closed;
     assert.equal(socket.destroyed, true);
   } finally { await listener.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("HTTPS adapter rejects excess in-flight requests and releases capacity after dispatch", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-https-capacity-"));
+  const certDir = join(new URL("./fixtures/", import.meta.url).pathname);
+  const key = await readFile(join(certDir, "gateway-test-key.pem"));
+  const cert = await readFile(join(certDir, "gateway-test-cert.pem"));
+  const probe = createServer();
+  await new Promise((resolve, reject) => { probe.once("error", reject); probe.listen({ host: "127.0.0.1", port: 0 }, resolve); });
+  const port = probe.address().port;
+  await new Promise((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
+  const token = "i".repeat(48);
+  let markEntered;
+  const entered = new Promise((resolve) => { markEntered = resolve; });
+  let releaseDispatch;
+  const dispatchGate = new Promise((resolve) => { releaseDispatch = resolve; });
+  const service = { async dispatch() { markEntered(); await dispatchGate; return { ok: true, data: { accepted: true } }; } };
+  const listener = await listenAdapterHttpsRpc(service, {
+    host: "127.0.0.1", port, key, cert, max_concurrent_requests: 1,
+    resolvePrincipal: (supplied) => supplied === token ? createPrincipal("host", "https-host", uuidv7()) : undefined,
+  });
+  const send = () => new Promise((resolve, reject) => {
+    const request = httpsRequest({ hostname: "127.0.0.1", port, ca: cert, method: "POST", path: "/rpc", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (response) => {
+      const chunks = []; response.on("data", (chunk) => chunks.push(chunk)); response.on("end", () => resolve({ status: response.statusCode, payload: JSON.parse(Buffer.concat(chunks).toString()) }));
+    });
+    request.once("error", reject);
+    request.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "taric.dispatch", params: { operation: "engagement.status", request: {} } }));
+  });
+  try {
+    const firstResponse = send();
+    await entered;
+    const saturated = await send();
+    assert.equal(saturated.status, 503);
+    assert.equal(saturated.payload.error.data.code, "unavailable_host");
+    releaseDispatch();
+    const completed = await firstResponse;
+    assert.equal(completed.status, 200);
+    assert.equal(completed.payload.result.ok, true);
+    const afterRelease = await send();
+    assert.equal(afterRelease.status, 200);
+  } finally { releaseDispatch(); await listener.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 test("ordinary JSON-RPC keeps Artifact reads and serialized responses within its declared frame", async () => {

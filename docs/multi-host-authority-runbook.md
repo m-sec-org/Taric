@@ -1,6 +1,6 @@
 # Multi-host authority runbook
 
-PostgreSQL and SQLite share the asynchronous Core governance implementation. PostgreSQL reports `implementation_state=available`, but runtime activation remains conditional on matching live conformance evidence and current schema/lease health; the default `single_host_sqlite` profile does not load the PostgreSQL driver or contact a PostgreSQL service. The saved PostgreSQL 17.11 report is a pre-1.0.0 candidate run that passed all twelve scenarios and independent logical backup/restore for one authority host. The 1.0.0 workspace validation on 2026-10-26 did not run PostgreSQL live tests, so that saved report is not valid activation evidence for the current source. A two-process/multi-host deployment and network interruption/reconnect profile remain unverified.
+PostgreSQL and SQLite share the asynchronous Core governance implementation. PostgreSQL reports `implementation_state=available`, but runtime activation remains conditional on matching live conformance evidence and current schema/lease health; the default `single_host_sqlite` profile does not load the PostgreSQL driver or contact a PostgreSQL service. On 2026-10-26, current-source live verification on OrbStack PostgreSQL 17.11 passed all twelve scenarios, enabled readiness, and independently restored 25 authority tables with matching sequence 106. The report is `/tmp/taric-postgres-runtime-20261026.json` on the verification machine; the checked-in PostgreSQL v2 report remains historical pre-1.0.0 evidence. A separate two-container test on the same workstation passed concurrent single-owner claims, winning-container termination, lease reclaim and old-generation fencing. Separate physical hosts and network interruption/reconnect remain unverified.
 
 An operator can inspect the deployed schema with `PostgresAuthorityStore.runtimeReadiness(report?)`. This read-only probe reports schema/sequence/lease health and the required runtime method/table/column inventory. It neither migrates the schema nor opens SQLite. Without full scenario evidence, or after any structural/health mismatch, it reports disabled. [PostgreSQL runtime readiness](postgres-runtime-readiness.md) describes the shared unit of work, verification commands and activation report.
 
@@ -12,6 +12,8 @@ An operator can inspect the deployed schema with `PostgresAuthorityStore.runtime
 - Markdown and Git are derived projections. They do not coordinate writers, leases, event ordering, or recovery.
 - PostgreSQL stores Taric authority state. Artifact bodies may remain external or be explicitly stored in a host-bound Taric task-session spool. The spool is local to the host/session root configured for the Core instance; it is not coordinated by PostgreSQL, and shared hosts must provide their own durable, isolated spool roots and backup procedure. Credentials remain opaque payload bytes and are never interpreted or exposed by default.
 
+The remote TCP/HTTPS gateway is an optional transport topology, not part of multi-host correctness. Hosts may each run Core and connect to the same PostgreSQL service, or access one centralized Core service through TLS TCP/HTTPS when database access and credentials should remain centralized. PostgreSQL remains the authority in both layouts. A centralized gateway uses its own configured content root; remote clients cannot reference a path on their own machine. HTTP/TCP Artifact calls use the gateway-managed session spool and bounded API frames, or an opaque external reference. The separate binary Artifact socket remains local-only.
+
 ## Enablement checklist
 
 1. Confirm the target needs multiple hosts writing the same authority. If it does not, use the default SQLite profile.
@@ -21,6 +23,19 @@ An operator can inspect the deployed schema with `PostgresAuthorityStore.runtime
 5. Create a verified backup and restore it into a temporary target. Confirm schema version, source and target sequences, integrity hash, Engagement identity, provenance, revision metadata, and unresolved errors.
 6. Generate `buildSharedAuthorityReleaseEvidence` with storage, `runtime_conformance` and verified restore metadata. For logical imports, retain both the source snapshot sequence and new target audit sequence, with the import audit binding the source sequence/hash. Set `TARIC_RUNTIME_CONFORMANCE` to the verified report path and select the multi-host profile. `openRuntimeService`, used by CLI and MCP, verifies the implementation/schema/policy binding and actual deployed health before construction; the shared factory checks health again before dispatch. No fallback SQLite factory exists.
 7. Start hosts and inspect diagnostics for the selected backend, schema and policy digests, host count, server-fenced lease mode, and enabled state. Verify every host resolves to the same authority service.
+
+The repeatable live checks are:
+
+```sh
+TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
+  TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
+  node scripts/verify-postgres-runtime.mjs --output /tmp/taric-postgres-runtime-current.json
+TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
+  TARIC_RUNTIME_CONFORMANCE=/tmp/taric-postgres-runtime-current.json \
+  node scripts/verify-multi-host-postgres-live.mjs --output /tmp/taric-multihost-current.json
+```
+
+The process harness creates a random disposable database and drops only that database after the check. It requires `CREATE DATABASE`/`DROP DATABASE` rights on the test role and uses a matching activation report. It starts two independent Node host containers with distinct host IDs and separate content roots on the OrbStack Compose network, then verifies a concurrent claim race, one winning owner, reclaim after the winner is killed and its lease expires, and rejection of a stale generation after that host container restarts. Both containers run on one workstation and reach the shared PostgreSQL container through the bridge network; this is container-level coordination evidence, not certification of multiple physical machines or network failure recovery.
 
 The process-facing configuration for each host is explicit:
 
@@ -35,9 +50,13 @@ export TARIC_CONTENT_ROOT='/secure/path/taric-content/<stable-host-id>'
 
 Use operator-managed secrets and TLS in a real deployment. Generate a new activation report for the exact current Core build and disposable test deployment before using this configuration; do not point 1.0.0 at the saved pre-1.0.0 `postgres-runtime-v2.json`. `TARIC_RUNTIME_CONFORMANCE` is an operator-owned activation evidence file, not a test output that a running host may regenerate. Changing Core, schema, policy, PostgreSQL schema, or deployment assumptions requires a new report or keeps the profile disabled. `capability.status` must report `backend=postgresql`, `lease_mode=server_side`, `runtime_state=enabled`, and verified evidence before traffic is admitted.
 
+For a centralized network gateway, configure the same PostgreSQL authority and matching runtime conformance path in the gateway process only; remote hosts need Taric API credentials, not database credentials or direct access to the database network. Configure TLS TCP for connection-bound JSON-RPC/notifications or HTTPS for request/response calls and state polling. Both modes use fixed token-to-principal mappings. Gateway restart closes sessions and revokes tokens removed from its protected configuration. See [remote gateway transport and client configuration](agent-integration.md#optional-remote-gateway).
+
 ## Artifact spool in a shared deployment
 
 Artifact APIs use the same Engagement/session authorization on every host, but PostgreSQL does not store or coordinate payload bytes. Before enabling a host, bind each task session to a root beneath that host's configured content root. A host may instead submit an external `host_ref`; Taric never fetches it. Do not point two hosts at the same writable spool unless the deployment has an independently tested filesystem and locking design; a shared PostgreSQL authority alone does not make file publication atomic.
+
+On 2026-10-26, `node scripts/verify-container-spool.mjs --output /tmp/taric-container-spool-current.json` passed on OrbStack using two sequential `node:22-alpine` containers under the host UID/GID. The first container created the SQLite authority, bound a task-session root on a temporary bind mount and ingested binary bytes; after that container exited, the second container mounted the same directory and verified metadata, hash and exact bytes. This proves that configuration on this local bind mount survives container replacement. It does not validate a third-party host, multiple hosts sharing one writable spool, a production storage driver, host termination during writes, or power-loss durability.
 
 The host/operator sequence is `artifact.session.bind` → `artifact.store.begin` → ordered append → `artifact.store.commit`. Base64 append is limited to 64 MiB decoded and 16 KiB JSON metadata. For large local files, `taric artifact.store.append-file '<metadata-json>' <path>` hashes and streams a file up to 64 MiB without putting bytes into process arguments.
 

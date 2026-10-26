@@ -10,6 +10,7 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | Operator CLI (`cli.operator`) | JSON operations, stderr failures, explicit process principal | Run only inside the trusted host/operator boundary. Default role is operator, not a model credential. |
 | Model MCP (`mcp.stdio_model_tools`) | stdio `2024-11-05`, exactly six tools | No admission, host-state, raw content, resources subscription, Tasks or HTTP listener. |
 | Node proxy | `taric proxy`, one fixed host principal and Engagement, authenticated Unix socket | Bun can call the local socket or embed Core with the Bun SQLite driver below; this proxy itself exposes no remote HTTP/TCP server. |
+| Optional network gateway | `taric gateway --config <path>`, TLS TCP JSON-RPC and HTTPS `/rpc` | Separate from `taric proxy`; fixed token-to-principal mapping, bounded 1 MiB requests, and no filesystem path ingestion from remote hosts. See [configuration and behavior](#optional-remote-gateway). |
 | Pi (`pi_native_adapter`) | Pinned `@earendil-works/pi-coding-agent` 1.4.0 / `4a08025` | Native capability depends on per-instance registration, tool support and run callbacks/binding. |
 | Pi lifecycle (`pi.session_lifecycle`) | `session_start`, shutdown observer | Static support does not establish live instance health. |
 | Pi Context (`pi.context_injection`) | `context` and `before_agent_start` map to Context Pack injection | Returns different host message shapes for the two hooks. |
@@ -23,7 +24,7 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | Quality (`quality.full_statistical_evaluation`) | Statistical algorithms implemented | Human annotation/baseline provenance is pending; capability remains unsupported and disabled until current pinned release evidence is complete. |
 | Public snapshot import/migration | `snapshot.import` is deferred; no public migration operation | Backend restore is an operator recovery path, not a host migration API. |
 
-Host rows pin package/distribution versions and contracts tested by Taric. Adapter tests use local host API, Cordis and RPC fixtures; they do not certify a live third-party host process or its health. `adapter.status` reports instance registration and runtime health as `not_observed` because it cannot inspect another process.
+Host rows pin package/distribution versions and contracts tested by Taric. On 2026-10-26, Pi/DeepSeek adapter and gateway contract suites passed, Hermes plugin tests passed (5), and the Bun SQLite driver suite passed (11). A separate smoke installed Pi 1.4.0 outside the workspace, started its actual RPC process, and loaded the Taric extension through Pi's `ExtensionAPI`; it registered `session_start`/`context` callbacks and the proposal tool. The smoke did not call a model or execute a tool. DeepSeek Harness and Hermes host runtimes were not installed, and a complete Pi workflow or host health is not certified. `adapter.status` reports instance registration and runtime health as `not_observed` because it cannot inspect another process.
 
 ## Adoption paths and host contract
 
@@ -106,7 +107,36 @@ node packages/cli/dist/bin.js proxy
 
 The proxy runs until SIGINT/SIGTERM, fixes role host regardless of TARIC_PRINCIPAL_ROLE, opens the configured authority and creates a 0600 Unix socket. It prints a startup line; that stdout is not a CLI-operation JSON response or MCP stream. JSON requests use taric.dispatch with params token/operation/request; [the API](taric-api.md#node-adapter-proxy) specifies framing/errors.
 
-Mount the socket only into the trusted bridge. Keep authority/content-root mounts and token out of model workers. A model process must not control TARIC_CONFIG or privileged CLI environment. Use [the Bun smoke client](../scripts/adapter-rpc-bun-client.mjs) or [the real restart harness](../scripts/benchmark-proxy-restart.mjs) for the supported local topology. The saved [proxy v5 report](benchmarks/proxy-restart-v5.json) records Node 22.21.1/Bun 1.3.13, 26 calls, two restarts, actual socket modes, idempotency/CAS and late-result checks; it does not certify a complete third-party host.
+Mount the socket only into the trusted bridge. Keep authority/content-root mounts and token out of model workers. A model process must not control TARIC_CONFIG or privileged CLI environment. Use [the Bun smoke client](../scripts/adapter-rpc-bun-client.mjs) or [the real restart harness](../scripts/benchmark-proxy-restart.mjs) for the supported local topology. The saved [proxy v5 report](benchmarks/proxy-restart-v5.json) records Node 22.21.1/Bun 1.3.13, 26 calls, two restarts, actual socket modes, idempotency/CAS and late-result checks; it does not certify a complete third-party host. `taric proxy` remains local Unix-socket only. The optional `taric gateway` also supports TLS TCP and HTTPS as described below.
+
+### Optional remote gateway
+
+Use the multi-principal gateway when a host must call Taric without receiving PostgreSQL credentials or network access. It does not replace PostgreSQL coordination: remote hosts still reach the same Core authority through the gateway, and PostgreSQL remains responsible for multi-host transactions, lease ordering, and fencing. Direct host-to-PostgreSQL Core remains the simpler topology when every host is trusted to access that service.
+
+The gateway config may enable the Unix socket, TLS TCP, HTTPS, or more than one listener. TLS certificate and private key paths are resolved relative to the gateway config file. Network endpoints require an explicit bind host and port; plaintext listeners are not available. Keep the config/key files operator-readable only and bind/firewall the service to trusted networks.
+
+```json
+{
+  "tls_tcp": { "host": "10.20.0.10", "port": 7443, "max_connections": 128 },
+  "https": { "host": "10.20.0.10", "port": 7444, "path": "/rpc", "max_connections": 128, "max_concurrent_requests": 64, "request_timeout_ms": 30000 },
+  "tls": { "key_file": "gateway-key.pem", "cert_file": "gateway-cert.pem" },
+  "tokens": [
+    { "token": "replace-with-a-random-secret-of-at-least-32-characters", "role": "host", "principal_id": "host-a", "engagement_id": "<engagement-id>" }
+  ]
+}
+```
+
+Configure `TARIC_CONFIG` and, for PostgreSQL-backed deployments, `TARIC_RUNTIME_CONFORMANCE` in the trusted gateway service environment, then start `taric gateway --config /secure/path/gateway.json`. The listener accepts TLS 1.2/1.3 only. Token entries are loaded at startup and bind to fixed role/principal/Engagement/session identities; do not send identity fields to select another principal. Rotate or revoke a token by updating the protected config and restarting the gateway, which closes existing connections. No forwarded identity headers are trusted.
+
+TLS TCP clients use the existing newline-delimited JSON-RPC protocol: send `taric.identify` first with `{token, declare:{role, principal_id, engagement_id}}`, then use `taric.dispatch` with that token. Identity is frozen per connection. TCP supports connection-bound `taric.subscribe`; reconnecting clients must resume from the last authoritative read sequence because notifications are best-effort hints.
+
+HTTPS accepts one JSON-RPC object per `POST /rpc`, `Content-Type: application/json`, with `Authorization: Bearer <token>`. The body shape is the existing `taric.dispatch` request; the bearer token determines the fixed principal, and the body contains only `operation` and `request` under `params`. JSON-RPC batches, other paths/methods/content types, CORS, and subscription methods are rejected. HTTPS does not stream notifications; after reconnect, query authoritative state using the last `read_seq`. Request and response JSON are each capped at 1 MiB; the gateway bounds concurrent requests, connections, and request time.
+
+Artifact paths always refer to the gateway host. Network `artifact.session.bind` ignores any client-supplied root and derives a gateway-local session root under the configured `content_root`; `artifact.ingest_file` is unsupported remotely because its path would name a gateway-host file. Remote clients may use bounded `artifact.store.begin`/`append`/`commit` frames or an opaque external reference. A client that needs large files should use an external Artifact store or a host-local Core/spool topology; this gateway does not expose the separate binary Artifact socket over the network.
+
+When more than one gateway process fronts the same PostgreSQL authority, all replicas must use the same shared content root (or a shared filesystem) and a routing policy that keeps a session reachable by every replica. A local root per replica can persist a path that another replica cannot read; use one gateway, shared storage, or sticky routing instead.
+
+The loopback TLS TCP and HTTPS end-to-end tests are part of `packages/cli/test/gateway.test.mjs`. They verify token identity, Engagement isolation, TLS-only TCP, HTTPS request bounds, local-path rejection, gateway-managed spool binding, and bounded Artifact transfer. This is transport conformance on one machine, not a production-network availability or credential-rotation certification.
 
 ### Model MCP setup
 

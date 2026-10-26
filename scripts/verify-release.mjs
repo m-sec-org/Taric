@@ -74,6 +74,7 @@ try {
     else if (packageName === "driver-bun-sqlite") { if (bunVersion.status === 0) run("tests:driver-bun-sqlite", "bun", ["test"], join(directory, "packages/driver-bun-sqlite")); }
     else run(`tests:${packageName}`, process.execPath, ["--test", "--test-concurrency=2", "--test-reporter=tap"], join(directory, "packages", packageName));
   }
+  if (built) run("remote-gateway-live", process.execPath, ["--test", "--test-name-pattern", "gateway exposes authenticated TLS TCP and HTTPS", "packages/cli/test/gateway.test.mjs"]);
   if (built) run("documentation-links", process.execPath, ["scripts/check-doc-links.mjs"]);
   if (built) run("compatibility-matrix", process.execPath, ["scripts/emit-compatibility-matrix.mjs", "--check"]);
   if (built) run("profile-manifest", process.execPath, ["--test", "scripts/test/profile-verification.test.mjs"]);
@@ -96,7 +97,7 @@ try {
   const runtime_conformance = await runAuthorityRuntimeConformance(postgres, {});
   const quality = buildReleaseReport({ samples, quality_provenance: qualityProvenance, digests: { commit: runtimeImplementationDigest(), schema: digest(JSON.stringify(coreSchema)), policy: policyDigest(), sample: qualitySampleDigest(samples), fixture: digest(readFileSync(fixturePath)) }, config: { minimumSampleCount: 30, requiredStrata, requiredGateIds: steps.map((step) => step.id) }, gates: steps.map((step) => ({ id: step.id, passed: step.passed, evidence: [step.output_digest] })) });
   const shared = live?.shared_authority ?? buildSharedAuthorityReleaseEvidence({ profile: "multi_host_authority", backend: "postgresql", authority_service: { configured: false, available: false, shared: false, count: 0 }, runtime_conformance });
-  const requiredTechnicalChecks = ["dependencies", "clean-build", "typecheck", "tests:schemas", "tests:core", "tests:cli", "tests:mcp", "tests:hermes", "tests:driver-bun-sqlite", "documentation-links", "compatibility-matrix", "profile-manifest", "clean-consumer", "proxy-restart-replay"];
+  const requiredTechnicalChecks = ["dependencies", "clean-build", "typecheck", "tests:schemas", "tests:core", "tests:cli", "tests:mcp", "tests:hermes", "tests:driver-bun-sqlite", "remote-gateway-live", "documentation-links", "compatibility-matrix", "profile-manifest", "clean-consumer", "proxy-restart-replay"];
   const technical_passed = requiredTechnicalChecks.every((id) => steps.some((step) => step.id === id && step.passed)) && (!liveRequested || steps.some((step) => step.id === "postgresql-runtime" && step.passed));
   const runtime_verified = technical_passed && live?.runtime_conformance?.passed === true && live?.readiness?.runtime_state === "enabled" && shared.enabled === true;
   // Implementation completion covers the delivered code and verified runtime.

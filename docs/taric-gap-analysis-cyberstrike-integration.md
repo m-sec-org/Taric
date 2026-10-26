@@ -23,7 +23,7 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 
 ## 能力提升后的状态校正（2026-10-26）
 
-本文保留 2026-10-16 的推演、代码基线、宿主源码引用与建议。原正文中的“当前”“未实现”“没有”等状态判断均限定为当时基线，不是当前待办或 Taric 当前能力声明；第 1–8 节是历史定位分析，不是实施计划。当前合同以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[当前设计](taric-design.md)为准。本轮 `1.0.0` 工作区于 2026-10-26 通过 build/typecheck/matrix/npm test：Core 341 pass、9 个 PG live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过；五个 `1.0.0` tarball clean consumer 通过。没有匹配当前源码摘要的 PostgreSQL live/runtime activation report，也未认证 CyberStrike 等真实第三方宿主、远程 gateway 或容器 spool。CyberStrike 项目当前状态与 MCP 工作组进度未重新核验。
+本文保留 2026-10-16 的推演、代码基线、宿主源码引用与建议。原正文中的“当前”“未实现”“没有”等状态判断均限定为当时基线，不是当前待办或 Taric 当前能力声明；第 1–8 节是历史定位分析，不是实施计划。当前合同以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[当前设计](taric-design.md)为准。2026-10-26 的 `1.0.0` build/typecheck/matrix、PG 配置 workspace tests（Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun 11）与 clean consumer 通过。当前源码 PostgreSQL runtime/restore、同机双容器 lease/reclaim、容器 bind-mounted spool 验证也通过；Pi 1.4.0 真实 RPC host 已加载 Taric 扩展，但未调用模型/工具。没有认证 CyberStrike 等完整真实宿主工作流或跨物理机网络恢复；可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试，生产网络部署及跨机故障恢复尚未验证。CyberStrike 项目当前状态与 MCP 工作组进度未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|

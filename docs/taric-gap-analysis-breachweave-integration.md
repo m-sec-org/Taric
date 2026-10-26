@@ -12,18 +12,18 @@
 
 ---
 
-## 能力提升后的状态校正（2026-10-25）
+## 能力提升后的状态校正（2026-10-26）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议。原正文中的“当前”“未实现”“不支持”均限定为当时状态，不作为当前待办或当前实现判断；§1–8 是历史分析和建议，不是实施路线。当前状态以[接入指南](agent-integration.md)、[API 合同](taric-api.md)、源码与测试为准。本轮 `1.0.0` 工作区于 2026-10-26 通过 build/typecheck/matrix/npm test：Core 341 pass、9 PG live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过；5 个 `1.0.0` tarball clean consumer 通过。没有匹配当前源码摘要的 PostgreSQL live/runtime activation report，也未认证真实第三方宿主、远程 gateway 或容器 spool。文中外部项目与 MCP 工作组快照未重新核验。
+本文保留 2026-10-16 的推演、代码基线、行号与建议。原正文中的“当前”“未实现”“不支持”均限定为当时状态，不作为当前待办或当前实现判断；§1–8 是历史分析和建议，不是实施路线。当前状态以[接入指南](agent-integration.md)、[API 合同](taric-api.md)、源码与测试为准。2026-10-26 的 `1.0.0` build/typecheck/matrix、PG 配置 workspace tests（Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun 11）及 clean consumer 通过。当前源码 PostgreSQL runtime/restore、同机双容器 lease/reclaim、容器 spool bind-mount 检查也通过；Pi 1.4.0 真实 RPC host 已加载 Taric 扩展。没有认证完整第三方宿主工作流、跨物理机网络恢复或 BreachWeave 集成；可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试，但生产网络部署与跨机故障恢复尚未验证。文中外部项目与 MCP 工作组快照未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
-| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite` 进程内驱动已在隔离 tarball consumer 中验证。五个 `1.0.0` tarball consumer 通过；包仍标记 private，registry 发布和第三方宿主认证不在此验证范围。 |
+| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite` 进程内驱动已在隔离 tarball consumer 中验证。Pi 1.4.0 RPC host 已实际加载 Taric extension；尚未认证完整 Pi 工作流、BreachWeave 或其他宿主。五个 `1.0.0` tarball consumer 通过；包仍标记 private，registry 发布和完整第三方宿主认证不在此验证范围。 |
 | 宿主 ID 封闭 | 自定义 adapter ID 已开放，认证仍按 package/distribution/version/commit 与实际实例绑定判断。 |
 | 无最小接入路径 | A～E 依赖闭环与独立 Node 治理示例已交付。 |
 | 无状态通知 | Core in-process 与 authenticated adapter RPC 已实现 bounded best-effort host subscription，并使用 query/read_seq 恢复；MCP resources subscription 与 Tasks 仍未支持。本机轮询 fixture 满足 1000ms 预算，不要求所有部署启用通知。 |
 | 存量导入 | 公开 snapshot.import 明确 unsupported；旧材料走正常 proposal/evidence，不提供通用历史迁移。 |
-| 远程拓扑 | 本机 Unix socket 已做重启/重放验证；本轮没有匹配 `1.0.0` 源码摘要的 PostgreSQL live report。双进程多主机和远程网络部署仍未验证，不能由本机 socket 结果外推。 |
+| 共享 authority 与 transport | 当前源码 PostgreSQL live report、同机双 host 容器 lease/reclaim 已通过；Unix socket 与 TLS TCP/HTTPS gateway 有本机测试。跨物理机部署、生产网络故障恢复未验证；多主机正确性由 PostgreSQL 提供，gateway 不参与协调。 |
 
 历史综合[技术验收](benchmarks/capability-verification-v2.json)和候选 release report 绑定旧源码基线，均不作为本轮 `1.0.0` PostgreSQL runtime 证据。当前本地验证计数见本节开头；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文原始代码行号、Bun/推送/宿主差距保留为历史推演，不等于当前未完成项。
 

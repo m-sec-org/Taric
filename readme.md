@@ -10,8 +10,9 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 
 - Taric/workspace packages `1.0.0`，API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
 - Schema registry 暴露 57 个 operations；CLI 白名单为 49 项（包括本地 `artifact.store.append-file` helper），MCP 仅暴露 6 个模型工具。这些入口的权限和操作集合不同，不能互相推导。
-- 本轮 `1.0.0` 工作区验证（2026-10-26）：build、typecheck、兼容矩阵、文档链接均通过；Schemas 10/10、Core 341 通过且 9 项因未配置 PostgreSQL 跳过、CLI 29/29、MCP 12/12、Hermes 5/5、Bun driver 11/11；隔离 consumer 成功安装并运行五个 `1.0.0` tarball。未生成本次 `1.0.0` PostgreSQL live release report。
-- 此前候选 release report 记录 Core 350/350 且含 PostgreSQL 单 authority readiness，但绑定旧 dirty worktree，不是本次 `1.0.0` 发布证据。PostgreSQL 14–18 已有实现；当前部署必须用匹配当前构建的 activation evidence 才能启用。双进程多主机、第三方宿主部署、远程 gateway 和容器 Artifact 挂载仍为 `not_verified`；npm registry 分发仍未支持，workspace 包保留 `private: true`。
+- 本轮 `1.0.0` 验证（2026-10-26）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 351/351（无 PostgreSQL 跳过），Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 全部通过。隔离 consumer 成功安装并运行五个 `1.0.0` tarball。
+- 当前源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`（25 张表、source/recovered sequence 106）；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。专项报告在验证机 `/tmp/taric-postgres-runtime-20261026.json`、`/tmp/taric-multihost-postgres-20261026.json` 和 `/tmp/taric-container-spool-20261026.json`。容器运行在同一工作站，未验证跨物理机或网络中断恢复。
+- Pi/DeepSeek/Hermes adapter 合同、Bun driver、Hermes plugin 和 gateway 测试均通过；另在 `/tmp` 隔离安装并启动真实 Pi 1.4.0 RPC 进程，Taric 扩展成功通过其 `ExtensionAPI` 注册。本机 smoke 未调用模型或工具；DeepSeek/Hermes 真实宿主及完整 Pi 工作流仍未认证。Gateway 保留本机 Unix socket，并支持可选 TLS TCP 长连接 JSON-RPC 和 HTTPS `POST /rpc`；loopback TLS 端到端测试通过。HTTPS 不提供连接订阅；远程文件路径摄取拒绝，Artifact session root 由 gateway 在其配置的 content root 内派生。多机生产部署仍须单独验收证书、网络、凭据轮换和服务可用性。PostgreSQL runtime 仍要求当前构建匹配的 activation evidence 及目标 schema/lease health；npm registry 分发未支持，workspace 包保留 `private: true`。
 - 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于本次 `1.0.0` 的 release report。
 
 此前候选报告及其 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)；二者均绑定旧工作树。
@@ -29,6 +30,8 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 | 记录宿主回传的动作决定和结果 | 管理凭据、审批人身份和用户授权 |
 
 Core 的默认权威边界是单主写入的 SQLite WAL authority；多主机使用显式的 `multi_host_authority` PostgreSQL profile。SQLite 和 PostgreSQL 共用 Core 治理逻辑，但 PostgreSQL runtime 默认关闭，只有当前构建匹配的 conformance report、schema 和 lease health 全部通过才会启用。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。可选 Artifact spool 的 payload 文件位于配置的内容根目录，不嵌入 authority 数据库、审计事件或模型输出。模型调用、worker 调度和目标系统请求不进入 Core。
+
+远程 gateway 是可选 API 传输拓扑，不提供共享状态正确性；多主机事务、租约和 fencing 仍由各 Core 共用的 PostgreSQL authority 协调。各 host 可直连 PostgreSQL，也可通过 TLS TCP/HTTPS gateway 访问 Core API，由 gateway 集中持有数据库凭据。远程 host 的文件系统不与 gateway 共享：path-based Artifact ingestion 不接受远程路径，Artifact bytes 通过受限 JSON-RPC operations 传输（每帧最多 1 MiB）或由宿主外部管理。
 
 Taric 支持三种动作协作模式：
 

@@ -20,7 +20,7 @@
 | I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；Core in-process 与 authenticated adapter RPC 提供 best-effort bounded subscription，并以 query/read_seq 恢复；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，MCP resources subscription 仍未支持。 |
 | I-08 导入边界 | 公开 `snapshot.import` 在 dispatch/Core/CLI 明确拒绝，内部隔离 restore 不构成宿主迁移 API；旧材料通过正常 proposal/evidence 治理接入。 |
 
-本轮 `1.0.0` 验证在 2026-10-26 通过 build、typecheck、兼容矩阵校验和 `npm test`：Core 341 pass、9 个 PostgreSQL live tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。五个 `1.0.0` tarball 在独立 consumer 安装与验证通过，文档链接检查 278/0。该轮没有与当前源码摘要匹配的 PostgreSQL live/runtime activation report；旧候选报告不作为本轮 PostgreSQL 证据。质量统计能力仍因缺少人工标注样本与人类基线而 unsupported/pending。远程 gateway、MCP Tasks、MCP resources subscription 和第三方宿主仍按 profile 单独判定。
+本轮 `1.0.0` 验证在 2026-10-26 通过 build、typecheck、兼容矩阵校验和启用 PostgreSQL 的 workspace `npm test`：Core 351/351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11，均通过。五个 `1.0.0` tarball 的独立 consumer 验证通过。当前源码 PostgreSQL 17.11 runtime 12/12、readiness 和独立逻辑备份/恢复通过；同机双容器 lease/reclaim 与容器 bind-mounted spool 的独立检查也通过。Pi 1.4.0 的真实 RPC 进程已加载 Taric extension，未调用模型/工具；完整第三方宿主流程、跨物理机网络恢复未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。专项报告位于本机 `/tmp`。质量统计能力仍因缺少人工标注样本与人类基线而 unsupported/pending；MCP Tasks 和 MCP resources subscription 也未实现。
 
 ## Abstract / 摘要
 
@@ -98,7 +98,7 @@
 | RM-3：WorkRun 映射 Tasks、HITL 映射 input_required | 暂缓 | 两类任务的生命周期、取消和授权语义不等价，当前模型工具也不需要据此新增长操作 |
 | BreachWeave RM-4：最小接入闭环与能力图 | 重点采纳 | P0 明确角色、依赖和召回结果；P1 用真实接口跑通，不能把 5–6 个 operation 当完整初始化清单 |
 | BreachWeave RM-5：host-native bootstrap / 历史导入 | 不采纳产品能力 | 不新增 import API、snapshot import 支持或通用迁移器；可记录宿主如何用正常治理入口逐条提交候选，历史内容不能冒充当前观察 |
-| BreachWeave RM-6：TCP/HTTP | 暂缓工程扩展 | 先把同机/容器宿主代理写清；网络监听需要独立威胁模型和 transport 合同，不能直接复用本地 token 就宣布完成 |
+| BreachWeave RM-6：TCP/HTTP（历史建议；本变更已交付可选 TLS TCP/HTTPS transport） | 暂缓工程扩展 | 先把同机/容器宿主代理写清；网络监听需要独立威胁模型和 transport 合同，不能直接复用本地 token 就宣布完成 |
 | BreachWeave RM-7：能力分区与文档一致性 | 重点采纳 | P0 记录分区、校验状态；没有包依赖和独立采用证据前不拆治理/覆盖/Artifact 包 |
 | CyberStrike RM-1：增量价值、不适用场景、成本披露 | 重点采纳 | P0 用保证与责任对照；成本采用实测工时与运行开销，不制造 ROI 或人周精确值 |
 | RM-1：三处能力独立销售/使用 | 部分采纳 | 跨会话、恢复、证据链可分别展示，但必须列依赖闭包；checkpoint 仍依赖 WorkRun/Attempt，数据写入仍走治理 |

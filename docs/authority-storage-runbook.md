@@ -1,6 +1,6 @@
 # Single-host authority reads and maintenance
 
-The package and schema contracts are listed in the [compatibility matrix](../compatibility-matrix.json). The saved runtime and benchmark reports cited below predate the 1.0.0 source and are historical measurements, not 1.0.0 release or deployment evidence. On 2026-10-26, the 1.0.0 workspace build, typecheck, matrix check, test suite, and clean tarball consumer passed; PostgreSQL live tests were not run. Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Keep saved benchmark reports unchanged when collecting new samples.
+The package and schema contracts are listed in the [compatibility matrix](../compatibility-matrix.json). The saved runtime and benchmark reports cited below predate the 1.0.0 source and are historical measurements, not 1.0.0 release or deployment evidence. On 2026-10-26, the 1.0.0 workspace build, typecheck, matrix check and PostgreSQL-configured workspace tests passed; isolated tarball consumer validation also passed. Current PostgreSQL runtime and disposable two-container coordination evidence are recorded in [runtime readiness](postgres-runtime-readiness.md). Public `snapshot.import` is unsupported; database backup/restore must preserve the matching content root and cursor key. Keep saved benchmark reports unchanged when collecting new samples.
 
 > Last reviewed: 2026-10-26
 

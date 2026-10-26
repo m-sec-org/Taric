@@ -5,7 +5,7 @@
 > **代码基线**：HEAD `73a6dfd` 加当时未提交工作区改动；下文原评审结论不代表当前代码或正式发布物。
 > **范围**：Taric 侧设计与实现、所记录的容器验证和跨仓契约风险。未执行 BreachWeave 真实部署验收，不能据此宣称跨仓集成通过。
 
-> **状态校正（2026-10-26）**：本报告第 2–7 节的缺陷与门槛是修复前审查记录，不能作为当前未完成项。分页、API 合同版本、订阅租约唤醒、单次 descriptor 读取、review pack 固定绑定和各变更的差距报告已有实现与回归测试，见 [host-sync 历史验收报告](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md)。当前 `1.0.0` 工作区已完成 build、typecheck、矩阵校验和全量测试：Core 341 通过、9 个 PostgreSQL live 测试因未设置 `TARIC_TEST_DATABASE_URL` 跳过；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 全通过。独立 `1.0.0` clean consumer 与文档链接检查通过。该轮没有新的 PostgreSQL live/runtime release report；此前候选报告绑定的是不同源码摘要，不作当前 `1.0.0` PostgreSQL 证据。真实 BreachWeave、远程 gateway、容器 spool 挂载和双进程多主机仍未验收。
+> **状态校正（2026-10-26）**：本报告第 2–7 节的缺陷与门槛是修复前审查记录，不能作为当前未完成项。分页、API 合同版本、订阅租约唤醒、单次 descriptor 读取、review pack 固定绑定和各变更的差距报告已有实现与回归测试，见 [host-sync 历史验收报告](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md)。当前 `1.0.0` build、typecheck、矩阵校验和 PostgreSQL 配置下的 workspace 全量测试通过：Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11，均无失败或跳过。PostgreSQL 当前源码 runtime 12/12、独立逻辑备份恢复、两个 host 容器经共享 bridge network 的 lease/reclaim、容器 bind-mounted spool 检查通过；报告保存在本机 `/tmp`。另隔离安装并启动了真实 Pi 1.4.0 RPC 进程，Taric 扩展通过其 `ExtensionAPI` 注册成功，但没有调用模型/工具。真实 BreachWeave、完整第三方宿主工作流、跨物理机/网络恢复仍未验收。可选 TLS TCP/HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署及跨机故障恢复仍未验收。
 
 ---
 
@@ -26,9 +26,9 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 ## 2. 终审结论
 
-截至 2026-10-26，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过本地合同/回归测试；当前 `1.0.0` 树通过 build、typecheck、矩阵校验、workspace 测试和隔离 tarball consumer 验证。当前没有与 `1.0.0` 源码摘要匹配的 PostgreSQL live/runtime 报告，因此 PostgreSQL 多主机 profile 仍未验证；第三方宿主与容器部署也未验收。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
+截至 2026-10-26，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过合同/回归测试；当前 `1.0.0` build、typecheck、矩阵、workspace 测试和隔离 tarball consumer 验证通过。PostgreSQL 当前源码 live/runtime 和同机双容器 lease/reclaim 已通过；跨物理机部署与网络中断恢复仍未验证。容器 spool bind mount 已在两个顺序运行的 Node 容器间通过写入、替换和原字节读取检查；这不等于完整第三方宿主集成认证。Pi 1.4.0 真实 RPC host 已加载 Taric extension，未调用模型/工具。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
 
-就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.0` tarball consumer 验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。当前没有匹配 `1.0.0` 的 PostgreSQL live/runtime 报告，包仍为 private、未发布至 npm registry。故本地基线已验证，但 PostgreSQL 多主机和 BreachWeave 嵌入 profile 未认证；Taric 不承担宿主的模型和执行职责。
+就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.0` tarball consumer 验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。PostgreSQL 当前源码 runtime 与同机双 host 容器 lease 已验证，但不代表 BreachWeave 或跨物理机部署认证。包仍为 private、未发布至 npm registry。Taric 不承担宿主的模型和执行职责。
 
 本报告不以主观百分比衡量完成度；表中的实现状态、当前工作区验证、部署 profile 认证和真实宿主集成是不同结论，不互相替代。
 
@@ -38,13 +38,14 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 | 验证面 | 原审核记录 | 证据强度与边界 |
 |---|---|---|
-| `1.0.0` 当前工作区：build/typecheck/矩阵/全量测试 | 通过；Core 341 pass、9 PG tests skipped；Schemas 10、CLI 29、MCP 12、Hermes 5、Bun driver 11 pass | 本地实现与测试证据，不等同 PostgreSQL live、远程/多机或第三方宿主认证 |
+| `1.0.0` 当前工作区：build/typecheck/矩阵/全量测试 | 通过；PostgreSQL 配置下 Core 351，Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 全通过 | 本地实现与 PostgreSQL live 证据；不等同跨机网络恢复或第三方宿主认证 |
 | 独立 `1.0.0` clean consumer | 通过；从 tarball 安装并验证包消费 | 验证本地 tarball 分发；不表示 npm registry 已发布 |
 | 文档链接 | 当前检查通过 | 只验证链接目标存在，不判断外部系统当前状态 |
-| PostgreSQL live / 多主机 | 本轮 9 个 live 测试跳过，且没有匹配 `1.0.0` 摘要的新 runtime 报告 | 当前 profile 未验证；此前候选报告不能替代当前构建的匹配证据 |
-| BreachWeave 真实宿主、远程 gateway、容器挂载 | 未执行 | 权限、真实调度/工具/动作、跨进程协作与挂载行为仍需对应宿主验收 |
+| PostgreSQL live / 双进程 | 12 个当前源码 runtime scenario、独立逻辑 restore 和两个 Node host 容器 lease/reclaim 均通过 | 两个容器只在一台工作站；跨机器、网络中断恢复仍未验证 |
+| 第三方宿主、远程 gateway | Pi 1.4.0 真实 RPC 启动并加载 Taric 扩展；无模型/工具调用。TLS TCP/HTTPS gateway 有本机 loopback 端到端测试 | Pi 完整工作流、DeepSeek/Hermes、真实 BreachWeave 仍需宿主验收；gateway 的生产网络部署、凭据运维与跨机故障恢复仍待验证 |
+| 容器 spool 挂载 | 两个顺序 Node 容器对同一临时 bind mount 完成写入、替换和 hash/原文验证 | 不覆盖第三方宿主权限模型、共享写入、存储故障或断电耐久性 |
 
-本轮本地测试通过说明对应样例在当前工作区通过；它不证明第三方宿主、网络/容器部署、PostgreSQL 多主机或生产容量已经认证。
+本轮本地测试证明对应样例在当前工作区通过；它不证明完整第三方宿主工作流、跨机网络/生产容器部署或生产容量已经认证。
 
 ## 3. 能力与跨仓目标对照
 
@@ -54,7 +55,7 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 | T-B `resource_refs` / `work.query` | 字段、dispatch、model projection 和 keyset 分页已实现并有回归测试；资源引用仍是提示，不是资源锁/调度器 | 宿主负责 worker 生命周期、全局资源互斥、限速和动作执行 |
 | T-C `coverage.gate` / `coverage.query` | dispatch、角色、投影已实现；gate 与 visibility 使用同一维护读取快照及水位 | 返回状态与关闭条件，不替宿主关闭 Engagement 或授权动作 |
 | T-D 宿主订阅信号 | Core 与 authenticated adapter RPC 提供有界 best-effort 通知、重鉴权、阈值/时间驱动租约提示、背压和轮询恢复 | 信号不是事实流或调度命令；MCP resources subscription 仍未支持，生产发现延迟无 SLA |
-| T-E `artifact.ingest_file` | 可选实现已做绑定根校验、单 descriptor 读取、hash、幂等发布和失败测试；当前 Node/Bun 不支持身份条件 unlink，因此即使显式要求也保留源文件 | 宿主可改用外部 Artifact；Taric 不管凭据、脱敏、保留期或一般删除策略。容器挂载行为未验证 |
+| T-E `artifact.ingest_file` | 可选实现已做绑定根校验、单 descriptor 读取、hash、幂等发布和失败测试；当前 Node/Bun 不支持身份条件 unlink，因此即使显式要求也保留源文件 | 两个顺序 Node 容器已对同一 bind-mounted spool 完成写入、替换和原字节校验；第三方宿主、生产权限模型、共享写入和存储故障仍未验收 |
 | T-H 派生证据来源门 | 来源门与 `source_kind` 治理已实现；策略需显式配置 | 源码/合同测试不等于 BreachWeave 捕获链已启用或第三方来源真实 |
 | T-G `taric review` | 确定性 pack 固定 admission 证据快照/policy 并由服务端校验；CLI 只导出或转交外部结果，不运行模型/provider | reviewer 选择、人工/模型审阅、verdict 与 SLA 属于宿主/operator |
 | T-F 多 principal gateway | 本地 gateway/RPC 能力已实现并有测试 | 远程网络部署、撤销与跨机重连 profile 未验证 |
@@ -62,7 +63,7 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 BreachWeave v4 的 A1/A2（结构化 Scope/ROE 与 WSTG/ASM 覆盖字典）是授权渗透上线的 P0 宿主要求，按通用性边界不属于 Taric core，也不在本报告的代码审查范围内。Taric 侧适配通过不能替代这两项宿主验收；在真实授权目标上运行前，必须另行证明越界拦截和覆盖字典配置有效。
 
-**历史结论修正**：原 v2 对 T-A/T-E/T-G 缺口的范围判断过宽。当前仍须按 profile 判定：本地实现和 tarball consumer 有证据，registry/第三方宿主/容器挂载仍未验证。T-G 已移除模型/provider 调用，只接受外部结果并校验 admission 绑定；Artifact `delete_source` 是逐次授权，但运行时无法证明安全条件删除时保留源文件。
+**历史结论修正**：原 v2 对 T-A/T-E/T-G 缺口的范围判断过宽。当前仍须按 profile 判定：本地实现和 tarball consumer 有证据；registry 与完整真实第三方宿主工作流仍未验证。Pi 1.4.0 的 RPC 启动和扩展加载 smoke 已通过。容器 bind mount 已有本机替换测试，但未认证生产权限、跨机共享或故障恢复。T-G 已移除模型/provider 调用，只接受外部结果并校验 admission 绑定；Artifact `delete_source` 是逐次授权，但运行时无法证明安全条件删除时保留源文件。
 
 ## 4. 本轮能力集的缺陷与条件门槛
 
@@ -121,9 +122,9 @@ API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 B
 
 原清单是修复前门槛。Taric 对应实现现已通过当前本地工作区测试；仍未由当前证据覆盖的部署声明须单独补证：
 
-1. PostgreSQL live / 多主机：生成与当前 `1.0.0` 源码摘要匹配的运行时报告，并覆盖双进程竞争及网络恢复。
+1. PostgreSQL 跨机验收：当前源码 live runtime、恢复和同机双容器 lease/reclaim 已通过；仍需在不同物理机覆盖共享 authority 竞争、网络分区与恢复。
 2. 真实宿主：验证 principal 映射、调度、工具、动作授权和重启生命周期。
-3. 远程 gateway / 容器 spool profile：在实际网络、身份撤销和挂载环境中验收。
+3. 远程 gateway / 生产 spool：可选 TLS TCP/HTTPS gateway 已实现并有本机 loopback 端到端测试；容器 spool bind-mount 替换检查已通过。生产网络监听、凭据轮换/撤销、跨机故障恢复与生产 spool 仍须在目标部署环境验收。
 4. npm registry 发布：若要声明 registry 可用，发布包并由独立 consumer 从 registry 安装；本地 tarball 验证不替代此门槛。
 
 以下是可选扩展或特定宿主的附加门槛，而不是独立插件基线门槛：
@@ -132,6 +133,6 @@ API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 B
 2. **T-E opaque spool profile**：Core 文件摄取合同已有测试；容器挂载、权限和重启需要宿主环境验收。当前 Node/Bun 条件 unlink 不可用时保留源文件；也可由宿主外部管理 Artifact。
 3. **T-G review profile**：确定性 pack/export/submit 已实现并测试；reviewer 模型、人审、verdict 和 SLA 仍由宿主/operator 负责。
 
-BreachWeave 侧另需用真实宿主验收启用后的 T-H 策略、agent 调度、工具调用和动作授权、资源并发约束、外部 Artifact 或授权 spool 选择、通知丢失后的恢复，以及可选 reviewer 流程。Taric 不承担这些宿主行为。若声明 PostgreSQL/多主机支持，再补实时 PostgreSQL 场景；SQLite 容器结果不外推为该能力认证。
+BreachWeave 侧另需用真实宿主验收启用后的 T-H 策略、agent 调度、工具调用和动作授权、资源并发约束、外部 Artifact 或授权 spool 选择、通知丢失后的恢复，以及可选 reviewer 流程。Taric 不承担这些宿主行为。当前 PostgreSQL runtime/恢复和同机双容器 lease/reclaim 已有 live 证据；若部署到不同物理机，仍需单独验证网络分区与恢复，不能用 SQLite 容器结果代替。
 
-**最终判定（2026-10-26）**：Taric `1.0.0` 当前工作区 build、typecheck、矩阵校验、全量测试、独立 tarball consumer 和文档链接检查通过。没有匹配当前源码的 PostgreSQL live/runtime 报告，也没有真实 BreachWeave、远程 gateway 或容器 spool 验收；这些 profile 不得宣称已验证。Taric 的职责边界仍是状态、记忆和治理服务，不包含模型运行、agent 启动、工具执行或目标动作决策。
+**最终判定（2026-10-26）**：Taric `1.0.0` 当前工作区 build、typecheck、矩阵校验、PostgreSQL 配置下的全量测试、独立 tarball consumer、当前源码 PostgreSQL runtime/backup 与同机双容器 lease/reclaim 均通过。容器 spool bind mount 的隔离替换测试也通过。Pi 1.4.0 真实 RPC host 已成功加载 Taric extension，但未认证完整调度/工具/动作流程；真实 BreachWeave、DeepSeek/Hermes runtime、生产网络 gateway 部署和跨物理机网络恢复仍未验收。TLS TCP/HTTPS gateway 已实现并通过本机 loopback 测试。Taric 的职责边界仍是状态、记忆和治理服务，不包含模型运行、agent 启动、工具执行或目标动作决策。

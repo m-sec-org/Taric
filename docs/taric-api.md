@@ -4,7 +4,7 @@ Core owns authority writes and governance. Hosts own model calls, workers, targe
 
 The repository packages `taric`, `@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/hermes-plugin` and `@taric/mcp` declare version `1.0.0`. These package versions are separate from protocol and persisted-data versions: the public API contract is `1.2.0`, the record Schema is `1.0.0`, and the authority SQL format is `authority-sql/4`. The packages are currently marked private, so their repository versions do not imply npm registry publication.
 
-The 2026-10-26 repository verification passed build, typecheck, compatibility-matrix validation, and the workspace suites: schemas 10/10, Core 341 passed with 9 PostgreSQL-dependent tests skipped, CLI 29/29, MCP 12/12, Hermes 5/5, and Bun driver 11/11. An isolated, unlinked consumer installed and exercised `schemas`, `core`, Bun driver, CLI and MCP tarballs at `1.0.0`; the Hermes plugin is validated by its Python test suite. This verifies the selected local package artifacts, not a live multi-host PostgreSQL deployment or a third-party host process. No fresh full live PostgreSQL release report is recorded for this tree.
+The 2026-10-26 repository verification passed build, typecheck, compatibility-matrix validation, and the PostgreSQL-configured workspace suites: schemas 10/10, Core 351/351 with no PostgreSQL skips, CLI 32/32, MCP 12/12, Hermes 5/5, and Bun driver 11/11. An isolated consumer installed and exercised `schemas`, `core`, Bun driver, CLI and MCP tarballs at `1.0.0`. Current-source PostgreSQL 17.11 conformance and independent backup/restore passed; separate local-container lease/reclaim and bind-mounted spool checks also passed. A real Pi 1.4.0 RPC process loaded the Taric extension, but no model/tool workflow was run. These results do not certify a physical multi-machine deployment, network partition recovery, or a complete third-party host integration. The optional gateway supports local Unix socket, TLS TCP, and HTTPS transports; remote network rollout still requires deployment-specific verification.
 
 ## Runtime startup and authority profiles
 
@@ -201,6 +201,12 @@ A request is one newline-terminated UTF-8 JSON-RPC message:
 A valid call returns a JSON-RPC `result` containing the Core envelope. Parse errors use -32700, invalid request -32600 and invalid method/authentication -32001. Requests and responses are capped at 1 MiB per line. Oversized requests close the socket; oversized responses return a smaller validation error. Requests are drained sequentially per connection with response backpressure; this is not a global bounded request scheduler.
 
 The socket is mode 0600, its created directory mode 0700. Protect the token, socket, authority and spool inside the trusted host boundary. A Bun client can use [adapter-rpc-bun-client.mjs](../scripts/adapter-rpc-bun-client.mjs). The proxy does not start HTTP/TCP or the binary Artifact listener automatically.
+
+### Optional TLS TCP and HTTPS gateway
+
+The optional network gateway uses the same `taric.dispatch` operations, schemas, Core authorization, and authority backend as local transports. See [remote gateway configuration and limits](agent-integration.md#optional-remote-gateway). TLS TCP retains line-delimited JSON-RPC with connection-bound token identity and optional notifications. HTTPS accepts one `POST /rpc` JSON-RPC request per bearer token and does not keep subscriptions open. Both require TLS and enforce the existing 1 MiB request/response frame bounds.
+
+Network clients cannot use `artifact.ingest_file`; it reads a path on the Core host. `artifact.session.bind` derives a gateway-local session root under configured `content_root` and ignores a caller-supplied root. Clients may send Artifact content through bounded API operations or provide an opaque external reference. The gateway does not fetch external references or serve remote host-local spool files.
 
 ### Session and run attribution
 

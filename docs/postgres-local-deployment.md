@@ -1,6 +1,6 @@
 # Local PostgreSQL with OrbStack
 
-The saved [runtime verification](benchmarks/postgres-runtime-v2.json), generated 2026-10-17, passed all 12 scenarios on PostgreSQL 17.11 and an independent `pg_dump`/`pg_restore` check of 24 tables (audit sequence 107→107). It is pre-1.0.0 candidate evidence and must not be used to activate 1.0.0. The 1.0.0 workspace validation on 2026-10-26 did not run PostgreSQL live tests; nine Core PostgreSQL-gated tests were skipped because no live test database was configured. Generate and review a fresh report for the exact build and deployment before activation. A saved report does not establish that a container is currently healthy.
+The saved [runtime verification](benchmarks/postgres-runtime-v2.json), generated 2026-10-17, remains pre-1.0.0 candidate evidence and must not be used to activate 1.0.0. On 2026-10-26, OrbStack PostgreSQL 17.11 passed all twelve current-source runtime scenarios and an independent `pg_dump`/`pg_restore` check of 25 tables (sequence 106→106); readiness was `enabled`/`ready`. The current report is `/tmp/taric-postgres-runtime-20261026.json` on the test machine. Core's PostgreSQL-gated tests also passed in the live workspace run. Regenerate and review a report for the exact build and deployment before activation; a saved report does not establish that a container is currently healthy.
 
 > Last reviewed: 2026-10-26
 
