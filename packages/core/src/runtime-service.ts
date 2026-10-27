@@ -49,16 +49,26 @@ function readActivationEvidence(path: string): AuthorityRuntimeConformance {
  * has no path to a SQLite constructor, and startup never runs mutating fixtures. */
 export async function openRuntimeService(options: RuntimeStartupOptions = {}): Promise<CoreService> {
   const env = options.env ?? process.env;
-  const config = options.config ?? discoverRuntimeConfig(env, options.cwd, options.home).config;
-  const resolution = resolveRuntimeAuthority({ ...options, config, env });
+  const discovered = options.config === undefined
+    ? discoverRuntimeConfig(env, options.cwd, options.home, options.runtimeConfigPath)
+    : undefined;
+  const config = options.config ?? discovered!.config;
+  const resolution = resolveRuntimeAuthority({
+    ...options,
+    config,
+    env,
+    runtimeConfigProvenance: options.runtimeConfigProvenance ?? discovered?.provenance,
+  });
   if (resolution.authority.backend === "sqlite") {
-    const startup = requireRuntimeAuthority({ ...options, config, env });
+    const startup = requireRuntimeAuthority({ ...options, config, env, runtimeConfigProvenance: resolution.runtimeConfigProvenance });
     return await createCoreServiceForPath(startup.dbPath, startup.contentRoot);
   }
   const disabled = (message: string, code: "backend_conformance_failed" | "postgresql_unavailable") => new RuntimeStartupError({
     ...resolution.diagnostics, ok: false, enabled: false, runtime_state: "disabled", evidence_state: "failed", code, message,
   });
-  const evidencePath = env.TARIC_RUNTIME_CONFORMANCE ?? config.runtime_conformance_path;
+  const evidencePath = resolution.runtimeConfigProvenance.source === "explicit"
+    ? config.runtime_conformance_path
+    : env.TARIC_RUNTIME_CONFORMANCE ?? config.runtime_conformance_path;
   if (!evidencePath) throw new RuntimeStartupError(resolution.diagnostics);
   let conformance: AuthorityRuntimeConformance;
   try { conformance = readActivationEvidence(evidencePath); }

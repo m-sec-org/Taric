@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { access, chmod, mkdir, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { CoreService, Principal } from "./service.js";
+import type { ApiResponse, CoreService, Principal } from "./service.js";
 import { registerTransportPrincipal } from "./service.js";
 import { ContractValidationError } from "./validation.js";
 import { ARTIFACT_CHUNK_BYTES, ARTIFACT_DEPLOYMENT_PROFILE, type ArtifactBinaryAppendStreamInput } from "./artifact-content-store.js";
@@ -21,6 +21,7 @@ export interface AdapterRpcOptions {
   /** 可选多 principal 解析：连接首帧声明身份，resolver 拥有 token↔身份映射的
    * 全部校验；请求体永不自选身份。未提供时 listener 保持单 principal 行为。 */
   resolvePrincipal?: (declared: { role: import("./service.js").PrincipalRole; principal_id: string; engagement_id?: string }, token: string) => Principal | Promise<Principal>;
+  gateway_operations?: GatewayTransportOperations;
 }
 export interface AdapterHttpsRpcOptions {
   host: string;
@@ -33,6 +34,11 @@ export interface AdapterHttpsRpcOptions {
   max_connections?: number;
   max_concurrent_requests?: number;
   request_timeout_ms?: number;
+  gateway_operations?: GatewayTransportOperations;
+}
+export interface GatewayTransportOperations {
+  status(principal: Principal): Promise<ApiResponse<Record<string, unknown>>> | ApiResponse<Record<string, unknown>>;
+  reload(principal: Principal): Promise<ApiResponse<Record<string, unknown>>> | ApiResponse<Record<string, unknown>>;
 }
 export const NETWORK_RPC_MAX_CONNECTIONS = 128;
 export const NETWORK_RPC_MAX_CONCURRENT_REQUESTS = 64;
@@ -70,7 +76,7 @@ export async function listenAdapterRpc(service: CoreService, options: AdapterRpc
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
     if (network) socket.setTimeout(NETWORK_RPC_IDLE_TIMEOUT_MS, () => socket.destroy());
-    handleSocket(socket, service, principal, options.token, options.resolvePrincipal, Boolean(network), options.network_content_root);
+    handleSocket(socket, service, principal, options.token, options.resolvePrincipal, Boolean(network), options.network_content_root, options.gateway_operations);
   };
   const server = network
     ? createTlsServer({ key: network.key, cert: network.cert, minVersion: "TLSv1.2", maxVersion: "TLSv1.3", handshakeTimeout: 10_000 }, onConnection)
@@ -268,6 +274,21 @@ async function handleHttpsRequest(
     const validId = input.id === undefined || input.id === null || (typeof input.id === "string" && input.id.length <= 128) || (typeof input.id === "number" && Number.isSafeInteger(input.id));
     if (typeof input.id === "string" && input.id.length <= 128 || typeof input.id === "number" && Number.isSafeInteger(input.id) || input.id === null) id = input.id;
     if (input.jsonrpc !== "2.0" || typeof input.method !== "string" || !validId) { httpRpcError(response, 400, id, -32600, "invalid request"); return; }
+    if (input.method === "taric.gateway.status" || input.method === "taric.gateway.reload") {
+      if (!options.gateway_operations) {
+        const payload = JSON.stringify({ jsonrpc: "2.0", id, result: { ok: false, error: { code: "unsupported_capability", message: "gateway operation is not enabled" } } });
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload) }); response.end(payload); return;
+      }
+      const principal = registerTransportPrincipal({ ...resolved, transport_verified: true as const });
+      let result: ApiResponse<Record<string, unknown>>;
+      try {
+        result = await (input.method === "taric.gateway.status" ? options.gateway_operations.status(principal) : options.gateway_operations.reload(principal));
+      } catch {
+        result = { ok: false, error: { code: "internal_error", message: "internal error" } };
+      }
+      const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
+      response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload) }); response.end(payload); return;
+    }
     if (input.method === "taric.subscribe" || input.method === "taric.unsubscribe") {
       const payload = JSON.stringify({ jsonrpc: "2.0", id, result: { ok: false, error: { code: "unsupported_capability", message: "HTTP request/response transport does not support connection-bound subscriptions; query host state after reconnect" } } });
       response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": Buffer.byteLength(payload) }); response.end(payload); return;
@@ -358,7 +379,7 @@ function handleArtifactBinarySocket(socket: Socket, service: CoreService, princi
   });
   socket.resume();
 }
-function handleSocket(socket: Socket, service: CoreService, principal: Principal | undefined, token: string, resolvePrincipal?: AdapterRpcOptions["resolvePrincipal"], network = false, networkContentRoot?: string) {
+function handleSocket(socket: Socket, service: CoreService, principal: Principal | undefined, token: string, resolvePrincipal?: AdapterRpcOptions["resolvePrincipal"], network = false, networkContentRoot?: string, gatewayOperations?: GatewayTransportOperations) {
   socket.setEncoding("utf8"); let buffer = "";
   // 多 principal 模式：resolver 存在时连接必须先 taric.identify 且身份随后冻结；
   // 单 principal 模式行为不变（listener principal 即连接身份）。
@@ -420,6 +441,17 @@ function handleSocket(socket: Socket, service: CoreService, principal: Principal
           response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: connection must identify before dispatch" } };
         } else if (resolvePrincipal && params && typeof params.token === "string" && params.token !== identifiedToken) {
           response = { jsonrpc: "2.0", id: input.id ?? null, error: { code: -32001, message: "authorization_error: connection credential changed after identification" } };
+        } else if (input.method === "taric.gateway.status" || input.method === "taric.gateway.reload") {
+          if (!gatewayOperations || !params || params.token !== (resolvePrincipal ? identifiedToken : token)) {
+            response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "unsupported_capability", message: "gateway operation is not enabled" } } };
+          } else {
+            try {
+              const result = await (input.method === "taric.gateway.status" ? gatewayOperations.status(connectionPrincipal!) : gatewayOperations.reload(connectionPrincipal!));
+              response = { jsonrpc: "2.0", id: input.id ?? null, result };
+            } catch {
+              response = { jsonrpc: "2.0", id: input.id ?? null, result: { ok: false, error: { code: "internal_error", message: "internal error" } } };
+            }
+          }
         } else if ((input.method === "taric.subscribe" || input.method === "taric.unsubscribe") && params && params.token === (resolvePrincipal ? identifiedToken : token) && (!params.request || (typeof params.request === "object" && !Array.isArray(params.request)))) {
           // 显式进入/退出订阅模式后服务端才可写 unsolicited 通知行。
           if (input.method === "taric.unsubscribe") {

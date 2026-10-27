@@ -2,9 +2,9 @@
 
 Core owns authority writes and governance. Hosts own model calls, workers, target tools, action authorization, reviewer identity, credentials, Artifact policy and retention. An accepted proposal/capture is not a verified Finding.
 
-The repository packages `taric`, `@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/hermes-plugin` and `@taric/mcp` declare version `1.0.0`. These package versions are separate from protocol and persisted-data versions: the public API contract is `1.2.0`, the record Schema is `1.0.0`, and the authority SQL format is `authority-sql/4`. The packages are currently marked private, so their repository versions do not imply npm registry publication.
+The runtime components `@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite` and `@taric/mcp` declare version `1.0.1`; the private root workspace and `@taric/hermes-plugin` remain at `1.0.0`. These package versions are separate from protocol and persisted-data versions: the public API contract is `1.2.0`, the record Schema is `1.0.0`, and the authority SQL format is `authority-sql/4`. The packages are currently marked private, so their repository versions do not imply npm registry publication.
 
-The 2026-10-26 repository verification passed build, typecheck, compatibility-matrix validation, and the PostgreSQL-configured workspace suites: schemas 10/10, Core 351/351 with no PostgreSQL skips, CLI 32/32, MCP 12/12, Hermes 5/5, and Bun driver 11/11. An isolated consumer installed and exercised `schemas`, `core`, Bun driver, CLI and MCP tarballs at `1.0.0`. Current-source PostgreSQL 17.11 conformance and independent backup/restore passed; separate local-container lease/reclaim and bind-mounted spool checks also passed. A real Pi 1.4.0 RPC process loaded the Taric extension, but no model/tool workflow was run. These results do not certify a physical multi-machine deployment, network partition recovery, or a complete third-party host integration. The optional gateway supports local Unix socket, TLS TCP, and HTTPS transports; remote network rollout still requires deployment-specific verification.
+The 2026-10-27 repository verification passed build, typecheck, compatibility-matrix validation, and the PostgreSQL-configured workspace suites: schemas 10/10, Core 356/356 with no PostgreSQL skips, CLI 37/37, MCP 12/12, Hermes 5/5, and Bun driver 11/11. Current-source PostgreSQL 17.11 conformance and independent backup/restore passed; separate local-container lease/reclaim and bind-mounted spool checks also passed. A real Pi 1.4.0 RPC process loaded the Taric extension, but no model/tool workflow was run. These results do not certify a physical multi-machine deployment, network partition recovery, or a complete third-party host integration. The optional gateway supports local Unix socket, TLS TCP, and HTTPS transports; remote network rollout still requires deployment-specific verification.
 
 ## Runtime startup and authority profiles
 
@@ -25,6 +25,27 @@ Use `await service.dispatch(operation, principal, request)` for public calls. `r
 ```
 
 An optional `error.follow_up` identifies follow-up work. Core codes are `validation_error`, `authorization_error`, `unsupported_capability`, `unsupported_schema_version`, `idempotency_conflict`, `stale_version`, `conflict`, `unavailable_host`, `invalid_cursor`, `minimum_budget_required`, `internal_error`. Startup diagnostics additionally use `configuration_invalid`, `unsupported_deployment`, `postgresql_unavailable`, `backend_conformance_failed`. JSON-RPC protocol errors are a separate layer.
+
+Validation failures may include bounded `error.details` produced by Core. Contract details use the stable shape below; `violations` is capped at 16 entries, each text field at 256 characters, and each violation has at most 8 safe schema parameters. Submitted values, credential values, connection strings, and arbitrary validator fields are never included.
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "validation_error",
+    "message": "invalid observation contract",
+    "details": {
+      "kind": "contract",
+      "contract_name": "observation",
+      "violations": [
+        { "instance_path": "/resource_ref", "keyword": "required", "params": { "missingProperty": "resource_ref" }, "message": "must have required property 'resource_ref'" }
+      ]
+    }
+  }
+}
+```
+
+Authority compatibility failures use `kind: "compatibility"` with `backend` (`sqlite`, `postgresql`, or `unknown`), bounded `expected`/`observed` markers, an optional `failed_marker`, and at most 32 missing fields. Local operator startup may retain the failure context needed to repair a selected authority; remote API/RPC responses never include database paths, SQL, bearer tokens, credentials, or raw submitted values. Drivers fail before writes and never switch a PostgreSQL authority to SQLite.
 
 Check business results as well as the outer envelope: L1 admission can return `ok:true` with `data.ok:false`, retain a rejection audit event and leave canonical state unchanged. MCP `isError` and the CLI exit code reflect the outer `ok`; neither alone proves admission succeeded.
 

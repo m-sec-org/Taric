@@ -11,6 +11,151 @@ export function compileSchema<T>(schema: AnySchema): ValidateFunction<T> {
 }
 
 export type ValidationCode = "validation_error" | "authorization_error" | "stale_version" | "unsupported_schema_version" | "conflict" | "idempotency_conflict" | "unsupported_capability" | "unavailable_host";
+
+/**
+ * Bounded diagnostics are deliberately a small public contract.  In
+ * particular, they never contain Ajv's `data` field or arbitrary exception
+ * objects.  Keep these limits low enough that an error can safely cross a
+ * line-delimited transport without becoming a second payload channel.
+ */
+export const DIAGNOSTIC_LIMITS = Object.freeze({
+  violations: 16,
+  text: 256,
+  params: 8,
+  missing: 32,
+});
+export type DiagnosticParameter = string | number | boolean;
+export interface DiagnosticViolation {
+  instance_path: string;
+  keyword: string;
+  params?: Readonly<Record<string, DiagnosticParameter>>;
+  message: string;
+}
+export interface ContractDiagnosticDetails {
+  kind: "contract";
+  contract_name: string;
+  violations: readonly DiagnosticViolation[];
+}
+export interface CompatibilityDiagnosticDetails {
+  kind: "compatibility";
+  backend: "sqlite" | "postgresql" | "unknown";
+  expected: Readonly<Record<string, string>>;
+  observed?: Readonly<Record<string, string>>;
+  failed_marker?: string;
+  missing?: readonly string[];
+}
+export type DiagnosticDetails = ContractDiagnosticDetails | CompatibilityDiagnosticDetails;
+
+function boundedText(value: unknown, fallback: string): string {
+  const text = typeof value === "string" ? value : fallback;
+  // Ajv messages are normally safe, but custom validators can echo data.  A
+  // credential-shaped fragment is never useful as a public diagnostic.
+  const redacted = text.replace(/((?:token|password|secret|credential|authorization|connection[_-]?string)\s*[=:]\s*)([^\s,;]+)/gi, "$1<redacted>");
+  return redacted.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, DIAGNOSTIC_LIMITS.text) || fallback;
+}
+
+function safePath(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const path = value.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, DIAGNOSTIC_LIMITS.text);
+  // Field names are useful, but credentials must not be reflected in a
+  // remote error even when a schema uses a credential-shaped property name.
+  return path.split("/").map((segment) => /(?:token|password|secret|credential|authorization|private[_-]?key)/i.test(segment) ? "<redacted>" : segment).join("/");
+}
+
+function safeParams(value: unknown): Readonly<Record<string, DiagnosticParameter>> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const output: Record<string, DiagnosticParameter> = {};
+  const allowed = new Set(["missingProperty", "additionalProperty", "type", "format", "comparison", "limit", "exclusive", "pattern", "propertyName", "expected"]);
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (Object.keys(output).length >= DIAGNOSTIC_LIMITS.params || !allowed.has(key)) continue;
+    if (typeof item === "string") {
+      if (/(?:token|password|secret|credential|authorization|private[_-]?key)/i.test(item)) output[key] = "<redacted>";
+      else output[key] = item.slice(0, DIAGNOSTIC_LIMITS.text);
+    } else if (typeof item === "number" && Number.isFinite(item)) output[key] = item;
+    else if (typeof item === "boolean") output[key] = item;
+  }
+  return Object.keys(output).length ? Object.freeze(output) : undefined;
+}
+
+/** Normalize Ajv output without exposing submitted data or implementation fields. */
+export function normalizeContractValidationDetails(contractName: string, errors: unknown): ContractDiagnosticDetails | undefined {
+  if (!Array.isArray(errors)) return undefined;
+  const violations: DiagnosticViolation[] = [];
+  for (const error of errors.slice(0, DIAGNOSTIC_LIMITS.violations)) {
+    if (!error || typeof error !== "object") continue;
+    const item = error as Record<string, unknown>;
+    const keyword = typeof item.keyword === "string" ? item.keyword.slice(0, DIAGNOSTIC_LIMITS.text) : "validation";
+    const params = safeParams(item.params);
+    violations.push({
+      instance_path: safePath(item.instancePath ?? item.dataPath),
+      keyword,
+      ...(params ? { params } : {}),
+      message: boundedText(item.message, `${keyword} constraint failed`),
+    });
+  }
+  if (!violations.length) return undefined;
+  return Object.freeze({ kind: "contract", contract_name: boundedText(contractName, "unknown"), violations: Object.freeze(violations) });
+}
+
+/** Compatibility details are also bounded so drivers can safely pass them to transports. */
+export function compatibilityDiagnosticDetails(input: {
+  backend: CompatibilityDiagnosticDetails["backend"];
+  expected: Record<string, unknown>;
+  observed?: Record<string, unknown>;
+  failed_marker?: string;
+  missing?: readonly string[];
+}): CompatibilityDiagnosticDetails {
+  const normalizeMap = (value: Record<string, unknown> | undefined): Readonly<Record<string, string>> | undefined => {
+    if (!value) return undefined;
+    const result: Record<string, string> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (Object.keys(result).length >= DIAGNOSTIC_LIMITS.params || typeof item === "object" || typeof item === "function") continue;
+      const text = String(item);
+      result[key.slice(0, DIAGNOSTIC_LIMITS.text)] = /(?:token|password|secret|credential|authorization|connection[_-]?string)/i.test(key) || /(?:token|password|secret|credential|authorization|postgres(?:ql)?:\/\/|:\/\/)/i.test(text)
+        ? "<redacted>"
+        : text.slice(0, DIAGNOSTIC_LIMITS.text);
+    }
+    return Object.freeze(result);
+  };
+  const missing = input.missing?.filter((item): item is string => typeof item === "string").slice(0, DIAGNOSTIC_LIMITS.missing).map((item) => /(?:token|password|secret|credential|authorization|private[_-]?key)/i.test(item) ? "<redacted>" : item.slice(0, DIAGNOSTIC_LIMITS.text));
+  return Object.freeze({
+    kind: "compatibility",
+    backend: input.backend,
+    expected: normalizeMap(input.expected) ?? Object.freeze({}),
+    ...(normalizeMap(input.observed) ? { observed: normalizeMap(input.observed) } : {}),
+    ...(input.failed_marker ? { failed_marker: boundedText(input.failed_marker, "compatibility") } : {}),
+    ...(missing?.length ? { missing: Object.freeze(missing) } : {}),
+  });
+}
+
+/** Keep only diagnostics created by the normalizers above at a service boundary. */
+export function normalizeDiagnosticDetails(details: unknown, contractName?: string): DiagnosticDetails | undefined {
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    const value = details as Record<string, unknown>;
+    if (value.kind === "contract" && typeof value.contract_name === "string" && Array.isArray(value.violations)) {
+      const violations = value.violations.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const violation = item as Record<string, unknown>;
+        return { instancePath: violation.instance_path, keyword: violation.keyword, params: violation.params, message: violation.message };
+      });
+      return normalizeContractValidationDetails(value.contract_name, violations);
+    }
+    if (value.kind === "compatibility" && (value.backend === "sqlite" || value.backend === "postgresql" || value.backend === "unknown") && value.expected && typeof value.expected === "object") {
+      return compatibilityDiagnosticDetails({
+        backend: value.backend,
+        expected: value.expected as Record<string, unknown>,
+        observed: value.observed && typeof value.observed === "object" ? value.observed as Record<string, unknown> : undefined,
+        failed_marker: typeof value.failed_marker === "string" ? value.failed_marker : undefined,
+        missing: Array.isArray(value.missing) ? value.missing.filter((item): item is string => typeof item === "string") : undefined,
+      });
+    }
+  }
+  return contractName ? normalizeContractValidationDetails(contractName, details) : undefined;
+}
+
+/** Public alias used by adapters that do not need to know the validator library. */
+export const normalizeValidationErrors = normalizeContractValidationDetails;
+
 export class ContractValidationError extends Error {
   readonly code: ValidationCode;
   readonly details: unknown;
@@ -43,8 +188,11 @@ const envelopeValidator = contractSchemaValidator.getSchema(`${coreSchema.$id}#/
 export function validateProposalEnvelope(value: unknown): void {
   const envelope = value as Record<string, unknown> | undefined;
   const content = envelope?.content as Record<string, unknown> | undefined;
-  if (content?.schema_version !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "proposal schema version is not supported");
-  if (!envelopeValidator(value)) throw new ContractValidationError("validation_error", "invalid proposal envelope", envelopeValidator.errors);
+  if (content?.schema_version !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "proposal schema version is not supported", {
+    kind: "contract", contract_name: "proposalEnvelope",
+    violations: Object.freeze([{ instance_path: "/content/schema_version", keyword: "const", params: Object.freeze({ expected: SCHEMA_VERSION }), message: "schema version is not supported" }]),
+  } satisfies ContractDiagnosticDetails);
+  if (!envelopeValidator(value)) throw new ContractValidationError("validation_error", "invalid proposal envelope", normalizeContractValidationDetails("proposalEnvelope", envelopeValidator.errors));
   if (envelope!.target_id !== undefined && envelope!.subject_ref !== undefined && envelope!.target_id !== envelope!.subject_ref) throw new ContractValidationError("validation_error", "proposal target_id and subject_ref must agree");
   const target = envelope!.target_id ?? envelope!.subject_ref;
   if ((Number(envelope!.expected_version) > 0) !== (target !== undefined)) throw new ContractValidationError("validation_error", "updates require an explicit target and positive expected_version; creates require expected_version zero");
@@ -56,7 +204,7 @@ export function validateProposalEnvelope(value: unknown): void {
  * substituted only in this temporary validation object. Evidence and review
  * availability are deliberately left to the separate L2 hard gates. */
 export function validateProposalCandidate(subjectType: string, content: Record<string, unknown>): void {
-  if (!candidateValidator(content)) throw new ContractValidationError("validation_error", "proposal contains privileged fields or an invalid candidate shape", candidateValidator.errors);
+  if (!candidateValidator(content)) throw new ContractValidationError("validation_error", "proposal contains privileged fields or an invalid candidate shape", normalizeContractValidationDetails("proposalCandidate", candidateValidator.errors));
   const expectedKind = subjectType === "action_recommendation" ? "action_intent" : subjectType;
   if (content.kind !== expectedKind) throw new ContractValidationError("validation_error", "proposal subject_type must match explicit candidate kind");
   const contract = proposalSubjectContracts[subjectType];
@@ -204,14 +352,23 @@ export function validateAuthorityReferences(record: Record<string, unknown>, ind
 
 /** 校验 Phase 1 合同，并执行跨字段安全约束。 */
 export function validateContract(name: ContractName, value: unknown): asserts value {
-  if (!value || typeof value !== "object") throw new ContractValidationError("validation_error", `${name} must be an object`);
+  if (!value || typeof value !== "object") throw new ContractValidationError("validation_error", `${name} must be an object`, {
+    kind: "contract", contract_name: name, violations: Object.freeze([{ instance_path: "", keyword: "type", params: Object.freeze({ type: "object" }), message: `${name} must be an object` }]),
+  } satisfies ContractDiagnosticDetails);
   const candidate = value as Record<string, unknown>;
   const versioned = !["proposalEnvelope", "proposalProvenance", "promotionL2", "apiSuccess", "apiError", "auditEvent"].includes(name) && !name.startsWith("artifact");
   if (versioned && candidate.schema_version !== SCHEMA_VERSION) {
-    throw new ContractValidationError("unsupported_schema_version", `unsupported schema version for ${name}`, { expected: SCHEMA_VERSION, received: candidate.schema_version });
+    throw new ContractValidationError("unsupported_schema_version", `unsupported schema version for ${name}`, {
+      kind: "contract", contract_name: name,
+      violations: Object.freeze([{
+        instance_path: "/schema_version", keyword: "const",
+        params: Object.freeze({ expected: SCHEMA_VERSION }),
+        message: "schema version is not supported",
+      }]),
+    } satisfies ContractDiagnosticDetails);
   }
   const validate = validators.get(name);
-  if (validate && !validate(value)) throw new ContractValidationError("validation_error", `invalid ${name} contract`, validate.errors);
+  if (validate && !validate(value)) throw new ContractValidationError("validation_error", `invalid ${name} contract`, normalizeContractValidationDetails(name, validate.errors));
   if (name === "proposalEnvelope") { validateProposalEnvelope(value); return; }
   if (name === "proposalCandidate" || name === "proposalProvenance" || name === "promotionL2" || name === "apiSuccess" || name === "apiError" || name === "auditEvent" || name.startsWith("artifact")) return;
   validateCanonicalRecord(candidate);

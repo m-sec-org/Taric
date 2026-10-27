@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "./identity.js";
 import { SCHEMA_VERSION } from "@taric/schemas";
-import { ContractValidationError } from "./validation.js";
+import { compatibilityDiagnosticDetails, ContractValidationError } from "./validation.js";
 import { AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION } from "./sql-schema.js";
 
 /** Bun 运行时没有 node:sqlite 内置模块：延迟到构造 node 驱动时才加载，
@@ -89,13 +89,15 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
         const hasMetadata = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").get());
         const hasRecords = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get());
         const schema = hasMetadata ? db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get() as { value?: string } | undefined : undefined;
-        if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible");
+        if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { schema_version: SCHEMA_VERSION }, ...(schema?.value ? { observed: { schema_version: schema.value } } : {}), failed_marker: "metadata.schema_version" }));
         const storageFormat = hasMetadata ? db.prepare("SELECT value FROM metadata WHERE key='storage_format'").get() as { value?: string } | undefined : undefined;
-        if (storageFormat && storageFormat.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible");
+        if (hasMetadata && storageFormat?.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { storage_format: AUTHORITY_SQL_SCHEMA_VERSION }, ...(storageFormat?.value ? { observed: { storage_format: storageFormat.value } } : {}), failed_marker: "metadata.storage_format" }));
         const proposals = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposals'").get();
         if (proposals) {
           const columns = new Set((db.prepare("PRAGMA table_info(proposals)").all() as Array<{ name: string }>).map((column) => column.name));
-          if (!["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"].every((field) => columns.has(field))) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible");
+          const required = ["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"];
+          const missing = required.filter((field) => !columns.has(field));
+          if (missing.length) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { proposal_identity: "v1" }, observed: { proposal_identity: "legacy" }, failed_marker: "proposals.identity", missing }));
         }
         db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
         db.exec("BEGIN IMMEDIATE");
@@ -236,10 +238,14 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
         if (prior.rows.length) {
           const metadata = prior.rows.some((row) => row.table_name === "metadata" && row.column_name === "value" && row.data_type === "text");
           const proposals = prior.rows.some((row) => row.table_name === "proposals" && row.column_name === "expected_version");
-          if (!metadata || !proposals) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority storage format is incompatible");
+          const missing = [
+            ...(metadata ? [] : ["metadata.value"]),
+            ...(proposals ? [] : ["proposals.expected_version"]),
+          ];
+          if (missing.length) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority storage format is incompatible", compatibilityDiagnosticDetails({ backend: "postgresql", expected: { storage_format: AUTHORITY_SQL_SCHEMA_VERSION, proposal_identity: "v1" }, failed_marker: "authority.layout", missing }));
           const version = (await client.query<{ value: string }>(`SELECT value FROM ${this.quotedSchema}.metadata WHERE key='schema_version'`)).rows[0]?.value;
           const format = (await client.query<{ value: string }>(`SELECT value FROM ${this.quotedSchema}.metadata WHERE key='storage_format'`)).rows[0]?.value;
-          if (version !== SCHEMA_VERSION || format !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority schema version is incompatible");
+          if (version !== SCHEMA_VERSION || format !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority schema version is incompatible", compatibilityDiagnosticDetails({ backend: "postgresql", expected: { schema_version: SCHEMA_VERSION, storage_format: AUTHORITY_SQL_SCHEMA_VERSION }, observed: { ...(version ? { schema_version: version } : {}), ...(format ? { storage_format: format } : {}) }, failed_marker: version !== SCHEMA_VERSION ? "metadata.schema_version" : "metadata.storage_format" }));
         }
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.quotedSchema}`);
         await client.query(`SET LOCAL search_path TO ${this.quotedSchema},pg_catalog`);
@@ -248,12 +254,20 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
         for (const [key, value] of AUTHORITY_SQL_INITIAL_METADATA) await client.query("INSERT INTO metadata(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING", [key, value]);
         await client.query("INSERT INTO metadata(key,value) VALUES('authority_id',$1) ON CONFLICT(key) DO NOTHING", [uuidv7()]);
       } else {
+        const prior = await client.query<{ table_name: string; column_name: string; data_type: string }>("SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema=$1", [this.schema]);
+        const metadata = prior.rows.some((row) => row.table_name === "metadata" && row.column_name === "value" && row.data_type === "text");
+        const proposals = prior.rows.some((row) => row.table_name === "proposals" && row.column_name === "expected_version");
+        const missing = [
+          ...(metadata ? [] : ["metadata.value"]),
+          ...(proposals ? [] : ["proposals.expected_version"]),
+        ];
+        if (missing.length) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority storage format is incompatible", compatibilityDiagnosticDetails({ backend: "postgresql", expected: { storage_format: AUTHORITY_SQL_SCHEMA_VERSION, proposal_identity: "v1" }, failed_marker: "authority.layout", missing }));
         const schema = (await client.query<{ value: string }>(`SELECT value FROM ${this.quotedSchema}.metadata WHERE key='schema_version'`)).rows[0]?.value;
         const format = (await client.query<{ value: string }>(`SELECT value FROM ${this.quotedSchema}.metadata WHERE key='storage_format'`)).rows[0]?.value;
-        if (schema !== SCHEMA_VERSION || format !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority schema version is incompatible");
+        if (schema !== SCHEMA_VERSION || format !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority schema version is incompatible", compatibilityDiagnosticDetails({ backend: "postgresql", expected: { schema_version: SCHEMA_VERSION, storage_format: AUTHORITY_SQL_SCHEMA_VERSION }, observed: { ...(schema ? { schema_version: schema } : {}), ...(format ? { storage_format: format } : {}) }, failed_marker: schema !== SCHEMA_VERSION ? "metadata.schema_version" : "metadata.storage_format" }));
       }
       this.identity = (await client.query<{ value: string }>(`SELECT value FROM ${this.quotedSchema}.metadata WHERE key='authority_id'`)).rows[0]?.value;
-      if (!this.identity || !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(this.identity)) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority identity is missing or incompatible");
+      if (!this.identity || !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(this.identity)) throw new ContractValidationError("unsupported_schema_version", "PostgreSQL authority identity is missing or incompatible", compatibilityDiagnosticDetails({ backend: "postgresql", expected: { authority_id: "uuidv7" }, ...(this.identity ? { observed: { authority_id: this.identity } } : {}), failed_marker: "metadata.authority_id" }));
     }, "write");
     this.initialized = true;
   }

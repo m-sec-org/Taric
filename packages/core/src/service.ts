@@ -7,7 +7,7 @@ import { uuidv7 } from "./identity.js";
 import { buildContextPack, ContextBudgetError, type ContextPack } from "./context.js";
 import { InvalidCursorError } from "./cursor-key.js";
 import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
-import { ContractValidationError, schemaValidator, UUID_V7_PATTERN, validateContract, validateProposalEnvelope } from "./validation.js";
+import { ContractValidationError, normalizeDiagnosticDetails, schemaValidator, UUID_V7_PATTERN, validateContract, validateProposalEnvelope, type DiagnosticDetails } from "./validation.js";
 import { API_CONTRACT_VERSION, coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
 import { createAccessDecisionObservation, createControlObservation, validateCoverageCellInput, type AccessDecisionObservationInput, type ControlObservationInput, type CoverageCellInput, coverageGateSnapshot } from "./coverage.js";
 import { ArtifactContentStore, ARTIFACT_CHUNK_BYTES, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
@@ -64,6 +64,7 @@ export interface ApiError {
     code: ApiErrorCode;
     message: string;
     follow_up?: string;
+    details?: DiagnosticDetails;
 }
 export interface ApiEnvelope<T> {
     ok: true;
@@ -1705,7 +1706,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                     operationRequestValidators.set(requestContract, validate);
                 }
                 if (!validate || !validate(request))
-                    return error("validation_error", `invalid ${operation} request`);
+                    return error("validation_error", `invalid ${operation} request`, undefined, normalizeDiagnosticDetails(validate?.errors, requestContract));
             }
             const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
             aliases["host.state"] = "hostState";
@@ -1874,7 +1875,7 @@ async function safe<T>(operation: () => ApiResponse<T> | Promise<ApiResponse<T>>
     }
     catch (cause) {
         if (cause instanceof ContractValidationError) {
-            return error(cause.code, cause.message, typeof cause.details === "string" ? cause.details : undefined);
+            return error(cause.code, cause.message, undefined, normalizeDiagnosticDetails(cause.details));
         }
         if (cause instanceof InvalidCursorError || cause instanceof ContextBudgetError)
             return error(cause.code, cause.message);
@@ -1883,4 +1884,6 @@ async function safe<T>(operation: () => ApiResponse<T> | Promise<ApiResponse<T>>
         return error("internal_error", "internal error");
     }
 }
-function error(code: ApiErrorCode, message: string, follow_up?: string): ErrorEnvelope { return { ok: false, error: { code, message, follow_up } }; }
+function error(code: ApiErrorCode, message: string, follow_up?: string, details?: DiagnosticDetails): ErrorEnvelope {
+    return { ok: false, error: { code, message, follow_up, ...(details ? { details } : {}) } };
+}

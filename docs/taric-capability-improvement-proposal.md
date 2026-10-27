@@ -1,11 +1,11 @@
 # 先补齐可验证的接入闭环，再按测量结果扩展 Taric 能力
 
-- 更新日期：2026-10-26
+- 更新日期：2026-10-27
 - 状态：提案已实施并归档；正文中的建议、优先级与实施顺序是历史设计记录，不是当前待办。当前合同以接入/API/运维文档为准。
-- 评审基线：本文保留 `c3db857e937c04293eb08e258ca98c8e24a2b897` 的历史设计讨论。当前 `1.0.0` 本地验证摘要见下表；历史 release report 不代表本轮源码验证。
+- 评审基线：本文保留 `c3db857e937c04293eb08e258ca98c8e24a2b897` 的历史设计讨论。当前 `1.0.1` 本地验证摘要见下表；历史 release report 不代表本轮源码验证。
 - 讨论入口：以本文的建议编号开展评审；来源为 [BreachWeave 推演](taric-gap-analysis-breachweave-integration.md)与 [CyberStrike 推演](taric-gap-analysis-cyberstrike-integration.md)。
 
-## 当前实现与验证状态（2026-10-26）
+## 当前实现与验证状态（2026-10-27）
 
 [既有任务](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/tasks.md)已完成。以下状态对照当前源码、测试、兼容矩阵和已保存验证资产；本次文档更新没有重新采样性能或认证第三方宿主。
 
@@ -20,7 +20,7 @@
 | I-07 宿主状态 | `host.state` 有界聚合与退避轮询已实现；Core in-process 与 authenticated adapter RPC 提供 best-effort bounded subscription，并以 query/read_seq 恢复；[轮询测量](benchmarks/host-state-poll-v1.json)满足该 fixture 的 1000ms 预算，MCP resources subscription 仍未支持。 |
 | I-08 导入边界 | 公开 `snapshot.import` 在 dispatch/Core/CLI 明确拒绝，内部隔离 restore 不构成宿主迁移 API；旧材料通过正常 proposal/evidence 治理接入。 |
 
-本轮 `1.0.0` 验证在 2026-10-26 通过 build、typecheck、兼容矩阵校验和启用 PostgreSQL 的 workspace `npm test`：Core 351/351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11，均通过。五个 `1.0.0` tarball 的独立 consumer 验证通过。当前源码 PostgreSQL 17.11 runtime 12/12、readiness 和独立逻辑备份/恢复通过；同机双容器 lease/reclaim 与容器 bind-mounted spool 的独立检查也通过。Pi 1.4.0 的真实 RPC 进程已加载 Taric extension，未调用模型/工具；完整第三方宿主流程、跨物理机网络恢复未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。专项报告位于本机 `/tmp`。质量统计能力仍因缺少人工标注样本与人类基线而 unsupported/pending；MCP Tasks 和 MCP resources subscription 也未实现。
+本轮 `1.0.1` 验证在 2026-10-27 通过 build、typecheck、兼容矩阵校验和启用 PostgreSQL 的 workspace `npm test`：Core 356/356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11，均通过且无 PostgreSQL 跳过。当前源码 PostgreSQL 17.11 runtime 12/12、readiness、独立备份恢复、同机双容器 lease/reclaim 和容器 bind-mounted spool 检查均通过。报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。Pi 1.4.0 的真实 RPC 进程已加载 Taric extension，未调用模型/工具；完整第三方宿主流程、跨物理机网络恢复未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。质量统计能力仍因缺少人工标注样本与人类基线而 unsupported/pending；MCP Tasks 和 MCP resources subscription 也未实现。
 
 ## Abstract / 摘要
 

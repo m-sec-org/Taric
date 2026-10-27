@@ -15,10 +15,10 @@ test("published compatibility matrix covers current contracts, package closure, 
   assert.equal(matrix.schema_version, SCHEMA_VERSION);
   assert.equal(matrix.api_contract_version, API_CONTRACT_VERSION);
   assert.equal(matrix.storage_contract_version, AUTHORITY_STORAGE_CONTRACT_VERSION);
-  assert.equal(schemaMetadata().core_version, "1.0.0");
+  assert.equal(schemaMetadata().core_version, "1.0.1");
   assert.deepEqual(matrix.operations.map(({ operation }) => operation), operationContracts.map(({ operation }) => operation));
   assert.ok(matrix.operations.every(({ request_schema, response_schema, errors }) => request_schema && response_schema && Array.isArray(errors)));
-  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "1.0.0");
+  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "1.0.1");
   assert.ok(matrix.drivers.some(({ name, runtime, exports }) => name === "@taric/driver-bun-sqlite" && runtime === "bun" && exports.includes(".")));
   assert.deepEqual(Object.keys(matrix.certified_hosts), Object.keys(TARIC_COMPATIBILITY_MANIFEST.hosts));
 });

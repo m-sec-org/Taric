@@ -18,7 +18,7 @@ These integration paths are independently selected and verified; their existence
 
 ## Version and package pairing
 
-This release exposes Taric/workspace packages `1.0.0`, API contract `1.2.0`, schema `1.0.0`, and authority storage contract `authority-storage/3`. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions. On 2026-10-26, build, typecheck, matrix validation and the PostgreSQL-configured workspace suites passed (Core 351/351 with no skipped live tests). The five local `1.0.0` tarballs also passed the isolated consumer check.
+This release exposes runtime components `1.0.1` (`@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, and `@taric/mcp`), while the private root workspace and Hermes plugin remain `1.0.0`; API contract `1.2.0`, schema `1.0.0`, and authority storage contract `authority-storage/3` are unchanged. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions. On 2026-10-27, build, typecheck, matrix validation and the PostgreSQL-configured workspace suites passed (Core 356/356 with no skipped live tests, CLI 37/37, Bun 11/11, MCP 12/12, and Schemas 10/10). Current runtime, backup/restore, multi-host and spool reports were generated for the `1.0.1` build.
 
 The Bun embedding profile uses versioned package artifacts; public npm publication is not required. Build the artifacts in dependency order:
 

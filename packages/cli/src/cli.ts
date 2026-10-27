@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, ARTIFACT_DEPLOYMENT_PROFILE, AuthorityConfigurationError, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type SharedAuthorityConfiguration } from "@taric/core";
+import { API_CONTRACT_VERSION, ARTIFACT_DEPLOYMENT_PROFILE, AuthorityConfigurationError, ContractValidationError, normalizeDiagnosticDetails, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type RuntimeConfigProvenance, type RuntimeConfigurationPrecedence, type SharedAuthorityConfiguration } from "@taric/core";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -33,19 +33,21 @@ export interface CliStartupResolution {
   dbPath: string;
   contentRoot: string;
   diagnostics: AuthorityStartupDiagnostics;
+  runtimeConfigProvenance: RuntimeConfigProvenance;
+  precedence: RuntimeConfigurationPrecedence;
 }
 
 /** Validate authority selection before opening any SQLite database. */
-export function resolveCliStartup(config: CliConfig, env: NodeJS.ProcessEnv = process.env, home = homedir()): CliStartupResolution {
-  const resolution = resolveRuntimeAuthority({ config, env, home });
-  return { dbPath: resolution.dbPath, contentRoot: resolution.contentRoot, diagnostics: resolution.diagnostics };
+export function resolveCliStartup(config: CliConfig, env: NodeJS.ProcessEnv = process.env, home = homedir(), runtimeConfigProvenance?: RuntimeConfigProvenance): CliStartupResolution {
+  const resolution = resolveRuntimeAuthority({ config, env, home, runtimeConfigProvenance });
+  return { dbPath: resolution.dbPath, contentRoot: resolution.contentRoot, diagnostics: resolution.diagnostics, runtimeConfigProvenance: resolution.runtimeConfigProvenance, precedence: resolution.precedence };
 }
 
 /**
  * Discover configuration without creating files or reading arbitrary project
  * state. Explicit TARIC_CONFIG wins, then a workspace-local or user config.
  */
-export function discoverCliConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd(), home = homedir()): { config: CliConfig; path?: string } {
+export function discoverCliConfig(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd(), home = homedir()): ReturnType<typeof discoverRuntimeConfig> {
   return discoverRuntimeConfig(env, cwd, home);
 }
 
@@ -138,10 +140,16 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     return await runProxyMain() as CliExitCode;
   }
   if (argv[0] === "gateway") {
-    const configFlag = argv.indexOf("--config");
-    const configPath = configFlag >= 0 ? argv[configFlag + 1] : undefined;
+    const { GatewayArgumentError, parseGatewayArguments } = await import("./gateway-args.js");
+    let gatewayArgs: { configPath: string; runtimeConfigPath?: string };
+    try { gatewayArgs = parseGatewayArguments(argv.slice(1)); }
+    catch (cause) {
+      const message = cause instanceof GatewayArgumentError ? cause.message : "invalid gateway arguments";
+      process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "validation_error", message } })}\n`);
+      return 2;
+    }
     const { runGatewayMain } = await import("./gateway.js");
-    return await runGatewayMain(configPath) as CliExitCode;
+    return await runGatewayMain(gatewayArgs.configPath, process.env, gatewayArgs.runtimeConfigPath) as CliExitCode;
   }
   // `taric review --proposal …` exports the admission-bound fixed pack or
   // forwards an external result; `taric review '<json>'` remains review.submit.
@@ -164,7 +172,7 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     process.stdout.write(`${API_CONTRACT_VERSION}\n`);
     return 0;
   }
-  let discovered: { config: CliConfig; path?: string };
+  let discovered: ReturnType<typeof discoverCliConfig>;
   try { discovered = discoverCliConfig(); }
   catch (cause) {
     const message = cause instanceof AuthorityConfigurationError ? cause.message : "invalid Taric configuration";
@@ -173,7 +181,7 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
   }
   const config = discovered.config;
   let startup: CliStartupResolution;
-  try { startup = resolveCliStartup(config); }
+  try { startup = resolveCliStartup(config, process.env, homedir(), discovered.provenance); }
   catch (cause) {
     const message = cause instanceof AuthorityConfigurationError ? cause.message : "invalid authority configuration";
     const code = cause instanceof AuthorityConfigurationError ? cause.code : "validation_error";
@@ -186,12 +194,13 @@ export async function runCliMain(argv: string[] = process.argv.slice(2)): Promis
     return 1;
   }
   let service: CoreService;
-  try { service = await openRuntimeService({ config }); }
+  try { service = await openRuntimeService({ config, runtimeConfigProvenance: discovered.provenance }); }
   catch (cause) {
     const error = cause instanceof RuntimeStartupError
       ? { code: cause.code, message: cause.diagnostics.message, follow_up: cause.diagnostics.follow_up }
       : { code: "configuration_invalid", message: "invalid authority configuration" };
-    process.stderr.write(`${JSON.stringify({ ok: false, error })}\n`);
+    const details = cause instanceof ContractValidationError ? normalizeDiagnosticDetails(cause.details) : undefined;
+    process.stderr.write(`${JSON.stringify({ ok: false, error: { ...error, ...(details ? { details } : {}) } })}\n`);
     return 1;
   }
   const role = (process.env.TARIC_PRINCIPAL_ROLE ?? config.principal_role ?? "operator") as "operator" | "model" | "host" | "reviewer" | "writer";

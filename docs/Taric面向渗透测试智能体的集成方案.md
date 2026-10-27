@@ -17,7 +17,7 @@
 13. [端到端示例（浓缩时序）](#13-端到端示例浓缩时序)
 14. [BreachWeave 集成案例（真实宿主映射）](#14-breachweave-集成案例真实宿主映射)
 
-> **当前状态（2026-10-26）**：本方案描述 Taric 能力和宿主验收边界；其中 §10 的推演、§11 的五阶段路线和 §14 的 BreachWeave 文件/版本映射，不是当前 Taric 的未完成实现清单。当前 `1.0.0` build、typecheck、compatibility matrix、PostgreSQL 配置下的 `npm test` 与 5 个 tarball clean consumer 通过：Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 均无失败。PostgreSQL 17.11 当前源码 12 个 runtime scenario 和独立逻辑备份/恢复通过；两个 host 容器同机 lease/reclaim、两个容器间 spool mount 写入与读回也通过。报告位于验证机 `/tmp`。Pi 1.4.0 真实 RPC host 已加载 Taric extension（无模型/工具调用）；真实 BreachWeave 和完整第三方宿主工作流、跨物理机网络恢复仍未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。质量统计能力仍因缺少人工标注样本/人类基线而 unsupported/pending。当前合同参见[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[代码设计](taric-design.md)。
+> **当前状态（2026-10-27）**：本方案描述 Taric 能力和宿主验收边界；其中 §10 的推演、§11 的五阶段路线和 §14 的 BreachWeave 文件/版本映射，不是当前 Taric 的未完成实现清单。当前 runtime components `1.0.1` 的 build、typecheck、compatibility matrix、PostgreSQL 配置下的 `npm test` 通过：Core 356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 均无失败且无 PostgreSQL 跳过。PostgreSQL 17.11 当前源码 12 个 runtime scenario、备份恢复、两个 host 容器同机 lease/reclaim、两个容器间 spool mount 写入与读回均通过；报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。Pi 1.4.0 真实 RPC host 已加载 Taric extension（无模型/工具调用）；真实 BreachWeave 和完整第三方宿主工作流、跨物理机网络恢复仍未验收。可选 TLS TCP 与 HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署、凭据轮换/撤销运维和跨机故障恢复尚未验收。质量统计能力仍因缺少人工标注样本/人类基线而 unsupported/pending。当前合同参见[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[代码设计](taric-design.md)。
 
 ## 1. 方案概述
 
@@ -40,7 +40,7 @@
 - **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理凭据生命周期。agent 调度、工具调用、动作授权、HITL 交互全部由宿主系统负责。
 - **零模型直写**：三类智能体（都是 LLM agent）对权威记忆只有"提案权"；权威写入、任务认领、工具执行、Artifact 落盘由宿主运行时以 host/operator 身份完成。观察者的纠偏同样是"提案 + 建议"，由宿主强制执行。
 
-多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)仍是 pre-1.0.0 历史证据，不能激活当前 `1.0.0` profile。2026-10-26 的独立 current-source live report 在本机 `/tmp/taric-postgres-runtime-20261026.json`，12 个 runtime scenario 和独立逻辑备份/恢复均通过；当前实现、schema、policy 摘要匹配的证据与部署 schema/租约健康检查仍是启用条件，默认 PostgreSQL runtime 保持关闭。两个独立 Node 容器在同一工作站通过 lease 竞争、owner 容器终止、reclaim 与旧 generation fencing 检查；真实跨物理机协作、网络中断恢复与容量仍需按 §11 验收。
+多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)仍是 pre-1.0.0 历史证据，不能激活当前 `1.0.1` profile。2026-10-27 的独立 current-source live report 在本机 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`，12 个 runtime scenario 和独立备份/恢复均通过；当前实现、schema、policy 摘要匹配的证据与部署 schema/租约健康检查仍是启用条件，默认 PostgreSQL runtime 保持关闭。两个独立 Node 容器在同一工作站通过 lease 竞争、owner 容器终止、reclaim 与旧 generation fencing 检查；真实跨物理机协作、网络中断恢复与容量仍需按 §11 验收。
 
 ## 2. 总体架构
 
@@ -771,7 +771,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 
 | 项 | BreachWeave 现状（源码核验） | 对 Taric 集成的含义 |
 |---|---|---|
-| 运行时（历史基线） | Bun monorepo；当时由 `bun run web` / `bun build --compile` 产出容器内 Linux 二进制 | 当时 Taric Core 依赖 Node SQLite，Bun 进程内嵌不可行。当前已提供独立 `@taric/driver-bun-sqlite`；1.0.0 tarball consumer 通过，但该宿主没有实际 Bun 内嵌验收。 |
+| 运行时（历史基线） | Bun monorepo；当时由 `bun run web` / `bun build --compile` 产出容器内 Linux 二进制 | 当时 Taric Core 依赖 Node SQLite，Bun 进程内嵌不可行。当前已提供 `@taric/driver-bun-sqlite@1.0.1`；当前驱动测试通过，但该宿主没有实际 Bun 内嵌验收。 |
 | 角色架构 | `Manager/Planner/Solver/Observer`；Solver 是 Docker 容器内的 `pi-coding-agent` 会话 | 规划者/执行者/观察者三类 LLM 天然对应 §1.1 |
 | Solver 通信 | 宿主机 ↔ 容器 stdin/stdout JSONL RPC（`runtime.ts:783-881`）；容器内还有一条 `host_bridge_request` 通道回宿主机（`host-bridge-client.ts:20-48`） | stdio 已被宿主自有协议占用，**MCP stdio 不能复用该流**；容器内需要独立进程 |
 | 共享记忆 | 项目级 `Memory`（`fact/evidence/failure/note/hint`）与 `Idea`（`pending/testing/verified/failed/skipped`），一条一 JSON 文件 + 目录锁 | 结构上接近 Taric 的 Observation/Evidence/Claim/TestHypothesis，但**无准入、无信任分级、无证据硬门** |
@@ -970,7 +970,7 @@ operator   audit.verify / snapshot.export / 导出原文
 | 12 | `evaluateCoverageGate` 是库函数而非 dispatch 操作（`coverage.ts:167`，`index.ts` 导出） | bridge 读取 cells 后本地计算，或后续单独扩展操作面 |
 | 13 | 现有 `computeChallengeCompleted` 与 `scanned` 是唯一完成判据 | 必须整体替换；新旧两套完成语义并存会产生“报告说完成、矩阵说未测”的矛盾 |
 
-当前 Taric 状态校正：Bun SQLite driver 与 exports 已交付，独立 `1.0.0` tarball consumer 验证通过；`work.query` 与 `coverage.gate/query` 已进入 dispatch 并有 keyset/projection/同快照合同；`work.transition` 是公开操作；`artifact.ingest_file` 可在显式授权的绑定会话根内单 descriptor 读取并校验字节；review pack 固定 admission 输入，review CLI 不调用 provider。MCP 模型接口仍只有六个工具，不暴露 host-only 调度、审核或 Artifact 操作。以上是 Taric 本地能力和测试边界，不是 BreachWeave 当前版本的适配结论。
+当前 Taric 状态校正：Bun SQLite driver 与 exports 已交付，`1.0.1` 当前构建和驱动测试通过；`work.query` 与 `coverage.gate/query` 已进入 dispatch 并有 keyset/projection/同快照合同；`work.transition` 是公开操作；`artifact.ingest_file` 可在显式授权的绑定会话根内单 descriptor 读取并校验字节；review pack 固定 admission 输入，review CLI 不调用 provider。MCP 模型接口仍只有六个工具，不暴露 host-only 调度、审核或 Artifact 操作。以上是 Taric 本地能力和测试边界，不是 BreachWeave 当前版本的适配结论。
 
 另外三条不属于 Taric 缺陷、但集成时必须由 BreachWeave 承担的责任：
 

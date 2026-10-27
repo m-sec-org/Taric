@@ -1,11 +1,13 @@
 # Taric 宿主同步适配：终审评估报告
 
-> **版本**：v3 历史评审（2026-10-24；状态校正于 2026-10-26）
+> **当前版本补充（2026-10-27）**：`@taric/cli`、`@taric/core`、`@taric/driver-bun-sqlite`、`@taric/mcp` 和 `@taric/schemas` 已更新至 `1.0.1`。当前 PostgreSQL live workspace 测试为 CLI 37/37、Core 356/356、Bun 11/11、MCP 12/12、Schemas 10/10，另有 Hermes 5/5；PostgreSQL runtime 12/12、备份恢复、多主机租约和容器 spool 检查均通过。下文 2026-10-26 的最终判定保留为历史记录，当前证据以本补充和状态校正段为准。
+
+> **版本**：v3 历史评审（2026-10-24；状态校正于 2026-10-27）
 > **审查对象**：[Taric 适配设计](taric-host-sync-adaptation-design.md)、BreachWeave 宿主工作区输入文档《Taric外置记忆集成差距分析与建议方案.md》（v4，未随 Taric 仓库分发）及本工作区实现。
 > **代码基线**：HEAD `73a6dfd` 加当时未提交工作区改动；下文原评审结论不代表当前代码或正式发布物。
 > **范围**：Taric 侧设计与实现、所记录的容器验证和跨仓契约风险。未执行 BreachWeave 真实部署验收，不能据此宣称跨仓集成通过。
 
-> **状态校正（2026-10-26）**：本报告第 2–7 节的缺陷与门槛是修复前审查记录，不能作为当前未完成项。分页、API 合同版本、订阅租约唤醒、单次 descriptor 读取、review pack 固定绑定和各变更的差距报告已有实现与回归测试，见 [host-sync 历史验收报告](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md)。当前 `1.0.0` build、typecheck、矩阵校验和 PostgreSQL 配置下的 workspace 全量测试通过：Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11，均无失败或跳过。PostgreSQL 当前源码 runtime 12/12、独立逻辑备份恢复、两个 host 容器经共享 bridge network 的 lease/reclaim、容器 bind-mounted spool 检查通过；报告保存在本机 `/tmp`。另隔离安装并启动了真实 Pi 1.4.0 RPC 进程，Taric 扩展通过其 `ExtensionAPI` 注册成功，但没有调用模型/工具。真实 BreachWeave、完整第三方宿主工作流、跨物理机/网络恢复仍未验收。可选 TLS TCP/HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署及跨机故障恢复仍未验收。
+> **状态校正（2026-10-27）**：本报告第 2–7 节的缺陷与门槛是修复前审查记录，不能作为当前未完成项。分页、API 合同版本、订阅租约唤醒、单次 descriptor 读取、review pack 固定绑定和各变更的差距报告已有实现与回归测试，见 [host-sync 历史验收报告](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md)。当前 `1.0.1` build、typecheck、矩阵校验和 PostgreSQL 配置下的 workspace 全量测试通过：Core 356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11，均无失败或跳过。PostgreSQL 当前源码 runtime 12/12、独立备份恢复、两个 host 容器经共享 bridge network 的 lease/reclaim、容器 bind-mounted spool 检查通过；报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。另隔离安装并启动了真实 Pi 1.4.0 RPC 进程，Taric 扩展通过其 `ExtensionAPI` 注册成功，但没有调用模型/工具。真实 BreachWeave、完整第三方宿主工作流、跨物理机/网络恢复仍未验收。可选 TLS TCP/HTTPS gateway 已实现，并有本机 loopback 端到端测试；生产网络部署及跨机故障恢复仍未验收。
 
 ---
 
@@ -26,20 +28,20 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 ## 2. 终审结论
 
-截至 2026-10-26，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过合同/回归测试；当前 `1.0.0` build、typecheck、矩阵、workspace 测试和隔离 tarball consumer 验证通过。PostgreSQL 当前源码 live/runtime 和同机双容器 lease/reclaim 已通过；跨物理机部署与网络中断恢复仍未验证。容器 spool bind mount 已在两个顺序运行的 Node 容器间通过写入、替换和原字节读取检查；这不等于完整第三方宿主集成认证。Pi 1.4.0 真实 RPC host 已加载 Taric extension，未调用模型/工具。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
+截至 2026-10-27，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过合同/回归测试；当前 `1.0.1` build、typecheck、矩阵、workspace 测试和当前 runtime/backup/restore 验证通过。PostgreSQL 当前源码 live/runtime 和同机双容器 lease/reclaim 已通过；跨物理机部署与网络中断恢复仍未验证。容器 spool bind mount 已在两个顺序运行的 Node 容器间通过写入、替换和原字节读取检查；这不等于完整第三方宿主集成认证。Pi 1.4.0 真实 RPC host 已加载 Taric extension，未调用模型/工具。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
 
-就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.0` tarball consumer 验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。PostgreSQL 当前源码 runtime 与同机双 host 容器 lease 已验证，但不代表 BreachWeave 或跨物理机部署认证。包仍为 private、未发布至 npm registry。Taric 不承担宿主的模型和执行职责。
+就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.1` 当前构建验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。PostgreSQL 当前源码 runtime 与同机双 host 容器 lease 已验证，但不代表 BreachWeave 或跨物理机部署认证。包仍为 private、未发布至 npm registry。Taric 不承担宿主的模型和执行职责。
 
 本报告不以主观百分比衡量完成度；表中的实现状态、当前工作区验证、部署 profile 认证和真实宿主集成是不同结论，不互相替代。
 
 ### 2.1 审查范围与证据
 
-设计共列出 11 项能力：T-A/B/C/D/E/H/F/G 与 D1/D2/D4。本节保留 2026-10-24 原审核的范围；当前工作区验证摘要见本节表格，profile 认证另见下文。历史报告中的测试计数和容器结果不属于 1.0.0 运行结果。
+设计共列出 11 项能力：T-A/B/C/D/E/H/F/G 与 D1/D2/D4。本节保留 2026-10-24 原审核的范围；当前工作区验证摘要见本节表格，profile 认证另见下文。历史报告中的测试计数和容器结果不属于 1.0.1 运行结果。
 
 | 验证面 | 原审核记录 | 证据强度与边界 |
 |---|---|---|
-| `1.0.0` 当前工作区：build/typecheck/矩阵/全量测试 | 通过；PostgreSQL 配置下 Core 351，Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 全通过 | 本地实现与 PostgreSQL live 证据；不等同跨机网络恢复或第三方宿主认证 |
-| 独立 `1.0.0` clean consumer | 通过；从 tarball 安装并验证包消费 | 验证本地 tarball 分发；不表示 npm registry 已发布 |
+| `1.0.1` 当前工作区：build/typecheck/矩阵/全量测试 | 通过；PostgreSQL 配置下 Core 356，Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 全通过 | 本地实现与 PostgreSQL live 证据；不等同跨机网络恢复或第三方宿主认证 |
+| 当前 `1.0.1` 组件构建与运行验证 | 通过；组件包仍为 private，未执行 registry 发布 | 验证本地组件一致性；不表示 npm registry 已发布 |
 | 文档链接 | 当前检查通过 | 只验证链接目标存在，不判断外部系统当前状态 |
 | PostgreSQL live / 双进程 | 12 个当前源码 runtime scenario、独立逻辑 restore 和两个 Node host 容器 lease/reclaim 均通过 | 两个容器只在一台工作站；跨机器、网络中断恢复仍未验证 |
 | 第三方宿主、远程 gateway | Pi 1.4.0 真实 RPC 启动并加载 Taric 扩展；无模型/工具调用。TLS TCP/HTTPS gateway 有本机 loopback 端到端测试 | Pi 完整工作流、DeepSeek/Hermes、真实 BreachWeave 仍需宿主验收；gateway 的生产网络部署、凭据运维与跨机故障恢复仍待验证 |
@@ -51,7 +53,7 @@ Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的�
 
 | Taric 项 | 结论 | 对 BreachWeave R 路线的影响 |
 |---|---|---|
-| T-A 驱动可移植性与分发 | 驱动契约、exports、Bun driver 已实现；`1.0.0` clean consumer 通过 tarball 安装验证。npm registry 发布仍未完成 | Bun 本地嵌入具备本地验证资产；不等同 registry 发布，也未验证 BreachWeave 消费与真实运行 |
+| T-A 驱动可移植性与分发 | 驱动契约、exports、Bun driver 已实现；`1.0.1` 构建与 11 项驱动测试通过。npm registry 发布仍未完成 | Bun 本地嵌入具备本地验证资产；不等同 registry 发布，也未验证 BreachWeave 消费与真实运行 |
 | T-B `resource_refs` / `work.query` | 字段、dispatch、model projection 和 keyset 分页已实现并有回归测试；资源引用仍是提示，不是资源锁/调度器 | 宿主负责 worker 生命周期、全局资源互斥、限速和动作执行 |
 | T-C `coverage.gate` / `coverage.query` | dispatch、角色、投影已实现；gate 与 visibility 使用同一维护读取快照及水位 | 返回状态与关闭条件，不替宿主关闭 Engagement 或授权动作 |
 | T-D 宿主订阅信号 | Core 与 authenticated adapter RPC 提供有界 best-effort 通知、重鉴权、阈值/时间驱动租约提示、背压和轮询恢复 | 信号不是事实流或调度命令；MCP resources subscription 仍未支持，生产发现延迟无 SLA |
@@ -83,7 +85,7 @@ BreachWeave v4 的 A1/A2（结构化 Scope/ROE 与 WSTG/ASM 覆盖字典）是�
 
 ### 历史发布缺口：分发面与 API 合同版本未兑现（合同已演进，registry 发布仍未完成）
 
-API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 Bun driver 已提供所需 exports。`1.0.0` tarball 已在独立 consumer 安装和运行通过。包清单仍保留 private，因此这不表示 npm registry 发布，也不表示 BreachWeave 的真实进程内集成已验收。
+API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 Bun driver 已提供所需 exports。当前 `1.0.1` 组件构建和运行测试通过。包清单仍保留 private，因此这不表示 npm registry 发布，也不表示 BreachWeave 的真实进程内集成已验收。
 
 仍需区分本地 tarball consumer 与 registry 发布，也需区分通用包消费验证与第三方宿主认证。
 
@@ -129,7 +131,7 @@ API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 B
 
 以下是可选扩展或特定宿主的附加门槛，而不是独立插件基线门槛：
 
-1. **BreachWeave Bun 进程内嵌入 profile**：本地 `1.0.0` tarball consumer 已通过；BreachWeave 自身的包消费、principal 映射、调度和重启仍需真实宿主验收。
+1. **BreachWeave Bun 进程内嵌入 profile**：Taric `1.0.1` Bun driver 构建与测试已通过；BreachWeave 自身的包消费、principal 映射、调度和重启仍需真实宿主验收。
 2. **T-E opaque spool profile**：Core 文件摄取合同已有测试；容器挂载、权限和重启需要宿主环境验收。当前 Node/Bun 条件 unlink 不可用时保留源文件；也可由宿主外部管理 Artifact。
 3. **T-G review profile**：确定性 pack/export/submit 已实现并测试；reviewer 模型、人审、verdict 和 SLA 仍由宿主/operator 负责。
 

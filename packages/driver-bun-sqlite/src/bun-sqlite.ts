@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { SCHEMA_VERSION } from "@taric/schemas";
-import { ContractValidationError, AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION, type AuthoritySqlDriver, type SqlMetrics, type SqlMetricsSnapshot, type SqlRunResult, type SqlTransactionMode } from "@taric/core";
+import { compatibilityDiagnosticDetails, ContractValidationError, AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION, type AuthoritySqlDriver, type SqlMetrics, type SqlMetricsSnapshot, type SqlRunResult, type SqlTransactionMode } from "@taric/core";
 
 function statementCount(sql: string): number {
   return Math.max(1, sql.split(";").map((part) => part.trim()).filter(Boolean).length);
@@ -54,13 +54,15 @@ export class BunSqliteAuthorityDriver implements AuthoritySqlDriver {
       const hasMetadata = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").get());
       const hasRecords = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='records'").get());
       const schema = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get() as { value?: string } | undefined : undefined;
-      if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible");
+      if ((hasMetadata || hasRecords) && schema?.value !== SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority schema version is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { schema_version: SCHEMA_VERSION }, ...(schema?.value ? { observed: { schema_version: schema.value } } : {}), failed_marker: "metadata.schema_version" }));
       const storageFormat = hasMetadata ? this.db.prepare("SELECT value FROM metadata WHERE key='storage_format'").get() as { value?: string } | undefined : undefined;
-      if (storageFormat && storageFormat.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible");
+      if (hasMetadata && storageFormat?.value !== AUTHORITY_SQL_SCHEMA_VERSION) throw new ContractValidationError("unsupported_schema_version", "authority storage format is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { storage_format: AUTHORITY_SQL_SCHEMA_VERSION }, ...(storageFormat?.value ? { observed: { storage_format: storageFormat.value } } : {}), failed_marker: "metadata.storage_format" }));
       const proposals = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='proposals'").get();
       if (proposals) {
         const columns = new Set((this.db.prepare("PRAGMA table_info(proposals)").all() as Array<{ name: string }>).map((column) => column.name));
-        if (!["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"].every((field) => columns.has(field))) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible");
+        const required = ["expected_version", "target_id", "client_request_id", "canonical_id", "canonical_version"];
+        const missing = required.filter((field) => !columns.has(field));
+        if (missing.length) throw new ContractValidationError("unsupported_schema_version", "authority proposal identity format is incompatible", compatibilityDiagnosticDetails({ backend: "sqlite", expected: { proposal_identity: "v1" }, observed: { proposal_identity: "legacy" }, failed_marker: "proposals.identity", missing }));
       }
       this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
       this.db.exec("BEGIN IMMEDIATE");

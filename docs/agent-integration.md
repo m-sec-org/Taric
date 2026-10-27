@@ -2,6 +2,10 @@
 
 Taric adds durable Engagement memory, governed candidates/Findings, execution recovery metadata and optional opaque Artifact storage. The host provides model calls, worker scheduling, target tools, identity, approval, credentials and content policy. Taric does not execute a target action or grant authorization.
 
+### Machine-readable diagnostics
+
+Every host transport preserves the Core `{ok:false,error}` envelope. Validation errors can carry bounded `error.details` with `kind: "contract"`, `contract_name`, and up to 16 safe `violations` (`instance_path`, `keyword`, optional schema `params` with at most 8 entries, and a bounded `message`). Authority startup/storage failures can carry `kind: "compatibility"` with backend and expected/observed schema markers. Hosts should branch on `error.code` first and use details for display or remediation; they must not expect submitted values, secrets, SQL, bearer tokens, absolute database paths, or arbitrary validator output. Taric still fails closed on malformed contracts and incompatible authorities, and host/operator code remains responsible for credentials, scheduling, target execution, redaction, and retention.
+
 ## Supported Profile
 
 | Surface | Implemented behavior | Deployment boundary |
@@ -24,7 +28,7 @@ Taric adds durable Engagement memory, governed candidates/Findings, execution re
 | Quality (`quality.full_statistical_evaluation`) | Statistical algorithms implemented | Human annotation/baseline provenance is pending; capability remains unsupported and disabled until current pinned release evidence is complete. |
 | Public snapshot import/migration | `snapshot.import` is deferred; no public migration operation | Backend restore is an operator recovery path, not a host migration API. |
 
-Host rows pin package/distribution versions and contracts tested by Taric. On 2026-10-26, Pi/DeepSeek adapter and gateway contract suites passed, Hermes plugin tests passed (5), and the Bun SQLite driver suite passed (11). A separate smoke installed Pi 1.4.0 outside the workspace, started its actual RPC process, and loaded the Taric extension through Pi's `ExtensionAPI`; it registered `session_start`/`context` callbacks and the proposal tool. The smoke did not call a model or execute a tool. DeepSeek Harness and Hermes host runtimes were not installed, and a complete Pi workflow or host health is not certified. `adapter.status` reports instance registration and runtime health as `not_observed` because it cannot inspect another process.
+Host rows pin package/distribution versions and contracts tested by Taric. On 2026-10-27, the `1.0.1` CLI/Core/Bun SQLite/MCP/Schemas component suites passed (CLI 37, Core 356 with no PostgreSQL skips, Bun 11, MCP 12, Schemas 10), Hermes plugin tests passed (5), and Pi/DeepSeek adapter and gateway contract suites passed. A separate smoke installed Pi 1.4.0 outside the workspace, started its actual RPC process, and loaded the Taric extension through Pi's `ExtensionAPI`; it registered `session_start`/`context` callbacks and the proposal tool. The smoke did not call a model or execute a tool. DeepSeek Harness and Hermes host runtimes were not installed, and a complete Pi workflow or host health is not certified. `adapter.status` reports instance registration and runtime health as `not_observed` because it cannot inspect another process.
 
 ## Adoption paths and host contract
 
@@ -126,7 +130,11 @@ The gateway config may enable the Unix socket, TLS TCP, HTTPS, or more than one 
 }
 ```
 
-Configure `TARIC_CONFIG` and, for PostgreSQL-backed deployments, `TARIC_RUNTIME_CONFORMANCE` in the trusted gateway service environment, then start `taric gateway --config /secure/path/gateway.json`. The listener accepts TLS 1.2/1.3 only. Token entries are loaded at startup and bind to fixed role/principal/Engagement/session identities; do not send identity fields to select another principal. Rotate or revoke a token by updating the protected config and restarting the gateway, which closes existing connections. No forwarded identity headers are trusted.
+Configure a separate authority runtime file for daemon and container deployments, then start `taric gateway --config /secure/path/gateway.json --runtime-config /secure/path/runtime.json`. The listener file contains only listeners, TLS material and the fixed token table; the runtime file selects authority, content root and principal policy. A missing, invalid or incompatible explicit runtime file fails before listener binding and never falls through to workspace or home configuration. The selected runtime source is immutable for the gateway process; changing authority or content root requires a restart. Keep PostgreSQL activation evidence in the runtime file as `runtime_conformance_path` for an explicit deployment, or use `TARIC_RUNTIME_CONFORMANCE` in compatibility mode.
+
+When `--runtime-config` is omitted, discovery selects the first existing source without merging: `TARIC_CONFIG`, `<cwd>/.taric/config.json`, then `$HOME/.taric/config.json`. Direct runtime environment values retain their documented precedence in this compatibility path. Startup/status diagnostics may expose the source kind (`explicit`, `environment`, `workspace`, `home` or `default`), SHA-256 digest and non-secret precedence decisions; do not expose database credentials, connection strings, bearer tokens or absolute paths to remote clients.
+
+The listener accepts TLS 1.2/1.3 only. Token entries are loaded at startup and bind to fixed role/principal/Engagement/session identities; do not send identity fields to select another principal. Rotate or revoke a token by updating the protected config and restarting the gateway, which closes existing connections. No forwarded identity headers are trusted.
 
 TLS TCP clients use the existing newline-delimited JSON-RPC protocol: send `taric.identify` first with `{token, declare:{role, principal_id, engagement_id}}`, then use `taric.dispatch` with that token. Identity is frozen per connection. TCP supports connection-bound `taric.subscribe`; reconnecting clients must resume from the last authoritative read sequence because notifications are best-effort hints.
 

@@ -1,5 +1,6 @@
 import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalCapability, type PrincipalRole, type ReviewerAttestation } from "./service.js";
 import { ContractValidationError } from "./validation.js";
+import type { DiagnosticDetails } from "./validation.js";
 
 /** Adapter 契约版本与 Core API 版本分开演进；两者都必须显式声明。 */
 export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
@@ -98,7 +99,7 @@ export interface PiExtensionApi {
   registerTool?(tool: PiRegisteredTool): void;
 }
 
-export interface AdapterError { code: string; message: string; follow_up?: string; }
+export interface AdapterError { code: string; message: string; follow_up?: string; details?: DiagnosticDetails; }
 
 export interface AdapterCapabilityReport {
   contract_version: string;

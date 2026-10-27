@@ -1,8 +1,8 @@
 # Context cursor recovery
 
-> Last reviewed: 2026-10-26
+> Last reviewed: 2026-10-27
 
-The context cursor recovery tests passed in the 1.0.0 workspace validation on 2026-10-26. The scale numbers at the end of this page are from the pre-1.0.0 candidate experiment; they remain fixture-specific historical observations and are not 1.0.0 release measurements or an SLA.
+The context cursor recovery tests passed in the `1.0.1` workspace validation on 2026-10-27. The scale numbers at the end of this page are from the pre-1.0.0 candidate experiment; they remain fixture-specific historical observations and are not 1.0.1 release measurements or an SLA.
 
 `context.build` and `context.query` produce ordered, budgeted context from a fixed `read_seq`. Use the same principal, Engagement, policy version, worker role, WorkItem, filters, ordering, candidate setting, and character budget when continuing. Preserve those request fields together with the cursor. A continuation cannot change the source sequence or cross an Engagement boundary. MCP exposes the same cursor, filter, ordering, budget, and sequence inputs.
 

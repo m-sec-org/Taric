@@ -33,6 +33,65 @@ test("Core shared config discovery resolves path, content and principal without 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("explicit runtime config is strict, authoritative, and reports a safe digest", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "taric-startup-explicit-"));
+  try {
+    const explicitPath = join(directory, "daemon.json");
+    const workspacePath = join(directory, ".taric", "config.json");
+    const explicitDb = join(directory, "explicit.sqlite");
+    const ambientDb = join(directory, "ambient.sqlite");
+    mkdirSync(join(directory, ".taric"), { recursive: true });
+    writeFileSync(workspacePath, JSON.stringify({ db_path: ambientDb, principal_id: "ambient" }));
+    writeFileSync(explicitPath, JSON.stringify({ db_path: explicitDb, content_root: join(directory, "explicit-content"), principal_id: "daemon" }));
+    const env = { TARIC_CONFIG: workspacePath, TARIC_DB: ambientDb, TARIC_PRINCIPAL_ID: "ambient-env" };
+    const discovered = discoverRuntimeConfig(env, directory, directory, explicitPath);
+    assert.equal(discovered.provenance.source, "explicit");
+    assert.match(discovered.provenance.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(discovered.path, explicitPath);
+    const resolved = resolveRuntimeAuthority({ env, cwd: directory, home: directory, runtimeConfigPath: explicitPath });
+    assert.equal(resolved.dbPath, explicitDb);
+    assert.equal(resolved.contentRoot, join(directory, "explicit-content"));
+    assert.equal(resolved.principal.id, "daemon");
+    assert.equal(resolved.runtimeConfigProvenance.source, "explicit");
+    assert.equal(resolved.precedence.db_path, "config");
+    assert.equal(resolved.precedence.principal_id, "config");
+    assert.equal(resolved.precedence.content_root_mode, "configured");
+    assert.equal(Object.isFrozen(resolved), true);
+    assert.equal(Object.isFrozen(resolved.authority), true);
+    assert.equal(Object.isFrozen(resolved.principal), true);
+    assert.equal(Object.isFrozen(resolved.principal.capabilities), true);
+    const service = await openRuntimeService({ env, cwd: directory, home: directory, runtimeConfigPath: explicitPath });
+    await service.close();
+    assert.equal(existsSync(explicitDb), true);
+    assert.equal(existsSync(ambientDb), false);
+    assert.throws(() => discoverRuntimeConfig(env, directory, directory, join(directory, "missing.json")), (error) => error.code === "configuration_invalid" && !error.message.includes("missing.json"));
+    writeFileSync(explicitPath, "{broken");
+    assert.throws(() => discoverRuntimeConfig(env, directory, directory, explicitPath), (error) => error.code === "configuration_invalid" && !error.message.includes(explicitPath));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("ambient runtime config provenance follows environment, workspace, home, then default", () => {
+  const directory = mkdtempSync(join(tmpdir(), "taric-startup-provenance-"));
+  try {
+    const envPath = join(directory, "env.json");
+    const workspace = join(directory, "workspace");
+    const home = join(directory, "home");
+    mkdirSync(join(workspace, ".taric"), { recursive: true });
+    mkdirSync(join(home, ".taric"), { recursive: true });
+    writeFileSync(envPath, JSON.stringify({ principal_id: "env" }));
+    writeFileSync(join(workspace, ".taric", "config.json"), JSON.stringify({ principal_id: "workspace" }));
+    writeFileSync(join(home, ".taric", "config.json"), JSON.stringify({ principal_id: "home" }));
+    assert.equal(discoverRuntimeConfig({ TARIC_CONFIG: envPath }, workspace, home).provenance.source, "environment");
+    assert.equal(discoverRuntimeConfig({}, workspace, home).provenance.source, "workspace");
+    rmSync(join(workspace, ".taric", "config.json"));
+    assert.equal(discoverRuntimeConfig({}, workspace, home).provenance.source, "home");
+    rmSync(join(home, ".taric", "config.json"));
+    const fallback = discoverRuntimeConfig({}, workspace, home);
+    assert.equal(fallback.provenance.source, "default");
+    assert.match(fallback.provenance.digest, /^sha256:[a-f0-9]{64}$/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("multi-host startup cannot open SQLite and explicit memory stays explicit", () => {
   const directory = mkdtempSync(join(tmpdir(), "taric-startup-blocked-"));
   try {

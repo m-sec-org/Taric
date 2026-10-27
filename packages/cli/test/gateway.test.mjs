@@ -14,6 +14,8 @@ import { parseGatewayConfig, gatewayResolver, startGateway } from "../dist/gatew
 const hostToken = "host-token-0123456789abcdef0123456789abcdef";
 const rotatedHostToken = "host-token-rotated-0123456789abcdef0123456789";
 const reviewerToken = "reviewer-token-0123456789abcdef01234567";
+const operatorToken = "operator-token-0123456789abcdef0123456789";
+const rotatedOperatorToken = "operator-rotated-0123456789abcdef0123456789";
 
 test("gateway config validation rejects malformed tables", () => {
   assert.ok(parseGatewayConfig(JSON.stringify({ socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "host", principal_id: "h" }] })));
@@ -106,6 +108,119 @@ test("taric gateway serves configured tokens over one listener end to end", asyn
     await gateway.close();
     await service.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("gateway status is authenticated and reports readiness without exposing token material", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "taric-gw-status-"));
+  const dbPath = join(directory, "authority.sqlite");
+  const contentRoot = join(directory, "content");
+  const store = new AuthorityStore(dbPath);
+  const service = await createCoreService(store, contentRoot);
+  const configPath = join(directory, "gateway.json");
+  const runtimePath = join(directory, "runtime.json");
+  await writeFile(runtimePath, JSON.stringify({ db_path: dbPath, content_root: contentRoot }));
+  await writeFile(configPath, JSON.stringify({ socket_path: join(directory, "gw.sock"), tokens: [
+    { token: operatorToken, role: "operator", principal_id: "operator-gw" },
+    { token: reviewerToken, role: "reviewer", principal_id: "reviewer-gw" },
+  ] }));
+  const gateway = await startGateway(configPath, { TARIC_CONFIG: runtimePath });
+  try {
+    const operator = rpcClient(join(directory, "gw.sock"));
+    operator.send({ jsonrpc: "2.0", id: 1, method: "taric.identify", params: { token: operatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    assert.equal((await operator.waitForLine((line) => line.includes('"id":1'))).result.ok, true);
+    operator.send({ jsonrpc: "2.0", id: 2, method: "taric.gateway.status", params: { token: operatorToken } });
+    const status = await operator.waitForLine((line) => line.includes('"id":2'));
+    assert.equal(status.result.ok, true, JSON.stringify(status));
+    assert.equal(status.result.data.liveness, true);
+    assert.equal(status.result.data.readiness, true);
+    assert.equal(status.result.data.runtime_configuration.source, "environment");
+    assert.equal(JSON.stringify(status).includes(operatorToken), false);
+    const reviewer = rpcClient(join(directory, "gw.sock"));
+    reviewer.send({ jsonrpc: "2.0", id: 3, method: "taric.identify", params: { token: reviewerToken, declare: { role: "reviewer", principal_id: "reviewer-gw" } } });
+    assert.equal((await reviewer.waitForLine((line) => line.includes('"id":3'))).result.ok, true);
+    reviewer.send({ jsonrpc: "2.0", id: 4, method: "taric.gateway.status", params: { token: reviewerToken } });
+    const rejected = await reviewer.waitForLine((line) => line.includes('"id":4'));
+    assert.equal(rejected.result.ok, false);
+    assert.equal(rejected.result.error.code, "authorization_error");
+    operator.socket.destroy(); reviewer.socket.destroy();
+  } finally {
+    await gateway.close(); await service.close(); await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("gateway reload validates replacement and revokes existing identities", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "taric-gw-reload-"));
+  const dbPath = join(directory, "authority.sqlite");
+  const contentRoot = join(directory, "content");
+  const store = new AuthorityStore(dbPath);
+  const service = await createCoreService(store, contentRoot);
+  const configPath = join(directory, "gateway.json");
+  const runtimePath = join(directory, "runtime.json");
+  const socketPath = join(directory, "gw.sock");
+  await writeFile(runtimePath, JSON.stringify({ db_path: dbPath, content_root: contentRoot }));
+  await writeFile(configPath, JSON.stringify({ socket_path: socketPath, tokens: [{ token: operatorToken, role: "operator", principal_id: "operator-gw" }] }));
+  const gateway = await startGateway(configPath, { TARIC_CONFIG: runtimePath });
+  try {
+    const invalid = rpcClient(socketPath);
+    invalid.send({ jsonrpc: "2.0", id: 1, method: "taric.identify", params: { token: operatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    assert.equal((await invalid.waitForLine((line) => line.includes('"id":1'))).result.ok, true);
+    await writeFile(configPath, JSON.stringify({ socket_path: socketPath, tokens: [{ token: "short", role: "operator", principal_id: "operator-gw" }] }));
+    invalid.send({ jsonrpc: "2.0", id: 2, method: "taric.gateway.reload", params: { token: operatorToken } });
+    const invalidReload = await invalid.waitForLine((line) => line.includes('"id":2'));
+    assert.equal(invalidReload.result.ok, false);
+    await writeFile(configPath, JSON.stringify({ socket_path: socketPath, tokens: [{ token: rotatedOperatorToken, role: "operator", principal_id: "operator-gw" }] }));
+    invalid.send({ jsonrpc: "2.0", id: 3, method: "taric.gateway.reload", params: { token: operatorToken } });
+    const accepted = await invalid.waitForLine((line) => line.includes('"id":3'));
+    assert.equal(accepted.result.ok, true, JSON.stringify(accepted));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(invalid.socket.destroyed, true);
+    const old = rpcClient(socketPath);
+    old.send({ jsonrpc: "2.0", id: 4, method: "taric.identify", params: { token: operatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    const oldRejected = await old.waitForLine((line) => line.includes('"id":4'));
+    assert.match(oldRejected.error.message, /authorization/);
+    const current = rpcClient(socketPath);
+    current.send({ jsonrpc: "2.0", id: 5, method: "taric.identify", params: { token: rotatedOperatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    assert.equal((await current.waitForLine((line) => line.includes('"id":5'))).result.ok, true);
+    old.socket.destroy(); current.socket.destroy(); invalid.socket.destroy();
+  } finally {
+    await gateway.close(); await service.close(); await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("gateway reload restores the previous listener set after a bind failure", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "taric-gw-reload-restore-"));
+  const dbPath = join(directory, "authority.sqlite");
+  const contentRoot = join(directory, "content");
+  const store = new AuthorityStore(dbPath);
+  const service = await createCoreService(store, contentRoot);
+  const configPath = join(directory, "gateway.json");
+  const runtimePath = join(directory, "runtime.json");
+  const socketPath = join(directory, "gw.sock");
+  const fixtureDir = join(fileURLToPath(new URL("../../core/test/fixtures/", import.meta.url)));
+  await writeFile(join(directory, "key.pem"), await readFile(join(fixtureDir, "gateway-test-key.pem")));
+  await writeFile(join(directory, "cert.pem"), await readFile(join(fixtureDir, "gateway-test-cert.pem")));
+  const occupied = createServer();
+  await new Promise((resolve, reject) => { occupied.once("error", reject); occupied.listen({ host: "127.0.0.1", port: 0 }, resolve); });
+  await writeFile(runtimePath, JSON.stringify({ db_path: dbPath, content_root: contentRoot }));
+  await writeFile(configPath, JSON.stringify({ socket_path: socketPath, tokens: [{ token: operatorToken, role: "operator", principal_id: "operator-gw" }] }));
+  const gateway = await startGateway(configPath, { TARIC_CONFIG: runtimePath });
+  try {
+    const client = rpcClient(socketPath);
+    client.send({ jsonrpc: "2.0", id: 1, method: "taric.identify", params: { token: operatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    assert.equal((await client.waitForLine((line) => line.includes('"id":1'))).result.ok, true);
+    await writeFile(configPath, JSON.stringify({ socket_path: socketPath, tls_tcp: { host: "127.0.0.1", port: occupied.address().port }, tls: { key_file: "key.pem", cert_file: "cert.pem" }, tokens: [{ token: rotatedOperatorToken, role: "operator", principal_id: "operator-gw" }] }));
+    client.send({ jsonrpc: "2.0", id: 2, method: "taric.gateway.reload", params: { token: operatorToken } });
+    assert.equal((await client.waitForLine((line) => line.includes('"id":2'))).result.ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const restored = rpcClient(socketPath);
+    restored.send({ jsonrpc: "2.0", id: 3, method: "taric.identify", params: { token: operatorToken, declare: { role: "operator", principal_id: "operator-gw" } } });
+    assert.equal((await restored.waitForLine((line) => line.includes('"id":3'))).result.ok, true);
+    restored.socket.destroy(); client.socket.destroy();
+  } finally {
+    await gateway.close();
+    await new Promise((resolve, reject) => occupied.close((error) => error ? reject(error) : resolve()));
+    await service.close(); await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -259,6 +374,10 @@ test("gateway exposes authenticated TLS TCP and HTTPS without changing Core iden
     const requestBody = JSON.stringify({ jsonrpc: "2.0", id: 10, method: "taric.dispatch", params: { operation: "engagement.status", request: { engagement_id: engagementId } } });
     const status = await httpsJsonRpc(httpsPort, hostToken, requestBody);
     assert.equal(status.status, 200); assert.equal(status.payload.result.ok, true);
+    const gatewayStatus = await httpsJsonRpc(httpsPort, hostToken, JSON.stringify({ jsonrpc: "2.0", id: 9, method: "taric.gateway.status" }));
+    assert.equal(gatewayStatus.status, 200); assert.equal(gatewayStatus.payload.result.ok, true);
+    assert.equal(gatewayStatus.payload.result.data.readiness, true);
+    assert.equal(JSON.stringify(gatewayStatus).includes(hostToken), false);
     const noAuth = await httpsJsonRpc(httpsPort, hostToken, requestBody, { authorized: false });
     assert.equal(noAuth.status, 401); assert.equal(noAuth.payload.error.data.code, "authorization_error");
     const forgedRole = await httpsJsonRpc(httpsPort, hostToken, JSON.stringify({ jsonrpc: "2.0", id: 11, method: "taric.dispatch", params: { operation: "engagement.init", request: { name: "forged", scope: { allowed_targets: [], excluded_targets: [], rules_of_engagement_ref: "roe" } } } }));

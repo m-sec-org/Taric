@@ -8,12 +8,12 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 
 ## 当前合同与验证状态
 
-- Taric/workspace packages `1.0.0`，API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
+- CLI、Core、Bun SQLite driver、MCP 和 Schemas runtime components 为 `1.0.1`；root workspace 和 Hermes plugin 仍为 `1.0.0`。API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
 - Schema registry 暴露 57 个 operations；CLI 白名单为 49 项（包括本地 `artifact.store.append-file` helper），MCP 仅暴露 6 个模型工具。这些入口的权限和操作集合不同，不能互相推导。
-- 本轮 `1.0.0` 验证（2026-10-26）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 351/351（无 PostgreSQL 跳过），Schemas 10、CLI 32、MCP 12、Hermes 5、Bun driver 11 全部通过。隔离 consumer 成功安装并运行五个 `1.0.0` tarball。
-- 当前源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`（25 张表、source/recovered sequence 106）；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。专项报告在验证机 `/tmp/taric-postgres-runtime-20261026.json`、`/tmp/taric-multihost-postgres-20261026.json` 和 `/tmp/taric-container-spool-20261026.json`。容器运行在同一工作站，未验证跨物理机或网络中断恢复。
+- 本轮 `1.0.1` 验证（2026-10-27）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 356/356（无 PostgreSQL 跳过），Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 全部通过。PostgreSQL runtime、独立备份恢复、双容器租约回收和容器 spool 检查均通过。
+- 当前源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。`1.0.1` 专项报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。容器运行在同一工作站，未验证跨物理机或网络中断恢复。
 - Pi/DeepSeek/Hermes adapter 合同、Bun driver、Hermes plugin 和 gateway 测试均通过；另在 `/tmp` 隔离安装并启动真实 Pi 1.4.0 RPC 进程，Taric 扩展成功通过其 `ExtensionAPI` 注册。本机 smoke 未调用模型或工具；DeepSeek/Hermes 真实宿主及完整 Pi 工作流仍未认证。Gateway 保留本机 Unix socket，并支持可选 TLS TCP 长连接 JSON-RPC 和 HTTPS `POST /rpc`；loopback TLS 端到端测试通过。HTTPS 不提供连接订阅；远程文件路径摄取拒绝，Artifact session root 由 gateway 在其配置的 content root 内派生。多机生产部署仍须单独验收证书、网络、凭据轮换和服务可用性。PostgreSQL runtime 仍要求当前构建匹配的 activation evidence 及目标 schema/lease health；npm registry 分发未支持，workspace 包保留 `private: true`。
-- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于本次 `1.0.0` 的 release report。
+- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于本次 `1.0.1` 的 release report。
 
 此前候选报告及其 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)；二者均绑定旧工作树。
 
@@ -135,7 +135,7 @@ node --test scripts/test/profile-verification.test.mjs
 ```bash
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
 TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.0.json
+node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.1.json
 ```
 
 `npm test` 会运行各 workspace 的 Node 测试和 Hermes 插件的 Python 测试。单独运行 Hermes 插件测试：
@@ -152,6 +152,8 @@ node packages/cli/dist/bin.js capability.status
 ```
 
 CLI 形式为 `taric <operation> [json]`；成功响应写 stdout，失败响应写 stderr。默认数据库路径为 `~/.taric/authority.sqlite`，可用 `TARIC_DB` 和 `TARIC_CONTENT_ROOT` 显式指定。
+
+Gateway 的 transport 配置和 authority runtime 配置是两个文件：`--config <gateway.json>` 只选择 listener、TLS material 和固定 token 表，`--runtime-config <runtime.json>` 选择 authority、content root 和 process principal。显式 runtime 文件不存在、JSON 无效或 authority 不兼容时，gateway 会在绑定 listener 前失败，不会退回 workspace 或 home 配置，也不会把 `TARIC_DB`、`TARIC_CONTENT_ROOT` 等 ambient 值合并进这次启动。省略 `--runtime-config` 时保留兼容发现顺序：`TARIC_CONFIG` → 当前工作目录 `.taric/config.json` → `$HOME/.taric/config.json`，只使用第一个存在的文件；没有文件时使用默认 SQLite 路径。启动诊断记录 `explicit`、`environment`、`workspace`、`home` 或 `default` 来源和不含秘密的 SHA-256 digest，远程状态只应返回来源类别和 digest，不返回路径、连接串或 token。authority、content root 和 principal policy 在 gateway 进程生命周期内固定；切换配置应停止并重新启动进程。回滚显式部署时，先恢复旧 runtime 文件并重启，再移除 `--runtime-config` 回到上述兼容发现顺序。
 
 ## Core 示例
 

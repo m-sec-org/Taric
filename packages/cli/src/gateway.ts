@@ -1,10 +1,24 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { createPrincipal, listenAdapterHttpsRpc, listenAdapterRpc, openRuntimeService, NETWORK_RPC_MAX_CONNECTIONS, NETWORK_RPC_MAX_CONCURRENT_REQUESTS, NETWORK_RPC_REQUEST_TIMEOUT_MS, type Principal, type PrincipalRole } from "@taric/core";
-import { discoverCliConfig, resolveCliStartup } from "./cli.js";
+import {
+  createPrincipal,
+  discoverRuntimeConfig,
+  listenAdapterHttpsRpc,
+  listenAdapterRpc,
+  openRuntimeService,
+  resolveRuntimeAuthority,
+  NETWORK_RPC_MAX_CONNECTIONS,
+  NETWORK_RPC_MAX_CONCURRENT_REQUESTS,
+  NETWORK_RPC_REQUEST_TIMEOUT_MS,
+  type ApiResponse,
+  type GatewayTransportOperations,
+  type Principal,
+  type PrincipalRole,
+  type RuntimeStartupConfig,
+} from "@taric/core";
 
-/** 多 principal 网关：一个 listener 服务多个 token 解析的身份。
- * 身份只来自 resolver 查表，请求体永不自选身份。 */
+/** Multi-principal gateway. Identity comes from the token table, never the request body. */
 
 export interface GatewayTokenEntry {
   token: string;
@@ -20,6 +34,15 @@ export interface GatewayConfig {
   tls?: { key_file: string; cert_file: string };
   tokens: GatewayTokenEntry[];
 }
+
+interface LoadedGatewayConfig {
+  config: GatewayConfig;
+  digest: string;
+  tlsMaterial?: { key: Buffer; cert: Buffer };
+}
+type GatewayListener = { close(): Promise<void> };
+type GatewayResult = ApiResponse<Record<string, unknown>>;
+const digest = (raw: string | Buffer): string => `sha256:${createHash("sha256").update(raw).digest("hex")}`;
 
 export function parseGatewayConfig(raw: string): GatewayConfig {
   const config = JSON.parse(raw) as GatewayConfig;
@@ -62,14 +85,23 @@ export function parseGatewayConfig(raw: string): GatewayConfig {
   return config;
 }
 
-/** resolver 即查表：声明身份必须与 token 表项逐字段一致，不匹配即抛错（fail closed）。 */
+function loadGatewayConfig(configPath: string): LoadedGatewayConfig {
+  const raw = readFileSync(configPath, "utf8");
+  const config = parseGatewayConfig(raw);
+  const tlsMaterial = config.tls ? {
+    key: readFileSync(resolve(dirname(resolve(configPath)), config.tls.key_file)),
+    cert: readFileSync(resolve(dirname(resolve(configPath)), config.tls.cert_file)),
+  } : undefined;
+  return { config, digest: digest(raw), tlsMaterial };
+}
+
+/** Resolver is a table lookup: declared identity must match the token entry exactly. */
 export function gatewayResolver(tokens: GatewayTokenEntry[]) {
   const table = new Map(tokens.map((entry) => [entry.token, entry]));
   return (declared: { role: PrincipalRole; principal_id: string; engagement_id?: string }, token: string): Principal => {
     const entry = table.get(token);
     if (!entry) throw new Error("unknown gateway token");
-    if (declared.role !== entry.role || declared.principal_id !== entry.principal_id || (declared.engagement_id ?? undefined) !== (entry.engagement_id ?? undefined))
-      throw new Error("declared identity does not match the gateway token table");
+    if (declared.role !== entry.role || declared.principal_id !== entry.principal_id || (declared.engagement_id ?? undefined) !== (entry.engagement_id ?? undefined)) throw new Error("declared identity does not match the gateway token table");
     return createPrincipal(entry.role, entry.principal_id, entry.engagement_id, [], undefined, entry.session_id);
   };
 }
@@ -83,72 +115,134 @@ export function gatewayBearerResolver(tokens: GatewayTokenEntry[]) {
   };
 }
 
-export async function startGateway(configPath: string, env: NodeJS.ProcessEnv = process.env) {
-  const config = parseGatewayConfig(readFileSync(configPath, "utf8"));
-  const tlsMaterial = config.tls ? {
-    key: readFileSync(resolve(dirname(resolve(configPath)), config.tls.key_file)),
-    cert: readFileSync(resolve(dirname(resolve(configPath)), config.tls.cert_file)),
-  } : undefined;
-  const { config: runtimeConfig } = discoverCliConfig(env);
-  const contentRoot = resolveCliStartup(runtimeConfig, env).contentRoot;
-  const service = await openRuntimeService({ config: runtimeConfig, env });
-  const listeners: Array<{ close(): Promise<void> }> = [];
-  try {
-    const resolver = gatewayResolver(config.tokens);
-    if (config.socket_path) listeners.push(await listenAdapterRpc(service, {
-      socket_path: config.socket_path,
-      token: `gateway-frame-token-${config.socket_path.slice(-16)}`,
-      resolvePrincipal: resolver,
-    }));
-    if (config.tls_tcp && tlsMaterial) listeners.push(await listenAdapterRpc(service, {
-      tls_tcp: { ...config.tls_tcp, ...tlsMaterial },
-      network_content_root: contentRoot,
-      token: "taric-tls-tcp-frame-token-boundary",
-      resolvePrincipal: resolver,
-    }));
-    if (config.https && tlsMaterial) listeners.push(await listenAdapterHttpsRpc(service, {
-      ...config.https,
-      ...tlsMaterial,
-      network_content_root: contentRoot,
-      resolvePrincipal: gatewayBearerResolver(config.tokens),
-      max_connections: config.https.max_connections ?? NETWORK_RPC_MAX_CONNECTIONS,
-    }));
+function listenerSummary(config: GatewayConfig): Record<string, unknown> {
+  return {
+    unix_socket: Boolean(config.socket_path),
+    tls_tcp: config.tls_tcp ? { enabled: true, host: config.tls_tcp.host, port: config.tls_tcp.port } : { enabled: false },
+    https: config.https ? { enabled: true, host: config.https.host, port: config.https.port, path: config.https.path ?? "/rpc" } : { enabled: false },
+  };
+}
+
+function unauthorized(): GatewayResult {
+  return { ok: false, error: { code: "authorization_error", message: "gateway status or reload requires an operator or host principal" } };
+}
+
+export interface GatewayInstance {
+  config: GatewayConfig;
+  close(): Promise<void>;
+}
+
+export async function startGateway(configPath: string, env: NodeJS.ProcessEnv = process.env, runtimeConfigPath?: string): Promise<GatewayInstance> {
+  let active = loadGatewayConfig(configPath);
+  const discovered = discoverRuntimeConfig(env, process.cwd(), undefined, runtimeConfigPath);
+  const runtimeConfig = discovered.config as RuntimeStartupConfig;
+  const resolution = resolveRuntimeAuthority({ config: runtimeConfig, env, runtimeConfigProvenance: discovered.provenance });
+  const service = await openRuntimeService({ config: runtimeConfig, env, runtimeConfigProvenance: discovered.provenance });
+  let listeners: GatewayListener[] = [];
+  let reloadPending = false;
+  let reloadFailure: string | undefined;
+  let closed = false;
+  let operations: GatewayTransportOperations;
+
+  const status = async (principal: Principal): Promise<GatewayResult> => {
+    if (!principal || !["operator", "host"].includes(principal.role)) return unauthorized();
+    let authorityReady = true;
+    let readinessCode = "ready";
+    try {
+      const probe = await service.status();
+      if (!probe.ok) { authorityReady = false; readinessCode = probe.error.code; }
+    } catch { authorityReady = false; readinessCode = "unavailable_host"; }
     return {
-      config,
-      async close() {
-        const errors: unknown[] = [];
-        for (const listener of [...listeners].reverse()) { try { await listener.close(); } catch (cause) { errors.push(cause); } }
-        await service.close();
-        if (errors.length) throw new AggregateError(errors, "one or more gateway listeners failed to close");
+      ok: true,
+      data: {
+        liveness: !closed,
+        readiness: authorityReady && !reloadPending,
+        readiness_code: reloadPending ? "reloading" : readinessCode,
+        authority: { backend: resolution.authority.backend, profile: resolution.authority.profile, schema_version: resolution.diagnostics.schema_version, policy_digest: resolution.diagnostics.policy_digest, fencing: authorityReady ? resolution.authority.lease_mode === "server_side" ? "server_side_ready" : "local" : "blocked" },
+        runtime_configuration: { source: resolution.runtimeConfigProvenance.source, digest: resolution.runtimeConfigProvenance.digest, content_root_mode: resolution.precedence.content_root === "default" ? "derived" : "configured", precedence: resolution.precedence },
+        gateway_configuration: { digest: active.digest, listeners: listenerSummary(active.config), token_count: active.config.tokens.length },
+        ...(reloadFailure ? { reload_failure: reloadFailure } : {}),
       },
     };
+  };
+
+  const closeListeners = async (items: GatewayListener[]) => {
+    const errors: unknown[] = [];
+    for (const listener of [...items].reverse()) { try { await listener.close(); } catch (cause) { errors.push(cause); } }
+    if (errors.length) throw new AggregateError(errors, "one or more gateway listeners failed to close");
+  };
+
+  const openListeners = async (loaded: LoadedGatewayConfig): Promise<GatewayListener[]> => {
+    const opened: GatewayListener[] = [];
+    try {
+      const resolver = gatewayResolver(loaded.config.tokens);
+      if (loaded.config.socket_path) opened.push(await listenAdapterRpc(service, { socket_path: loaded.config.socket_path, token: `gateway-frame-token-${loaded.config.socket_path.slice(-16)}`, resolvePrincipal: resolver, gateway_operations: operations }));
+      if (loaded.config.tls_tcp && loaded.tlsMaterial) opened.push(await listenAdapterRpc(service, { tls_tcp: { ...loaded.config.tls_tcp, ...loaded.tlsMaterial }, network_content_root: resolution.contentRoot, token: "taric-tls-tcp-frame-token-boundary", resolvePrincipal: resolver, gateway_operations: operations }));
+      if (loaded.config.https && loaded.tlsMaterial) opened.push(await listenAdapterHttpsRpc(service, { ...loaded.config.https, ...loaded.tlsMaterial, network_content_root: resolution.contentRoot, resolvePrincipal: gatewayBearerResolver(loaded.config.tokens), max_connections: loaded.config.https.max_connections ?? NETWORK_RPC_MAX_CONNECTIONS, gateway_operations: operations }));
+      return opened;
+    } catch (cause) {
+      await closeListeners(opened).catch(() => undefined);
+      throw cause;
+    }
+  };
+
+  const reload = async (principal: Principal): Promise<GatewayResult> => {
+    if (!principal || principal.role !== "operator") return unauthorized();
+    if (reloadPending) return { ok: false, error: { code: "unavailable_host", message: "gateway reload is already in progress" } };
+    let next: LoadedGatewayConfig;
+    try { next = loadGatewayConfig(configPath); }
+    catch (cause) { return { ok: false, error: { code: "validation_error", message: cause instanceof Error ? cause.message : "gateway configuration is invalid" } }; }
+    reloadPending = true;
+    reloadFailure = undefined;
+    setTimeout(() => {
+      void (async () => {
+        const previous = active;
+        const previousListeners = listeners;
+        try {
+          if (closed) throw new Error("gateway is closed");
+          await closeListeners(previousListeners);
+          const replacement = await openListeners(next);
+          listeners = replacement;
+          active = next;
+        } catch (cause) {
+          reloadFailure = cause instanceof Error ? cause.message : "gateway reload failed";
+          try { listeners = await openListeners(previous); active = previous; }
+          catch (restoreCause) { reloadFailure = restoreCause instanceof Error ? restoreCause.message : reloadFailure; listeners = []; }
+        } finally { reloadPending = false; }
+      })();
+    }, 0);
+    return { ok: true, data: { accepted: true, config_digest: next.digest, reconnect_required: true } };
+  };
+  operations = { status, reload };
+  try {
+    listeners = await openListeners(active);
+    return {
+      config: active.config,
+      async close() { if (closed) return; closed = true; await closeListeners(listeners); await service.close(); },
+    };
   } catch (cause) {
-    for (const listener of [...listeners].reverse()) await listener.close().catch(() => undefined);
+    await closeListeners(listeners).catch(() => undefined);
     await service.close();
     throw cause;
   }
 }
 
-export async function runGatewayMain(configPath: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+export async function runGatewayMain(configPath: string | undefined, env: NodeJS.ProcessEnv = process.env, runtimeConfigPath?: string): Promise<number> {
   if (!configPath) {
     process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "validation_error", message: "gateway requires --config <gateway.json>" } })}\n`);
     return 2;
   }
-  let gateway: Awaited<ReturnType<typeof startGateway>>;
-  try { gateway = await startGateway(configPath, env); }
+  let gateway: GatewayInstance;
+  try { gateway = await startGateway(configPath, env, runtimeConfigPath); }
   catch (cause) {
     const message = cause instanceof Error ? cause.message : "gateway startup failed";
     process.stderr.write(`${JSON.stringify({ ok: false, error: { code: "gateway_startup_failed", message } })}\n`);
     return 1;
   }
   process.stdout.write(`Taric multi-principal gateway listening (${gateway.config.tokens.length} tokens)\n`);
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolveStop) => {
     let stopping = false;
-    const stop = () => {
-      if (stopping) return;
-      stopping = true;
-      void gateway.close().catch(() => undefined).finally(resolve);
-    };
+    const stop = () => { if (stopping) return; stopping = true; void gateway.close().catch(() => undefined).finally(resolveStop); };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });

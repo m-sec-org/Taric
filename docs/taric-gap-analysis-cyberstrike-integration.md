@@ -21,9 +21,9 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 
 ---
 
-## 能力提升后的状态校正（2026-10-26）
+## 能力提升后的状态校正（2026-10-27）
 
-本文保留 2026-10-16 的推演、代码基线、宿主源码引用与建议。原正文中的“当前”“未实现”“没有”等状态判断均限定为当时基线，不是当前待办或 Taric 当前能力声明；第 1–8 节是历史定位分析，不是实施计划。当前合同以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[当前设计](taric-design.md)为准。2026-10-26 的 `1.0.0` build/typecheck/matrix、PG 配置 workspace tests（Core 351、Schemas 10、CLI 32、MCP 12、Hermes 5、Bun 11）与 clean consumer 通过。当前源码 PostgreSQL runtime/restore、同机双容器 lease/reclaim、容器 bind-mounted spool 验证也通过；Pi 1.4.0 真实 RPC host 已加载 Taric 扩展，但未调用模型/工具。没有认证 CyberStrike 等完整真实宿主工作流或跨物理机网络恢复；可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试，生产网络部署及跨机故障恢复尚未验证。CyberStrike 项目当前状态与 MCP 工作组进度未重新核验。
+本文保留 2026-10-16 的推演、代码基线、宿主源码引用与建议。原正文中的“当前”“未实现”“没有”等状态判断均限定为当时基线，不是当前待办或 Taric 当前能力声明；第 1–8 节是历史定位分析，不是实施计划。当前合同以[接入指南](agent-integration.md)、[API 合同](taric-api.md)和[当前设计](taric-design.md)为准。2026-10-27 的 `1.0.1` build/typecheck/matrix、PG 配置 workspace tests（Core 356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun 11）与当前 runtime/backup/restore、同机双容器 lease/reclaim、容器 bind-mounted spool 验证均通过。Pi 1.4.0 真实 RPC host 已加载 Taric 扩展，但未调用模型/工具。没有认证 CyberStrike 等完整真实宿主工作流或跨物理机网络恢复；可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试，生产网络部署及跨机故障恢复尚未验证。CyberStrike 项目当前状态与 MCP 工作组进度未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
@@ -33,7 +33,7 @@ BreachWeave 回答「能不能接」。CyberStrike 回答「**该不该接**」�
 | 无交互时延测量 | Context、proxy、Artifact、维护和 host.state 已有版本化实测；50k Context 首屏降低 42.5%，未达 50% 候选目标，无通用 SLA。 |
 | 价值与质量未量化 | 本轮质量发布证据仍缺人工标注样本/人类基线；没有 ROI、等效安全比例或第三方宿主认证结论。 |
 
-历史综合[技术验收](benchmarks/capability-verification-v2.json)与候选报告绑定旧源码基线，不作为本轮 `1.0.0` PostgreSQL 证据。当前本地验证计数见上；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文的宿主推演和外部项目状态不构成当前 Taric 认证。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)与候选报告绑定旧源码基线，不作为本轮 `1.0.1` PostgreSQL 证据。当前本地验证计数见上；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文的宿主推演和外部项目状态不构成当前 Taric 认证。
 
 ## 目录
 

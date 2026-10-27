@@ -2,7 +2,7 @@ import { SCHEMA_VERSION } from "@taric/schemas";
 import { AuthorityStore, type ReadSnapshot, type TrustLevel } from "./store.js";
 import { PostgresAuthorityDriver, quotePostgresSchema, type PostgresQueryable, type PostgresQueryResult } from "./sql-driver.js";
 import { AUTHORITY_SQL_TABLES, AUTHORITY_SQL_INDEXES, AUTHORITY_SQL_INITIAL_METADATA, AUTHORITY_SQL_SCHEMA_VERSION } from "./sql-schema.js";
-import { ContractValidationError } from "./validation.js";
+import { compatibilityDiagnosticDetails, ContractValidationError, type CompatibilityDiagnosticDetails } from "./validation.js";
 import { uuidv7 } from "./identity.js";
 import { AUTHORITY_RUNTIME_SCENARIOS, runAuthorityRuntimeConformance, runtimeConformancePassed, type AuthorityBackendMethod, type AuthorityRuntimeConformance, type AuthorityRuntimeScenario } from "./storage-contract.js";
 
@@ -48,6 +48,7 @@ export interface PostgresRuntimeReadiness {
     persistence_shape: "available" | "missing"; runtime_evidence: "missing" | "passed" | "failed";
   }[];
   conformance: AuthorityRuntimeConformance;
+  compatibility?: CompatibilityDiagnosticDetails;
   blocker?: "runtime_conformance_evidence_required" | "backend_health_failed";
 }
 const runtimeDomainMethods = {
@@ -121,6 +122,7 @@ export class PostgresAuthorityStore extends AuthorityStore {
     let conformance = runtimeConformancePassed(report) ? report! : missingEvidence;
     let unavailable = false;
     const columns = new Map<string, Set<string>>();
+    const observedMetadata: Record<string, string> = {};
     let health: PostgresRuntimeReadiness["health"] = { available: false, schema_valid: false, fencing: false };
     try {
       await this.driver.inspect(async (client) => {
@@ -131,6 +133,7 @@ export class PostgresAuthorityStore extends AuthorityStore {
         let schema_valid = false;
         if (metadataText) {
           const metadata = await client.query<{ key: string; value: string }>(`SELECT key,value FROM ${schema}.metadata WHERE key IN ('schema_version','storage_format','authority_id')`);
+          for (const row of metadata.rows) observedMetadata[row.key] = row.value;
           schema_valid = metadata.rows.find((row) => row.key === "schema_version")?.value === SCHEMA_VERSION && metadata.rows.find((row) => row.key === "storage_format")?.value === AUTHORITY_SQL_SCHEMA_VERSION && /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(metadata.rows.find((row) => row.key === "authority_id")?.value ?? "");
         }
         let watermarks: PostgresRuntimeReadiness["health"]["watermarks"];
@@ -155,15 +158,23 @@ export class PostgresAuthorityStore extends AuthorityStore {
       return { id, missing_methods, missing_tables, missing_columns, persistence_shape: missing_methods.length || missing_tables.length || missing_columns.length ? "missing" as const : "available" as const, runtime_evidence: evidence?.passed ? "passed" as const : report ? "failed" as const : "missing" as const };
     });
     const healthy = health.available && health.schema_valid && health.fencing && domains.every((domain) => domain.persistence_shape === "available");
+    const missingRuntimeColumns = domains.flatMap((domain) => domain.missing_columns).slice(0, 32);
+    const compatibility = !health.available ? undefined : !health.schema_valid
+      ? compatibilityDiagnosticDetails({ backend: "postgresql", expected: { schema_version: SCHEMA_VERSION, storage_format: AUTHORITY_SQL_SCHEMA_VERSION, authority_id: "uuidv7" }, observed: observedMetadata, failed_marker: observedMetadata.schema_version !== SCHEMA_VERSION ? "metadata.schema_version" : observedMetadata.storage_format !== AUTHORITY_SQL_SCHEMA_VERSION ? "metadata.storage_format" : "metadata.authority_id" })
+      : !health.fencing
+        ? compatibilityDiagnosticDetails({ backend: "postgresql", expected: { fencing: "valid" }, observed: { fencing: "invalid" }, failed_marker: "authority.fencing" })
+        : missingRuntimeColumns.length
+          ? compatibilityDiagnosticDetails({ backend: "postgresql", expected: { runtime_layout: "complete" }, failed_marker: "authority.layout", missing: missingRuntimeColumns })
+          : undefined;
     if (!healthy && conformance.passed) conformance = { ...conformance, passed: false, failures: [...conformance.failures, "PostgreSQL runtime health did not conform"] };
     const enabled = healthy && runtimeConformancePassed(conformance);
-    const result: PostgresRuntimeReadiness = { version: "postgres-runtime-readiness/1", backend: "postgresql", implementation_state: "available", runtime_state: enabled ? "enabled" : "disabled", evidence_state: enabled ? "verified" : "failed", code: enabled ? "ready" : unavailable ? "postgresql_unavailable" : "backend_conformance_failed", health, domains, conformance, ...(enabled ? {} : { blocker: healthy ? "runtime_conformance_evidence_required" as const : "backend_health_failed" as const }) };
+    const result: PostgresRuntimeReadiness = { version: "postgres-runtime-readiness/1", backend: "postgresql", implementation_state: "available", runtime_state: enabled ? "enabled" : "disabled", evidence_state: enabled ? "verified" : "failed", code: enabled ? "ready" : unavailable ? "postgresql_unavailable" : "backend_conformance_failed", health, domains, conformance, ...(compatibility ? { compatibility } : {}), ...(enabled ? {} : { blocker: healthy ? "runtime_conformance_evidence_required" as const : "backend_health_failed" as const }) };
     this.readiness = result; return result;
   }
   async health(): Promise<{ available: true; backend: "postgresql"; schema_version: string; fencing: boolean; committed_seq: number; projected_seq: number; indexed_seq: number }> {
     await this.migrate();
     const report = await this.runtimeReadiness(this.readiness?.conformance);
-    if (!report.health.available || !report.health.schema_valid || !report.health.fencing || report.domains.some((domain) => domain.persistence_shape !== "available") || !report.health.watermarks) throw new ContractValidationError("conflict", "PostgreSQL authority health checks failed");
+    if (!report.health.available || !report.health.schema_valid || !report.health.fencing || report.domains.some((domain) => domain.persistence_shape !== "available") || !report.health.watermarks) throw new ContractValidationError("conflict", "PostgreSQL authority health checks failed", report.compatibility);
     return { available: true, backend: "postgresql", schema_version: POSTGRES_SCHEMA_VERSION, fencing: true, ...report.health.watermarks };
   }
   async pinSnapshot(engagementId: string, options: SnapshotOptions & { ttlMs?: number } = {}): Promise<PostgresPinnedSnapshot> {

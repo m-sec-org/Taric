@@ -25,7 +25,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前合同为 Taric/workspace package `1.0.0`、API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3`。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是本次 `1.0.0` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
+当前 runtime components 为 `1.0.1`（root workspace 和 Hermes plugin 保持 `1.0.0`），API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3` 不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是本次 `1.0.1` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
 
 ## 2. 技术栈
 
@@ -39,7 +39,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
 
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite` 进程内驱动；本次 `1.0.0` 包版本在本地隔离 consumer 中完成 tarball 安装、导入和 Bun query 验证，不代表 npm registry 发布或第三方宿主认证。
+`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.1` 进程内驱动；本次 `1.0.1` 包版本完成构建和 Bun driver 11 项验证，不代表 npm registry 发布或第三方宿主认证。
 
 ## 3. 仓库与代码结构
 
@@ -231,7 +231,7 @@ MCP 支持 `initialize/tools/list/tools/call`，返回协议 `2024-11-05` 与 `{
 
 ## 8. 配置与环境变量
 
-配置发现依次检查 `TARIC_CONFIG`、工作区 `.taric/config.json`、用户 `~/.taric/config.json`，选择第一个存在的文件，不合并；显式路径不存在仍继续候选。`config.authority` 整体优先于环境 profile，其他字段逐项解析，不能笼统说所有环境变量最高优先级。
+兼容配置发现依次检查 `TARIC_CONFIG`、工作区 `.taric/config.json`、用户 `~/.taric/config.json`，选择第一个存在的文件，不合并；`--runtime-config` 显式路径不存在或无效时直接失败，不继续候选。`config.authority` 整体优先于环境 profile，其他字段逐项解析，不能笼统说所有环境变量最高优先级。
 
 | 项目 | 实际解析 |
 |---|---|
@@ -280,9 +280,9 @@ node scripts/check-doc-links.mjs
 node --test scripts/test/profile-verification.test.mjs
 ```
 
-重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-26 的 workspace 测试在配置 live PostgreSQL 后通过：Schemas 10/10、Core 351/351（无跳过）、CLI 32/32、MCP 12/12、Hermes 5/5、Bun driver 11/11。build、typecheck、matrix 和隔离 `1.0.0` clean consumer 也通过。当前 PG 12 场景及独立逻辑 restore 通过；额外的双 host 容器 bridge 网络 lease/reclaim 和容器 bind-mounted spool 检查通过。它们不代表跨物理机/网络恢复或真实第三方宿主验收。此前候选报告绑定较早工作树，仍只作为历史证据。
+重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-27 的 `1.0.1` workspace 测试在配置 live PostgreSQL 后通过：Schemas 10/10、Core 356/356（无跳过）、CLI 37/37、MCP 12/12、Hermes 5/5、Bun driver 11/11。build、typecheck、matrix 也通过。当前 PG 12 场景、独立备份恢复、双 host 容器 bridge 网络 lease/reclaim 和容器 bind-mounted spool 检查通过。它们不代表跨物理机/网络恢复或真实第三方宿主验收。此前候选报告绑定较早工作树，仍只作为历史证据。
 
-[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。这些报告对应早期候选工作树，不代表本次 1.0.0 发布验证。质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
+[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。这些报告对应早期候选工作树，不代表本次 1.0.1 发布验证。质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
 
 ## 13. 已知差距与假设
 

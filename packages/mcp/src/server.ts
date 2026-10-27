@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, RuntimeStartupError, createPrincipal, openRuntimeService, resolveRuntimeAuthority, type CoreService, type Principal, type RuntimeStartupOptions } from "@taric/core";
+import { API_CONTRACT_VERSION, RuntimeStartupError, createPrincipal, openRuntimeService, resolveRuntimeAuthority, type CoreService, type ContractDiagnosticDetails, type Principal, type RuntimeStartupOptions } from "@taric/core";
 
 export const modelTools = ["context.query", "resource.query", "evidence.query", "proposal.submit", "checkpoint.propose", "action.recommend"] as const;
 
@@ -24,16 +24,22 @@ export function createMcpServer(service: CoreService, principal: Principal = { i
       const schema = toolSchemas[params.name as (typeof modelTools)[number]];
       const arguments_ = params.arguments ?? {};
       const missing = schema.required.filter((key) => arguments_[key] === undefined);
-      if (missing.length) return toolError("validation_error", `missing required arguments: ${missing.join(", ")}`);
+      if (missing.length) return toolError("validation_error", `missing required arguments: ${missing.join(", ")}`, {
+        kind: "contract", contract_name: params.name,
+        violations: missing.slice(0, 16).map((key) => ({ instance_path: `/${key}`, keyword: "required", params: { missingProperty: key }, message: "must have required property" })),
+      });
       const unexpected = Object.keys(arguments_).filter((key) => !(key in schema.properties));
-      if (unexpected.length) return toolError("validation_error", `unexpected arguments: ${unexpected.join(", ")}`);
+      if (unexpected.length) return toolError("validation_error", `unexpected arguments: ${unexpected.join(", ")}`, {
+        kind: "contract", contract_name: params.name,
+        violations: unexpected.slice(0, 16).map((key) => ({ instance_path: `/${key}`, keyword: "additionalProperties", params: { additionalProperty: key }, message: "must NOT have additional properties" })),
+      });
       const response = await service.dispatch(params.name, authenticatedPrincipal, params.arguments ?? {});
       return { content: [{ type: "text", text: JSON.stringify(response) }], isError: !response.ok };
     }
   };
 }
 
-function toolError(code: string, message: string) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: { code, message } }) }], isError: true }; }
+function toolError(code: string, message: string, details?: ContractDiagnosticDetails) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: { code, message, ...(details ? { details } : {}) } }) }], isError: true }; }
 
 /** MCP and CLI share the Core startup resolver; :memory: is explicit/test-only. */
 export function resolveMcpStartup(options: RuntimeStartupOptions = {}) { return resolveRuntimeAuthority(options); }

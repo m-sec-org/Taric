@@ -753,7 +753,28 @@ export interface AuditEvent {
 }
 
 export interface ApiSuccess<T = unknown> { ok: true; data: T; request_id?: string }
-export interface ApiError { code: string; message: string; follow_up?: string; details?: unknown }
+export type DiagnosticParameter = string | number | boolean;
+export interface DiagnosticViolation {
+  instance_path: string;
+  keyword: string;
+  params?: Readonly<Record<string, DiagnosticParameter>>;
+  message: string;
+}
+export interface ContractDiagnosticDetails {
+  kind: "contract";
+  contract_name: string;
+  violations: readonly DiagnosticViolation[];
+}
+export interface CompatibilityDiagnosticDetails {
+  kind: "compatibility";
+  backend: "sqlite" | "postgresql" | "unknown";
+  expected: Readonly<Record<string, string>>;
+  observed?: Readonly<Record<string, string>>;
+  failed_marker?: string;
+  missing?: readonly string[];
+}
+export type ApiErrorDetails = ContractDiagnosticDetails | CompatibilityDiagnosticDetails;
+export interface ApiError { code: string; message: string; follow_up?: string; details?: ApiErrorDetails }
 export interface ApiErrorEnvelope { ok: false; error: ApiError }
 export type ApiResponse<T = unknown> = ApiSuccess<T> | ApiErrorEnvelope;
 
