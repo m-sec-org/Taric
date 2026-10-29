@@ -14,6 +14,7 @@ import {
   type ApiResponse,
   type GatewayTransportOperations,
   type Principal,
+  type PrincipalCapability,
   type PrincipalRole,
   type RuntimeStartupConfig,
 } from "@taric/core";
@@ -26,6 +27,7 @@ export interface GatewayTokenEntry {
   principal_id: string;
   engagement_id?: string;
   session_id?: string;
+  capabilities?: readonly ("content_read")[];
 }
 export interface GatewayConfig {
   socket_path?: string;
@@ -43,6 +45,10 @@ interface LoadedGatewayConfig {
 type GatewayListener = { close(): Promise<void> };
 type GatewayResult = ApiResponse<Record<string, unknown>>;
 const digest = (raw: string | Buffer): string => `sha256:${createHash("sha256").update(raw).digest("hex")}`;
+
+function validateGatewayTokenCapabilities(entry: Pick<GatewayTokenEntry, "role" | "capabilities">): void {
+  if (entry.capabilities !== undefined && (!Array.isArray(entry.capabilities) || entry.capabilities.some((capability) => capability !== "content_read") || (entry.role !== "host" && entry.role !== "operator"))) throw new Error("gateway token capabilities may only grant content_read to host or operator principals");
+}
 
 export function parseGatewayConfig(raw: string): GatewayConfig {
   const config = JSON.parse(raw) as GatewayConfig;
@@ -79,6 +85,7 @@ export function parseGatewayConfig(raw: string): GatewayConfig {
     if (typeof entry.principal_id !== "string" || !entry.principal_id.trim()) throw new Error("gateway token principal_id is required");
     if (entry.engagement_id !== undefined && typeof entry.engagement_id !== "string") throw new Error("gateway token engagement_id must be a string");
     if (entry.session_id !== undefined && typeof entry.session_id !== "string") throw new Error("gateway token session_id must be a string");
+    validateGatewayTokenCapabilities(entry);
     if (seen.has(entry.token)) throw new Error("gateway tokens must be unique");
     seen.add(entry.token);
   }
@@ -101,8 +108,9 @@ export function gatewayResolver(tokens: GatewayTokenEntry[]) {
   return (declared: { role: PrincipalRole; principal_id: string; engagement_id?: string }, token: string): Principal => {
     const entry = table.get(token);
     if (!entry) throw new Error("unknown gateway token");
+    validateGatewayTokenCapabilities(entry);
     if (declared.role !== entry.role || declared.principal_id !== entry.principal_id || (declared.engagement_id ?? undefined) !== (entry.engagement_id ?? undefined)) throw new Error("declared identity does not match the gateway token table");
-    return createPrincipal(entry.role, entry.principal_id, entry.engagement_id, [], undefined, entry.session_id);
+    return createPrincipal(entry.role, entry.principal_id, entry.engagement_id, entry.capabilities as readonly PrincipalCapability[] | undefined, undefined, entry.session_id);
   };
 }
 
@@ -111,7 +119,8 @@ export function gatewayBearerResolver(tokens: GatewayTokenEntry[]) {
   return (token: string): Principal | undefined => {
     const entry = table.get(token);
     if (!entry) return undefined;
-    return createPrincipal(entry.role, entry.principal_id, entry.engagement_id, [], undefined, entry.session_id);
+    validateGatewayTokenCapabilities(entry);
+    return createPrincipal(entry.role, entry.principal_id, entry.engagement_id, entry.capabilities as readonly PrincipalCapability[] | undefined, undefined, entry.session_id);
   };
 }
 

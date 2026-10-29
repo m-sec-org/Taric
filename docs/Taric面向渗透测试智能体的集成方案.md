@@ -37,7 +37,7 @@
 
 - **单机模式（默认）**：`single_host_sqlite` profile 使用持久 SQLite WAL authority 与本地 Artifact spool，无 PostgreSQL 依赖，适合一台机器上的宿主与多个 worker。
 - **多主机模式（显式启用）**：`multi_host_authority` profile 使用同一个 PostgreSQL authority；各机器运行 Taric Core，并接入各自宿主的模型、工具与本地 spool。共享范围由 Engagement 与 principal 权限共同约束，不自动跨 Engagement 分享。
-- **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理凭据生命周期。agent 调度、工具调用、动作授权、HITL 交互全部由宿主系统负责。
+- **Taric 只做状态与记忆**：不运行模型、不启动/调度 agent、不执行目标系统操作、不发放高风险动作授权、不管理目标凭据生命周期。宿主明确授权后，Taric 可将任务目标的用户名密码、token、cookie、密钥或 SSO 材料作为 opaque Artifact 保存，并由可信 host/operator 通过 `content_read` 按需取用；agent 调度、工具调用、动作授权、HITL 交互和目标凭据 ACL/加密/轮换/撤销/保留由宿主系统负责。Taric 的 gateway/authority/TLS 接入凭据是独立的配置凭据，不能混入任务数据。
 - **零模型直写**：三类智能体（都是 LLM agent）对权威记忆只有"提案权"；权威写入、任务认领、工具执行、Artifact 落盘由宿主运行时以 host/operator 身份完成。观察者的纠偏同样是"提案 + 建议"，由宿主强制执行。
 
 多主机模式已接入与 SQLite 共用的异步 Core 治理实现。仓库保存的[PostgreSQL v2 验证报告](benchmarks/postgres-runtime-v2.json)仍是 pre-1.0.0 历史证据，不能激活当前 `1.0.1` profile。2026-10-27 的独立 current-source live report 在本机 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`，12 个 runtime scenario 和独立备份/恢复均通过；当前实现、schema、policy 摘要匹配的证据与部署 schema/租约健康检查仍是启用条件，默认 PostgreSQL runtime 保持关闭。两个独立 Node 容器在同一工作站通过 lease 竞争、owner 容器终止、reclaim 与旧 generation fencing 检查；真实跨物理机协作、网络中断恢复与容量仍需按 §11 验收。
@@ -174,7 +174,7 @@ PostgreSQL 统一权威状态和提交顺序，各宿主可并行运行模型与
 
 - 每个智能体使用**独立的 `TARIC_PRINCIPAL_ID`**，保证审计事件、幂等键、Context cursor 与提案 provenance 可归属到具体 agent。
 - 观察者需要两个身份：`model` 身份走 MCP 做日常巡查；`reviewer` 身份仅用于 `review.submit`（reviewer_id 必须等于已验证 principal id，防止伪造）。两个身份能力不同，不要混用。
-- 智能体**不得**持有 host/operator/writer 凭据。多主机可以存在多个受信任 Core 写入实例，由共同 authority 的事务、版本和权限检查协调；不存在模型绕过 Core 直写数据库的通道。
+- 智能体**不得**持有 Taric 的 host/operator/writer/reviewer 或 gateway 接入凭据。任务目标凭据属于另一类受 Engagement 授权控制的 Artifact 数据；只有可信 host/operator 的显式 `content_read` 路径可以取回原文。多主机可以存在多个受信任 Core 写入实例，由共同 authority 的事务、版本和权限检查协调；不存在模型绕过 Core 直写数据库的通道。
 - 多主机使用全局可区分的身份，例如 `host-a`、`host-b` 与 `host-a/executor-1`、`host-b/executor-1`。`TARIC_HOST_ID` 是部署标识，任务 owner 取自经过验证的 host principal；仅修改请求中的 `host_id` 不会转移归属。部署时应将本机 host principal 与部署标识一致配置。
 
 ### 4.2 单机部署配置
@@ -220,7 +220,7 @@ try {
 }
 ```
 
-这是调用结构示意，`operation`、`verifiedPrincipal` 和 `request` 由宿主集成提供。连接凭据不能交给模型。服务不可用、报告缺失/不匹配或健康检查失败时保持阻塞，不创建 SQLite 降级副本；恢复 PostgreSQL 后重新检查健康并重试。部署步骤见[本地部署与启用](postgres-local-deployment.md)和[多主机运行手册](multi-host-authority-runbook.md)。仓库 Compose 示例仅绑定本机回环地址，不能原样作为跨机部署；跨机部署需配置受控网络、身份凭据、最小权限和连接保护。
+这是调用结构示意，`operation`、`verifiedPrincipal` 和 `request` 由宿主集成提供。Taric 连接凭据不能交给模型；目标系统认证材料应通过受信 host/operator 的 Artifact 路径存取。服务不可用、报告缺失/不匹配或健康检查失败时保持阻塞，不创建 SQLite 降级副本；恢复 PostgreSQL 后重新检查健康并重试。部署步骤见[本地部署与启用](postgres-local-deployment.md)和[多主机运行手册](multi-host-authority-runbook.md)。仓库 Compose 示例仅绑定本机回环地址，不能原样作为跨机部署；跨机部署需配置受控网络、身份凭据、最小权限和连接保护。
 
 ### 4.4 异构宿主的协作接入
 
@@ -228,7 +228,7 @@ try {
 
 ## 5. 采用闭环、成本与保证边界
 
-下面五条路径是依赖闭合的采用选择。每条路径都列出初始化、真实宿主职责、认证角色、操作和信任结果；完成一次调用不代表后续路径已经启用。模型始终只能使用现有六个 MCP 工具，host/operator/reviewer/writer 凭据必须由宿主的受信任入口持有。
+下面五条路径是依赖闭合的采用选择。每条路径都列出初始化、真实宿主职责、认证角色、操作和信任结果；完成一次调用不代表后续路径已经启用。模型始终只能使用现有六个 MCP 工具，Taric 接入用的 host/operator/reviewer/writer 凭据必须由宿主的受信任入口持有；目标系统凭据若需持久化则走显式 Artifact 存取，不进入模型 MCP。
 
 | 路径 | 初始化与依赖 | 角色与 operation | 结果、信任边界与宿主职责 |
 |---|---|---|---|
@@ -823,7 +823,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 
 关键边界：
 
-- **bridge 持有全部非模型凭据**。host/operator/writer/reviewer 只存在于 bridge；Solver 容器里的 MCP 进程只有 model principal，它**能提交提案但不能晋升、不能捕获观察、不能落 Artifact**。
+- **bridge 持有全部 Taric 接入凭据**。host/operator/writer/reviewer 只存在于 bridge；Solver 容器里的 MCP 进程只有 model principal，它**能提交提案但不能晋升、不能捕获观察、不能落 Artifact**。目标系统凭据若由任务产生，bridge 可按 Engagement/ACL 将其写入 Artifact；模型不能直接读取原文。
 - **原文由宿主写**。Solver 的工具输出已经通过 JSONL 回到宿主机（`runtime.ts:783-881`），bridge 依据真实字节写 Artifact；容器内不做 Artifact 上传，也不挂载 content root。
 - **每个 solver 一个 MCP 子进程**，principal 形如 `bw-solver-<solverId>`；这与 §4.1 的每实例独立身份一致。
 - **容器内 MCP 必须能打开同一 authority**：`proposal.submit`/`checkpoint.propose`/`action.recommend` 都是 authority 写入，`taric-mcp` 启动时会用 `TARIC_DB`（或配置文件）自行打开它（`server.ts:runMcpStdio` → `openRuntimeService`）。因此容器需要以可写方式访问该 SQLite 文件。这带来一个必须显式决策的边界：
@@ -847,7 +847,7 @@ operator   核对全局审计/覆盖，分别导出各宿主内容，协调数�
 约束与现状差异：
 
 - BreachWeave 的 Observer 当前通过 `challenge_memory_add` **直接写**项目共享记忆（`tools.ts:299-309` → `host-bridge-handler.ts:161-171` → `manager.ts:1345-1350`），宿主只做非空/枚举校验。接入 Taric 后这条路径必须改成**提案**：Observer 的结论是“对执行轨迹的判断”，不是工具字节，因此应提交 `claim` / `test_hypothesis` / `negative_observation` 提案，由 host admission 进入 L1；幻觉无法再直接进入共享层。
-- `reviewer` 的 attestation 必须来自宿主的可信配置/传输，不能由模型结果自报。当前 review CLI 可从可信环境配置读取 reviewer ID/attestation，并只转交宿主/operator 准备的外部结果；旧稿“CLI 固定传 undefined、reviewer 必须在 bridge 内创建”是历史实现判断。gateway resolver 也可将 token 映射到身份与 session，凭据保管仍由宿主负责。
+- `reviewer` 的 attestation 必须来自宿主的可信配置/传输，不能由模型结果自报。当前 review CLI 可从可信环境配置读取 reviewer ID/attestation，并只转交宿主/operator 准备的外部结果；旧稿“CLI 固定传 undefined、reviewer 必须在 bridge 内创建”是历史实现判断。gateway resolver 也可将 Taric token 映射到身份与 session；只有配置了 `capabilities:["content_read"]` 的 host/operator token 才能读取目标凭据 Artifact。Taric 接入凭据与目标系统凭据均由宿主负责保管，但必须分开存放。
 - 多项目 Planner 的横切视图：Taric 的 `context.query` 按 Engagement 绑定且 principal 固定（`service.ts:1211`）。BreachWeave 的 Planner 一次看 3 个活跃项目，因此有两种落地方式，二选一：
   1. **推荐**：bridge 以 operator 身份分别读取各 Engagement，拼成一份宿主侧快照注入 Planner；Planner 输出结构化 WorkItem 建议，由 bridge 写入对应 Engagement。代价是 Planner 不再是严格的 Taric model principal，但归属仍由宿主代写，审计真实。
   2. 每项目一个 Planner model 进程，跨项目调度退回宿主的确定性调度器。
@@ -965,7 +965,7 @@ operator   audit.verify / snapshot.export / 导出原文
 | 7 | 操作注册表无 WorkRun 状态迁移（`registry.ts:103-106` 只有 claim/renew/reclaim/resume） | WorkItem 完成走 `proposal.submit(work_item)` 更新 + `admission.evaluate`；WorkRun/Attempt 的终态迁移当前只能由持有 `AuthorityStore` 的受信任进程调用 `transitionWorkRun`（`store.ts:2937`），不是公开 dispatch 操作。bridge 若只持有 `CoreService`，应把“运行完成”表达为 WorkItem 状态与 checkpoint，而不是伪造 WorkRun 终态 |
 | 8 | run-bound 会话要求 claim 后绑定；已绑定的 host-session **不能**升级为 run-bound（`artifact-content-store.ts:190-219`，测试 `artifact-content.test.mjs:211-215`） | 每个 solver 用独立 session id；bridge 不要复用同一 session 跨 run |
 | 9 | 带 `TARIC_SESSION_ID` 的 proxy 在 claim 时会写 `task_session_ref`，而 claim 要求该 session 已注册（`store.ts:2479-2483`） | 推荐 bridge 不设全局 transport session，按 run 显式 bind；或用每 run 独立 principal |
-| 10 | `artifact.store.begin` 的 `summary` 字段拒绝 URL/token/secret 字样（`artifact-content-store.ts:242`） | 摘要只写分类与状态，不把目标 URL 放进 summary |
+| 10 | `artifact.store.begin` 的 metadata `summary` 字段拒绝 URL/token/secret 字样（`artifact-content-store.ts:242`）；该限制只针对摘要 metadata，不检查 Artifact payload | 摘要只写分类与状态；目标认证原文放在 opaque payload，通过 `content_read` 按需读取 |
 | 11 | Artifact JSON-RPC 单行上限 1 MiB，普通 RPC 原文读 ≤512 KiB（`adapter-rpc.ts:11-13,198-207`） | 大文件用 `storage_mode: external` + `host_ref`，或 bridge 内直接调用 Core |
 | 12 | `evaluateCoverageGate` 是库函数而非 dispatch 操作（`coverage.ts:167`，`index.ts` 导出） | bridge 读取 cells 后本地计算，或后续单独扩展操作面 |
 | 13 | 现有 `computeChallengeCompleted` 与 `scanned` 是唯一完成判据 | 必须整体替换；新旧两套完成语义并存会产生“报告说完成、矩阵说未测”的矛盾 |
@@ -975,7 +975,7 @@ operator   audit.verify / snapshot.export / 导出原文
 另外三条不属于 Taric 缺陷、但集成时必须由 BreachWeave 承担的责任：
 
 1. **容器内 MCP 的进程与网络**：solver 容器需要能启动 Node 进程并访问 bridge/authority；若容器无网络或只读文件系统，只能改为“宿主代理 MCP”（§4.4 的 transport 边界）。
-2. **Artifact 脱敏与保留**：spool 可能含 Cookie/Token 字节；Taric 不脱敏、不扫描、不删除，BreachWeave 必须自行配置 ACL 与保留策略。
+2. **Artifact 脱敏与保留**：spool 可能含 Cookie/Token 字节；Taric 支持经明确授权保存和按需读取这些目标凭据，但不脱敏、不扫描、不删除，BreachWeave 必须自行配置 ACL、加密、轮换、撤销与保留策略。gateway/authority/TLS 接入凭据另行配置，不能写入 spool。
 3. **覆盖矩阵粒度**：资产 × 测试类别 × 身份 × 条件会组合爆炸；BreachWeave 需要先定义测试类别字典，否则矩阵会退化为噪声。
 
 ### 14.9 不该做的事

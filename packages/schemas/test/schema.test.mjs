@@ -71,6 +71,15 @@ test("every unsupported capability has a follow-up owner or is a permanent non-g
   for (const entry of permanent) {
     assert.ok(!unsupportedContracts.some((u) => u.capability === entry), `${entry} is a non-goal, not a deferred capability`);
   }
+  const artifactRedaction = contractRegistry.permanent_non_goals.find((entry) => entry.capability === "artifact_redaction");
+  const secretScanning = contractRegistry.permanent_non_goals.find((entry) => entry.capability === "secret_scanning");
+  const credentialLifecycle = contractRegistry.permanent_non_goals.find((entry) => entry.capability === "credential_lifecycle");
+  assert.match(artifactRedaction.reason, /opaque Artifact bytes/);
+  assert.match(secretScanning.reason, /stored and read as raw bytes/);
+  assert.match(credentialLifecycle.reason, /task-target credentials stored as opaque Artifacts/);
+  const rawRead = operationContracts.find((entry) => entry.operation === "artifact.content.read");
+  assert.deepEqual(rawRead?.roles, ["host", "operator"]);
+  assert.equal(rawRead?.capability, "content_read");
 });
 
 test("generated TypeScript contract map and schema agree on the contract list", () => {

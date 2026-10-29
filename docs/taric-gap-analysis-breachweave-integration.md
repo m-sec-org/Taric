@@ -56,7 +56,7 @@ BreachWeave 推演提供了一个高信息量的测试用例：一个架构上**
 | **状态推送能力** | MCP 层只有 tools、无 resources，无任何 server-initiated notification；事件驱动能力为零 | P1 |
 | **采用路径** | 存量状态无导入路径、传输拓扑集中于 stdio/Unix socket、模块边界未文档化 | P1–P2 |
 
-需要明确的是：**本报告不主张降低 Taric 的安全标准**。零模型直写、host-only `capture.observation`、fail closed、Artifact 不解析不脱敏——这些是不变量，任何可接入性改进都不得触碰。下面所有建议都在这条红线之内。
+需要明确的是：**本报告不主张降低 Taric 的安全标准**。零模型直写、host-only `capture.observation`、fail closed、Artifact 不解析不脱敏——这些是不变量，任何可接入性改进都不得触碰。Artifact 原文可能含渗透目标认证信息；Taric 支持在宿主明确授权后以 opaque bytes 保存，并由获 `content_read` 的可信 host/operator 按需读取。不脱敏、不扫密和不管理凭据生命周期不等于拒绝存取目标凭据。gateway token、authority 数据库凭据和 TLS 私钥属于宿主到 Taric 的接入配置，不能与任务目标凭据混用。
 
 ---
 
@@ -287,9 +287,9 @@ MCP 的设计意图是 **tools 承载有副作用的动作、resources 承载数
 | 目标资源全局互斥/限速 | 否（仅部分） | §7.3：任务唯一租约 ≠ 目标资源锁 |
 | 资产发现完备性 | 否 | §10.2.2 残余缺口 1 |
 | 自动摘要、资源摘要沉淀 | 否 | §10.2.1 残余缺口 3 |
-| 内容脱敏、凭据生命周期、保留期限 | 否（且是永久非目标） | §5.8 |
+| 内容脱敏、目标凭据生命周期、保留期限 | 否（且是永久非目标）；授权 opaque Artifact 存取仍支持 | §5.8 |
 
-同时应诚实指出：**采纳 Taric 会新增暴露面**——Artifact spool 可能包含凭据/Token/Cookie 字节，而 Taric 明确不脱敏、不扫描、不自动删除。这是宿主的责任，但应在采用决策中被显式计入。
+同时应诚实指出：**采纳 Taric 会新增暴露面**——Artifact spool 可能包含凭据/Token/Cookie 字节，并可由明确授权的 host/operator 按需读回；Taric 不脱敏、不扫描、不自动删除。宿主必须负责 spool ACL、加密、访问授权、轮换、保留与删除策略，并在采用决策中显式计入。该任务目标材料与 gateway/authority/TLS 等 Taric 接入凭据应分开保管。
 
 ---
 
@@ -525,7 +525,7 @@ Taric 审计事件「永不包含 Artifact 内容或凭据物料」。通知作�
 - 零模型直写；`capture.observation` host-only
 - fail closed 与结构化拒绝
 - 五硬门由非 LLM 策略引擎重算；模型自报字段无效
-- Artifact 不解析、不脱敏、不扫描
+- Artifact 不解析、不脱敏、不扫描；可按 host/operator 授权保存/读取目标凭据 opaque bytes
 - 「不调度 agent、不执行目标动作」的边界
 - L1 ≠ 事实；L0/L1 默认不进普通召回
 

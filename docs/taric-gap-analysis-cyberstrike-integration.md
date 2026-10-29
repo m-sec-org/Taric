@@ -343,7 +343,7 @@ private async assertFence(input: ArtifactBeginInput, principal: string): Promise
 | 目标资源全局互斥/限速 | **否**（仅部分） | 集成方案 §7.3：任务唯一租约 ≠ 目标资源锁 |
 | 资产发现完备性 | **否** | 集成方案 §10.2.2 残余缺口 1 |
 | 自动摘要、资源摘要沉淀 | **否** | 集成方案 §10.2.1 残余缺口 3 |
-| 内容脱敏、凭据生命周期、保留期限 | **否**（永久非目标） | 集成方案 §5.8；`compatibility.ts` `TARIC_NON_GOALS` |
+| 内容脱敏、目标凭据生命周期、保留期限 | **否**（永久非目标）；授权的 opaque Artifact 保存/读取支持 | 集成方案 §5.8；`compatibility.ts` `TARIC_NON_GOALS` |
 | CyberStrike 的 `session_id` 作用域设计 | **否** | 宿主自身架构选择 |
 | CyberStrike 的记忆依赖模型主动调用 | **否** | 宿主实现缺陷，非 Taric 责任 |
 
@@ -442,7 +442,7 @@ BreachWeave 分析给出了「可移植运行时 > 开放宿主契约 > 事件/�
 - fail closed 与结构化拒绝；证据缺失即拒绝，不放宽
 - 五硬门由非 LLM 策略引擎重算；模型自报字段（`accept: true`、`trust_level`、`verified`）无效
 - L1 ≠ 事实；L0/L1 默认不进普通召回
-- Artifact 不解析、不脱敏、不扫描；凭据生命周期与保留策略属宿主
+- Artifact 不解析、不脱敏、不扫描；宿主授权的目标凭据可作为 opaque bytes 存取，生命周期与保留策略属宿主
 - 「不调度 agent、不执行目标动作、不签发授权」的边界
 - Engagement 隔离；跨 Engagement 不自动共享
 

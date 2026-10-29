@@ -12,7 +12,7 @@ export interface ProjectionOptions {
     retentionPolicy: string;
     authorizeRemotePush: (engagementId: string) => Promise<boolean> | boolean;
     secretScanCallback?: (input: SecretScanInput) => Promise<SecretScanCallbackResult | boolean> | SecretScanCallbackResult | boolean;
-    /** This callback performs the remote operation; Taric does not shell out or store credentials. */
+    /** This callback performs the remote push; repository access credentials stay in host configuration, not authority state or projections. */
     pushCallback?: (input: RemotePushInput) => Promise<RemotePushCallbackResult | boolean> | RemotePushCallbackResult | boolean;
   };
   localGit?: boolean;

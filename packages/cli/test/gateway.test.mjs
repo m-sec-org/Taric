@@ -16,6 +16,7 @@ const rotatedHostToken = "host-token-rotated-0123456789abcdef0123456789";
 const reviewerToken = "reviewer-token-0123456789abcdef01234567";
 const operatorToken = "operator-token-0123456789abcdef0123456789";
 const rotatedOperatorToken = "operator-rotated-0123456789abcdef0123456789";
+const contentReaderToken = "content-reader-token-0123456789abcdef0123456789";
 
 test("gateway config validation rejects malformed tables", () => {
   assert.ok(parseGatewayConfig(JSON.stringify({ socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "host", principal_id: "h" }] })));
@@ -25,6 +26,8 @@ test("gateway config validation rejects malformed tables", () => {
     { socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "superuser", principal_id: "h" }] },
     { socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "host" }] },
     { socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "host", principal_id: "h" }, { token: hostToken, role: "host", principal_id: "h2" }] },
+    { socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "host", principal_id: "h", capabilities: ["operator"] }] },
+    { socket_path: "/tmp/g.sock", tokens: [{ token: hostToken, role: "model", principal_id: "m", capabilities: ["content_read"] }] },
     { tls_tcp: { host: "127.0.0.1", port: 1234 }, tokens: [{ token: hostToken, role: "host", principal_id: "h" }] },
     { https: { host: "127.0.0.1", port: 1234 }, tls: { key_file: "key.pem" }, tokens: [{ token: hostToken, role: "host", principal_id: "h" }] },
     { https: { host: "127.0.0.1", port: 1234, path: "/rpc?bad" }, tls: { key_file: "key.pem", cert_file: "cert.pem" }, tokens: [{ token: hostToken, role: "host", principal_id: "h" }] },
@@ -35,11 +38,17 @@ test("gateway config validation rejects malformed tables", () => {
 test("gateway resolver maps table tokens exactly and fails closed on mismatch", () => {
   const resolver = gatewayResolver([
     { token: hostToken, role: "host", principal_id: "host-gw", engagement_id: "e1" },
+    { token: contentReaderToken, role: "host", principal_id: "reader-gw", engagement_id: "e1", capabilities: ["content_read"] },
     { token: reviewerToken, role: "reviewer", principal_id: "reviewer-gw", engagement_id: "e1" },
   ]);
   const host = resolver({ role: "host", principal_id: "host-gw", engagement_id: "e1" }, hostToken);
   assert.equal(host.role, "host");
   assert.equal(host.engagement_id, "e1");
+  assert.equal(host.capabilities.includes("content_read"), false);
+  const contentReader = resolver({ role: "host", principal_id: "reader-gw", engagement_id: "e1" }, contentReaderToken);
+  assert.equal(contentReader.capabilities.includes("content_read"), true);
+  const invalidResolver = gatewayResolver([{ token: hostToken, role: "host", principal_id: "bad-gw", capabilities: ["admit"] }]);
+  assert.throws(() => invalidResolver({ role: "host", principal_id: "bad-gw" }, hostToken), /may only grant content_read/);
   assert.throws(() => resolver({ role: "operator", principal_id: "host-gw" }, hostToken), /does not match/);
   assert.throws(() => resolver({ role: "host", principal_id: "host-gw" }, "unknown-token-0123456789abcdef012345678"), /unknown gateway token/);
 });
@@ -84,6 +93,7 @@ test("taric gateway serves configured tokens over one listener end to end", asyn
     socket_path: join(directory, "gw.sock"),
     tokens: [
       { token: hostToken, role: "host", principal_id: "host-gw", engagement_id },
+      { token: contentReaderToken, role: "host", principal_id: "content-reader-gw", engagement_id, capabilities: ["content_read"] },
       { token: reviewerToken, role: "reviewer", principal_id: "reviewer-gw", engagement_id },
     ],
   }));
@@ -97,12 +107,35 @@ test("taric gateway serves configured tokens over one listener end to end", asyn
     hostClient.send({ jsonrpc: "2.0", id: 2, method: "taric.dispatch", params: { token: hostToken, operation: "engagement.status", request: { engagement_id } } });
     const status = await hostClient.waitForLine((line) => line.includes('"id":2'));
     assert.equal(status.result.ok, true, JSON.stringify(status));
+    const readerClient = rpcClient(join(directory, "gw.sock"));
+    readerClient.send({ jsonrpc: "2.0", id: 4, method: "taric.identify", params: { token: contentReaderToken, declare: { role: "host", principal_id: "content-reader-gw", engagement_id } } });
+    assert.equal((await readerClient.waitForLine((line) => line.includes('"id":4'))).result.ok, true);
+    readerClient.send({ jsonrpc: "2.0", id: 5, method: "taric.dispatch", params: { token: contentReaderToken, operation: "artifact.session.bind", request: { engagement_id, session_id: "credential-session", root: join(contentRoot, "credential-session"), mode: "host-session" } } });
+    assert.equal((await readerClient.waitForLine((line) => line.includes('"id":5'))).result.ok, true);
+    const targetCredential = Buffer.from("username=operator\npassword=TARGET-GATEWAY-PASSWORD\ncookie=session=TARGET-GATEWAY-COOKIE\ntoken=TARGET-GATEWAY-TOKEN\n", "utf8");
+    const targetHash = `sha256:${createHash("sha256").update(targetCredential).digest("hex")}`;
+    readerClient.send({ jsonrpc: "2.0", id: 6, method: "taric.dispatch", params: { token: contentReaderToken, operation: "artifact.store.begin", request: { engagement_id, session_id: "credential-session", payload_kind: "text", media_type: "text/plain", expected_bytes: targetCredential.length, expected_hash: targetHash } } });
+    const begun = await readerClient.waitForLine((line) => line.includes('"id":6'));
+    assert.equal(begun.result.ok, true, JSON.stringify(begun));
+    readerClient.send({ jsonrpc: "2.0", id: 7, method: "taric.dispatch", params: { token: contentReaderToken, operation: "artifact.store.append", request: { engagement_id, session_id: "credential-session", upload_id: begun.result.data.upload_id, ordinal: 0, data: targetCredential.toString("base64"), encoding: "base64", chunk_hash: targetHash } } });
+    assert.equal((await readerClient.waitForLine((line) => line.includes('"id":7'))).result.ok, true);
+    readerClient.send({ jsonrpc: "2.0", id: 8, method: "taric.dispatch", params: { token: contentReaderToken, operation: "artifact.store.commit", request: { engagement_id, session_id: "credential-session", upload_id: begun.result.data.upload_id, total_bytes: targetCredential.length, chunk_count: 1, content_hash: targetHash } } });
+    const committed = await readerClient.waitForLine((line) => line.includes('"id":8'));
+    assert.equal(committed.result.ok, true, JSON.stringify(committed));
+    readerClient.send({ jsonrpc: "2.0", id: 9, method: "taric.dispatch", params: { token: contentReaderToken, operation: "artifact.content.read", request: { engagement_id, session_id: "credential-session", content_ref: committed.result.data.content_ref } } });
+    const read = await readerClient.waitForLine((line) => line.includes('"id":9'));
+    assert.equal(read.result.ok, true, JSON.stringify(read));
+    assert.deepEqual(Buffer.from(read.result.data.data, "base64"), targetCredential);
+    hostClient.send({ jsonrpc: "2.0", id: 10, method: "taric.dispatch", params: { token: hostToken, operation: "artifact.content.read", request: { engagement_id, session_id: "credential-session", content_ref: committed.result.data.content_ref } } });
+    const defaultRead = await hostClient.waitForLine((line) => line.includes('"id":10'));
+    assert.equal(defaultRead.result.error.code, "authorization_error");
     // 伪造声明：host token 声明 reviewer 身份。
     const forged = rpcClient(join(directory, "gw.sock"));
     forged.send({ jsonrpc: "2.0", id: 3, method: "taric.identify", params: { token: hostToken, declare: { role: "reviewer", principal_id: "reviewer-gw", engagement_id } } });
     const rejected = await forged.waitForLine((line) => line.includes('"id":3'));
     assert.match(rejected.error.message, /authorization/);
     hostClient.socket.destroy();
+    readerClient.socket.destroy();
     forged.socket.destroy();
   } finally {
     await gateway.close();

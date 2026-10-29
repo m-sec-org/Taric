@@ -44,6 +44,32 @@ test("Core stores and retrieves exact binary bytes while list remains metadata-o
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
 });
 
+test("task-target credentials round-trip as opaque Artifact bytes through explicit content_read", async () => {
+  const ctx = (await setup());
+  try {
+    const session_id = "credential-session";
+    await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root: join(ctx.dir, "content", session_id), mode: "host-session" });
+    const bytes = Buffer.from("username=operator\npassword=TARGET-PASSWORD-CANARY\ncookie=session=TARGET-COOKIE-CANARY\ntoken=TARGET-TOKEN-CANARY\n", "utf8");
+    const content_hash = sha256(bytes);
+    const begun = await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain", expected_bytes: bytes.length, expected_hash: content_hash });
+    assert.equal(begun.ok, true);
+    const appended = await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begun.data.upload_id, ordinal: 0, data: bytes.toString("base64"), encoding: "base64", chunk_hash: content_hash });
+    assert.equal(appended.ok, true);
+    const committed = await ctx.service.dispatch("artifact.store.commit", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begun.data.upload_id, total_bytes: bytes.length, chunk_count: 1, content_hash });
+    assert.equal(committed.ok, true);
+
+    const request = { engagement_id: ctx.engagement_id, session_id, content_ref: committed.data.content_ref };
+    assert.equal((await ctx.service.dispatch("artifact.content.read", ctx.host, request)).error.code, "authorization_error");
+    assert.equal((await ctx.service.dispatch("artifact.content.read", ctx.model, request)).error.code, "authorization_error");
+    const read = await ctx.service.dispatch("artifact.content.read", ctx.contentReader, request);
+    assert.equal(read.ok, true);
+    assert.deepEqual(Buffer.from(read.data.data, "base64"), bytes);
+    const listed = await ctx.service.dispatch("artifact.content.list", ctx.host, { engagement_id: ctx.engagement_id, session_id, page_size: 10 });
+    assert.equal("data" in listed.data.items[0], false);
+    assert.equal(JSON.stringify(await ctx.store.events()).includes("TARGET-PASSWORD-CANARY"), false);
+  } finally { await ctx.store.close(); rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
 test("transport rejects oversized or non-canonical base64 before decoding", async () => {
   const ctx = (await setup());
   try {

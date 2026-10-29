@@ -32,6 +32,10 @@ The gateway SHALL support an explicit operator-triggered reload of listener and 
 - **WHEN** a reload contains malformed tokens, invalid TLS material, or unsupported listener settings
 - **THEN** the gateway keeps the prior active configuration, returns a structured failure, and does not partially bind or remove listeners
 
-#### Scenario: Reload does not create a credential store
+#### Scenario: Reload does not create a gateway access credential store
 - **WHEN** the gateway reloads a token table
-- **THEN** it reads operator-managed configuration only, does not issue or persist bearer secrets in authority state, and preserves one-token-to-one-principal/Engagement binding
+- **THEN** it reads operator-managed Taric access configuration only, does not issue or persist gateway bearer secrets in authority state, and preserves one-token-to-one-principal/Engagement binding; this does not restrict task-target credentials stored as opaque Artifact payloads
+
+#### Scenario: Explicit task Artifact read grant
+- **WHEN** an operator configures `capabilities: ["content_read"]` on a host or operator token
+- **THEN** that fixed principal may read raw task-session Artifact bytes in its bound Engagement; tokens without the grant remain unable to read raw bytes, and model/reviewer/writer tokens cannot receive the grant

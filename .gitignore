@@ -7,9 +7,13 @@ node_modules/
 .DS_Store
 **/openspec/
 !openspec/
-openspec/changes/*
+openspec/*
 !openspec/changes/harden-taric-authority-runtime/
 !openspec/changes/harden-taric-authority-runtime/*.md
+!openspec/changes/2026-10-29-task-target-credential-artifacts/
+!openspec/changes/2026-10-29-task-target-credential-artifacts/*.md
+!openspec/changes/2026-10-29-task-target-credential-artifacts/specs/
+!openspec/changes/2026-10-29-task-target-credential-artifacts/specs/*
 **/.claude/
 **/.pi-reference-1.1.0/
 **/.taric/

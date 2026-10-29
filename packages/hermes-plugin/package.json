@@ -1,6 +1,6 @@
 {
   "name": "@taric/hermes-plugin",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "scripts": { "test": "python3 -m unittest discover -s tests" }

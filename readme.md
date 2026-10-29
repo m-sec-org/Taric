@@ -2,18 +2,20 @@
 
 Taric 是一个面向多智能体渗透测试的长期记忆与协作扩展。Core 提供版本化的 Engagement 权威状态、提案治理、证据引用、覆盖评估、任务租约、checkpoint、审计恢复、Context Pack 和可重建投影；CLI、MCP 与宿主 adapter 共享同一套 API 合同。
 
-Taric 作为独立插件或扩展，自身不运行模型，不决定启动时机，不启动或调度 agent，不执行目标系统操作。宿主应用负责 agent 调度、工具调用和动作授权。Artifact 可由宿主外部管理；宿主也可显式授权 Taric 在已绑定的任务会话 spool 中保存 opaque 原始内容。凭据生命周期、内容脱敏和保留期限仍由宿主/operator 负责。
+Taric 作为独立插件或扩展，自身不运行模型，不决定启动时机，不启动或调度 agent，不执行目标系统操作。宿主应用负责 agent 调度、工具调用和动作授权。Artifact 可由宿主外部管理；宿主也可显式授权 Taric 在已绑定的任务会话 spool 中保存并按需读回 opaque 原始内容，包括授权渗透测试过程中提供或获取的目标系统用户名密码、token、cookie、密钥和 SSO 材料。Taric 不脱敏、不扫密，也不签发、验证、刷新、轮换、撤销或管理这些目标凭据的生命周期；ACL、加密、保留和生命周期策略由宿主/operator 负责。
+
+Taric 接入凭据是另一类数据：gateway token、authority 数据库连接凭据、TLS 私钥和 runtime 配置只用于宿主与 Taric 之间的信任边界，不是任务目标凭据，必须由宿主/operator 单独配置和保护，不能交给模型或写入任务 Artifact。Gateway 按受保护配置加载其 token 映射并用于鉴权，不把 token 值返回给客户端或放进 authority 任务数据。
 
 Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权威记忆变更、证据绑定、覆盖状态和执行归属保存在可审计状态中，并为冲突、过期租约和恢复提供确定性检查。
 
 ## 当前合同与验证状态
 
-- CLI、Core、Bun SQLite driver、MCP 和 Schemas runtime components 为 `1.0.1`；root workspace 和 Hermes plugin 仍为 `1.0.0`。API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
+- Taric root workspace、CLI、Core、Bun SQLite driver、MCP、Schemas 和 Hermes plugin 当前版本均为 `1.0.2`。API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
 - Schema registry 暴露 57 个 operations；CLI 白名单为 49 项（包括本地 `artifact.store.append-file` helper），MCP 仅暴露 6 个模型工具。这些入口的权限和操作集合不同，不能互相推导。
-- 本轮 `1.0.1` 验证（2026-10-27）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 356/356（无 PostgreSQL 跳过），Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 全部通过。PostgreSQL runtime、独立备份恢复、双容器租约回收和容器 spool 检查均通过。
+- 上一轮 `1.0.1` 验证（2026-10-27）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 356/356（无 PostgreSQL 跳过），Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 全部通过。PostgreSQL runtime、独立备份恢复、双容器租约回收和容器 spool 检查均通过。
 - 当前源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。`1.0.1` 专项报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。容器运行在同一工作站，未验证跨物理机或网络中断恢复。
 - Pi/DeepSeek/Hermes adapter 合同、Bun driver、Hermes plugin 和 gateway 测试均通过；另在 `/tmp` 隔离安装并启动真实 Pi 1.4.0 RPC 进程，Taric 扩展成功通过其 `ExtensionAPI` 注册。本机 smoke 未调用模型或工具；DeepSeek/Hermes 真实宿主及完整 Pi 工作流仍未认证。Gateway 保留本机 Unix socket，并支持可选 TLS TCP 长连接 JSON-RPC 和 HTTPS `POST /rpc`；loopback TLS 端到端测试通过。HTTPS 不提供连接订阅；远程文件路径摄取拒绝，Artifact session root 由 gateway 在其配置的 content root 内派生。多机生产部署仍须单独验收证书、网络、凭据轮换和服务可用性。PostgreSQL runtime 仍要求当前构建匹配的 activation evidence 及目标 schema/lease health；npm registry 分发未支持，workspace 包保留 `private: true`。
-- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于本次 `1.0.1` 的 release report。
+- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于当前 `1.0.2` 的 release report。
 
 此前候选报告及其 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)；二者均绑定旧工作树。
 
@@ -26,8 +28,8 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 | 区分待审提案、机审候选和独立验证记录 | 调用渗透测试工具 |
 | 记录证据引用和测试覆盖状态 | 决定高风险动作是否允许 |
 | 管理 WorkRun、checkpoint 和 handoff 状态 | 选择自主执行或 HITL 流程 |
-| 按授权在任务会话 spool 保存 opaque Artifact 原始字节 | 管理 Artifact 脱敏、凭据生命周期和保留策略 |
-| 记录宿主回传的动作决定和结果 | 管理凭据、审批人身份和用户授权 |
+| 按授权在任务会话 spool 保存并按需读回 opaque Artifact 原始字节 | 管理目标凭据的 ACL、加密、轮换、撤销、保留和删除策略 |
+| 记录宿主回传的动作决定和结果 | 管理 Taric 接入凭据、审批人身份和用户授权 |
 
 Core 的默认权威边界是单主写入的 SQLite WAL authority；多主机使用显式的 `multi_host_authority` PostgreSQL profile。SQLite 和 PostgreSQL 共用 Core 治理逻辑，但 PostgreSQL runtime 默认关闭，只有当前构建匹配的 conformance report、schema 和 lease health 全部通过才会启用。所有 canonical 写入经过 Core service、身份校验、schema/状态机/版本检查和审计事件；Markdown、Git、Context Pack、JSON/JSONL snapshot 都是派生结果。可选 Artifact spool 的 payload 文件位于配置的内容根目录，不嵌入 authority 数据库、审计事件或模型输出。模型调用、worker 调度和目标系统请求不进入 Core。
 
@@ -45,8 +47,9 @@ Taric 支持三种动作协作模式：
 
 - Taric 可通过 `artifact.session.bind` 和 `artifact.store.*` 在显式绑定的任务会话 spool 中保存 opaque 文本或二进制原文；默认 model/MCP、Context、Markdown projection 和 snapshot 不返回原文。
 - Artifact spool 仅按 host/operator 显式授权使用。Taric 不解析、执行、解密、扫描或脱敏 payload，也不自动删除、恢复或应用保留期限。
-- Taric 不保存凭据或 Token。
-- Taric 不扫描或脱敏宿主数据。
+- Taric 可在显式 host/operator 授权和 `content_read` 门控下保存、读回任务目标凭据的 opaque Artifact 字节。
+- 宿主与 Taric 间的 gateway/authority/TLS 配置凭据由宿主管理，不得写入任务 Artifact、模型视图或诊断响应；它们与任务目标凭据分开存放。
+- Taric 不扫描或脱敏宿主数据；Artifact 原文可能包含目标凭据。
 - Taric 不发起目标系统请求。
 - Taric 不授权高风险动作。
 - 默认 Node SQLite driver 使用同步 `node:sqlite`。Core 方法返回 Promise，但底层 SQL 和部分文件阶段仍同步，长时间操作会阻塞调用进程；注入 Bun SQLite driver 不会加载 Node SQLite driver。
@@ -135,7 +138,7 @@ node --test scripts/test/profile-verification.test.mjs
 ```bash
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
 TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.1.json
+node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.2.json
 ```
 
 `npm test` 会运行各 workspace 的 Node 测试和 Hermes 插件的 Python 测试。单独运行 Hermes 插件测试：

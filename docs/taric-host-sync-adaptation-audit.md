@@ -17,20 +17,20 @@ Taric 的产品边界是独立的外置记忆、权威状态和治理插件。Ta
 
 Taric 负责的是可验证的状态与治理契约：记录和查询权威实体、执行非 LLM admission/hard-gate、维护 host-only capture 与 provenance、提供 WorkItem/WorkRun 的任务状态接口、计算覆盖状态、提供无内容的状态提示，以及在明确授权时对绑定任务会话 spool 中的 opaque 原始字节做完整性保护和持久化。`resource_refs` 是调度提示，不是目标资源锁；通知是提示，不是 agent 启动命令；`coverage.gate` 是状态判断，不是关闭 Engagement 的决策。
 
-Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的文件摄取或 spool 存储扩展时，Taric 才需要验证绑定会话、路径/对象边界、字节完整性、幂等和失败恢复。Taric 不解析、不脱敏、不扫描 opaque 内容，也不负责凭据生命周期、内容保留期限、删除策略或宿主侧秘密管理；这些由宿主/operator 负责。
+Artifact 可以完全由宿主外部管理。只有宿主显式选择 Taric 的文件摄取或 spool 存储扩展时，Taric 才需要验证绑定会话、路径/对象边界、字节完整性、幂等和失败恢复。宿主授权的任务目标凭据可作为 opaque Artifact 保存，并由 `content_read` 可信读取；Taric 不解析、不脱敏、不扫描 opaque 内容，也不负责目标凭据生命周期、内容保留期限、删除策略或 Taric 接入凭据管理；这些由宿主/operator 负责。
 
 因此本报告采用两个验收 profile。它们用于判断某一发布声明是否成立，不表示每个宿主必须启用所有扩展：
 
 | Profile | 结论含义 | 必须验证的内容 |
 |---|---|---|
 | Taric 独立插件基线 | 判断通用插件本身及其公开合同是否可发布 | 对外公开的 API、治理和状态语义正确，版本可识别；订阅通知、Bun 嵌入、文件摄取、review CLI 等分别作为可选能力，不因存在于方案中就成为每个宿主的必选项 |
-| 宿主嵌入扩展（BreachWeave R 路线） | 判断特定宿主是否可选择进程内嵌入 | T-A Bun 驱动与可安装分发、D4 三方版本矩阵、宿主 principal 映射、可选 T-E/T-G/T-F，以及真实宿主的调度、工具、凭据和 spool 验收 |
+| 宿主嵌入扩展（BreachWeave R 路线） | 判断特定宿主是否可选择进程内嵌入 | T-A Bun 驱动与可安装分发、D4 三方版本矩阵、宿主 principal 映射、可选 T-E/T-G/T-F，以及真实宿主的调度、工具、目标凭据生命周期/授权读回和 spool 验收 |
 
 ## 2. 终审结论
 
 截至 2026-10-27，修复前审核列出的 Taric 实现缺陷均已完成对应实现并通过合同/回归测试；当前 `1.0.1` build、typecheck、矩阵、workspace 测试和当前 runtime/backup/restore 验证通过。PostgreSQL 当前源码 live/runtime 和同机双容器 lease/reclaim 已通过；跨物理机部署与网络中断恢复仍未验证。容器 spool bind mount 已在两个顺序运行的 Node 容器间通过写入、替换和原字节读取检查；这不等于完整第三方宿主集成认证。Pi 1.4.0 真实 RPC host 已加载 Taric extension，未调用模型/工具。Bun 驱动、通知、review pack 和显式授权文件摄取是已实现的可选 profile，不是每种部署都必须启用的能力。
 
-就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.1` 当前构建验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、凭据管理、spool/外部 Artifact 选择和真实运行时行为。PostgreSQL 当前源码 runtime 与同机双 host 容器 lease 已验证，但不代表 BreachWeave 或跨物理机部署认证。包仍为 private、未发布至 npm registry。Taric 不承担宿主的模型和执行职责。
+就 BreachWeave 的 R 路线而言，Taric 的本地插件合同、workspace 测试和 `1.0.1` 当前构建验证已通过；BreachWeave 的进程内集成仍需验证宿主配置、agent 调度、资源冲突协调、工具与动作授权、目标凭据生命周期、Artifact `content_read` principal 授权、spool/外部 Artifact 选择和真实运行时行为。PostgreSQL 当前源码 runtime 与同机双 host 容器 lease 已验证，但不代表 BreachWeave 或跨物理机部署认证。包仍为 private、未发布至 npm registry。Taric 不承担宿主的模型和执行职责。
 
 本报告不以主观百分比衡量完成度；表中的实现状态、当前工作区验证、部署 profile 认证和真实宿主集成是不同结论，不互相替代。
 
@@ -103,7 +103,7 @@ API 合同已升至 `1.2.0`，兼容矩阵含新增操作；Core、Schemas 与 B
 
 | 级别 | 问题 | 影响与处理要求 |
 |---|---|---|
-| 条件性安全门（仅启用 T-E） | `artifact.ingest_file` 先 `realpath/stat`，后按路径重新打开并可按路径删除 | 若宿主授权 Taric 读取绑定任务会话 spool，session root 被另一主体并发写入时，符号链接/路径替换可能使读取越出绑定目录，也可能删除替换后的目标。采用受信 staging 目录和受控文件描述符读取；仅用 `O_NOFOLLOW` 不能保护可变父目录或后续按路径删除。同步读取一次、在实际上传字节流上累计 hash，并在提交时校验；若需“快照”语义，限制写入者或先生成不可变文件。宿主外部管理 Artifact 时，该项不构成 Taric 基线发布门。Taric 不负责凭据、脱敏、保留或删除策略。 |
+| 条件性安全门（仅启用 T-E） | `artifact.ingest_file` 先 `realpath/stat`，后按路径重新打开并可按路径删除 | 若宿主授权 Taric 读取绑定任务会话 spool，session root 被另一主体并发写入时，符号链接/路径替换可能使读取越出绑定目录，也可能删除替换后的目标。采用受信 staging 目录和受控文件描述符读取；仅用 `O_NOFOLLOW` 不能保护可变父目录或后续按路径删除。同步读取一次、在实际上传字节流上累计 hash，并在提交时校验；若需“快照”语义，限制写入者或先生成不可变文件。宿主外部管理 Artifact 时，该项不构成 Taric 基线发布门。目标凭据生命周期、Artifact 脱敏、保留和删除策略由宿主负责。 |
 | P2 | `work.query` 对 model 角色返回原始 WorkItem | 与 `query` 的 `sanitizeModelRecord` 策略不一致。检查 WorkItem 内容中可能含 URL、摘要或其他不应直接暴露给模型的字段，复用/定义明确的模型投影，并加字段级断言。 |
 | P2 | `coverage.gate` visibility 摘要第二次读取 | gate 和摘要可能对应不同数据库水位。改成同一快照返回，或为二者返回明确的独立 `read_seq`，避免宿主据拼接结果作关闭判断。 |
 | P2 | review policy digest 来源未绑定 | harness 可用默认或 CLI 值填摘要；应从提案 admission 固定结果读取并验证。与 R1 的证据快照绑定一起修复。 |

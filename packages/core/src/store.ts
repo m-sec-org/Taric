@@ -1839,7 +1839,7 @@ export class AuthorityStore {
                 body: string;
             }>;
             const records = rows.map((row) => sanitizeSnapshotRecord(JSON.parse(row.body), sensitive) as CanonicalRecord);
-            const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.0", engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
+            const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.2", engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
             return { ...payload, hash: hash(json(payload)) };
         }));
     }
@@ -1876,7 +1876,7 @@ export class AuthorityStore {
                     throw new ContractValidationError("validation_error", "snapshot JSONL contains an invalid record row");
                 return row.record;
             });
-            normalized = { schema_version: manifest.schema_version, core_version: "1.0.0", engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
+            normalized = { schema_version: manifest.schema_version, core_version: "1.0.2", engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
         }
         else
             normalized = snapshot;

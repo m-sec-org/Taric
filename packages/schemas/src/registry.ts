@@ -154,9 +154,9 @@ export const permanentNonGoals: Array<{ capability: string; reason: string }> = 
   { capability: "hitl_identity", reason: "Taric 不建立人的身份或 HITL 审批系统" },
   { capability: "agent_loop", reason: "Taric 不实现 agent loop 或 worker 调度" },
   { capability: "audit_signing_keys", reason: "Taric 不托管审计签名密钥" },
-  { capability: "artifact_redaction", reason: "Taric stores opaque originals and does not redact payloads" },
-  { capability: "secret_scanning", reason: "Taric does not inspect raw payloads for secrets" },
-  { capability: "credential_lifecycle", reason: "Taric does not manage credential or token lifecycle" },
+  { capability: "artifact_redaction", reason: "Taric may store task-target authentication material as opaque Artifact bytes after explicit host authorization, but does not redact payloads" },
+  { capability: "secret_scanning", reason: "Taric does not inspect opaque Artifact bytes for secrets; task-target credentials may be stored and read as raw bytes" },
+  { capability: "credential_lifecycle", reason: "Taric does not issue, validate, refresh, rotate, revoke, or manage credential lifecycles; host-managed Taric transport/runtime credentials are separate from task-target credentials stored as opaque Artifacts" },
   { capability: "content_retention", reason: "Retention and expiry remain host/operator policy" },
 ];
 

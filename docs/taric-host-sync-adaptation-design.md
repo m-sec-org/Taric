@@ -8,7 +8,7 @@
 > **本方案的约束（不可违反）**：Taric 保持**独立且通用的外置记忆插件**定位——
 > 1. 每项改动必须能以"任意宿主接入都需要"的语言立项，BreachWeave 只是首个消费者与验证宿主；
 > 2. 宿主域概念（WSTG 字典、渗透工具、CTF/项目语义等）**禁止进入 core**；`test_category` 等保持为不透明字符串字段；
-> 3. 安全不变量不动：零模型直写、`capture.observation` host-only、fail closed、五硬门由非 LLM 策略引擎重算、L1 ≠ 事实、L0/L1 默认不进普通召回、Artifact 不解析/不脱敏/不扫描。
+> 3. 安全不变量不动：零模型直写、`capture.observation` host-only、fail closed、五硬门由非 LLM 策略引擎重算、L1 ≠ 事实、L0/L1 默认不进普通召回、Artifact 不解析/不脱敏/不扫描；宿主授权的目标凭据仍可作为 opaque Artifact 保存并由 `content_read` 按需读取。
 
 ---
 
@@ -229,7 +229,7 @@ interface SubscriptionSignal { topic: string; engagement_id: string; read_seq: n
 - Core 在绑定根内打开一个不跟随末端符号链接的文件描述符，核对 descriptor、目录项和真实路径身份；同一个 descriptor 只读取一次，在实际分块时累计完整内容 hash，并将相同字节送入既有 staging、校验、publication 和幂等路径。
 - `path` 不得包含 `..`，且必须位于已绑定根目录内。支持的最大字节数由 `TARIC_INGEST_MAX_BYTES` 设置，默认 2 GiB；无效配置在读取前失败。外部 Artifact 仍是默认零拷贝方案，不会打开其内容。
 - 读取过程中若路径身份、descriptor 元数据或实际长度变化，Core 在 publication 前拒绝；stage 数据不会出现在 Artifact catalog。Node/Bun 当前文件 API 无法原子地比较文件对象并 unlink，因此即使请求设置 `delete_source: true`，Core 也保留源文件并返回 `source_deleted: false` 与原因。若以后某运行时提供原子身份条件删除，只有绑定目录项仍匹配已读对象时才可启用；检测到替换或无法核对时必须保留路径项。
-- Taric 不解析、扫描、分类或脱敏这些字节；凭据、内容脱敏、保留期限及一般删除策略仍由宿主/operator 负责。
+- Taric 不解析、扫描、分类或脱敏这些字节；任务目标凭据可作为 opaque 原文保存/按授权读回，其 ACL、加密、轮换、保留期限及一般删除策略仍由宿主/operator 负责。Taric 的 gateway、authority 和 TLS 接入凭据是另一类宿主配置，不是任务 Artifact。
 
 ### 6.3 验收
 

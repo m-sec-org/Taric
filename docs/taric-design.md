@@ -19,13 +19,13 @@
 
 ## 1. 概述
 
-Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔离单位；Core 管理版本化记录、Proposal/Review/Admission、覆盖、WorkRun/Attempt、checkpoint、动作状态、审计、Context 和可选 Artifact spool。宿主负责模型调用、worker 调度、真实工具执行、人工身份、动作授权、凭据与内容保留策略。
+Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔离单位；Core 管理版本化记录、Proposal/Review/Admission、覆盖、WorkRun/Attempt、checkpoint、动作状态、审计、Context 和可选 Artifact spool。宿主负责模型调用、worker 调度、真实工具执行、人工身份、动作授权及目标凭据的 ACL、加密、生命周期和内容保留策略。授权的目标系统认证材料可以作为 opaque Artifact 原文存取；连接 Taric 所需的 gateway、authority 和 TLS 配置凭据由宿主独立保管。
 
 当前实现同时支持持久单机 SQLite 与显式启用的 PostgreSQL 共享 authority，两者复用同一套异步 Core 治理代码。CLI、MCP、原生 adapter 和本机 Node proxy 都调用 Core；PostgreSQL 不复制业务治理，Markdown/Git 不充当 authority。模型不能调用 writer/host/operator 路径，也不能自行声明已验证事实。
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前 runtime components 为 `1.0.1`（root workspace 和 Hermes plugin 保持 `1.0.0`），API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3` 不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是本次 `1.0.1` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
+当前 root workspace 和 runtime components 均为 `1.0.2`，API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3` 不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前 `1.0.2` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
 
 ## 2. 技术栈
 
@@ -154,7 +154,7 @@ operator `snapshot.export` 返回 sanitized Taric-native JSON，包含所选序�
 
 ### 5.1 模式与会话绑定
 
-宿主可仅保留外部 `host_ref`，或授权存储 opaque text/binary/manifest 字节。Taric 不抓取外部引用、不解析/执行/脱敏原文，也不管理凭据生命周期；原文可能含 token/cookie/密钥，ACL、加密卷、扫描、保留与备份由宿主负责。模型仅获允许的引用/类型化元数据。
+宿主可仅保留外部 `host_ref`，或授权存储 opaque text/binary/manifest 字节，包括用户提供或任务中获得的目标系统用户名密码、token、cookie、密钥和 SSO 材料。持有 `content_read` 的可信 host/operator 可按需经 `artifact.content.read` 读取原始字节。Taric 不抓取外部引用、不解析/执行/脱敏或扫密，也不签发、验证、刷新、轮换、撤销或管理凭据生命周期；原文的 ACL、加密卷、保留、删除与备份由宿主负责。普通模型查询仅获允许的引用/类型化元数据。
 
 `artifact.session.bind` 必须指定模式：
 
@@ -250,7 +250,7 @@ PG 的 dbPath 仍参与默认 contentRoot 推导，但不打开 SQLite；部署�
 
 ## 9. 外部依赖
 
-Node、SQLite 与本地文件系统是单机运行前提；PG profile 另外依赖数据库连接与有效证据。宿主提供工具、身份、批准、凭据及可选扫描/push callbacks。`reference/` 的冻结输入只用于设计，不是运行时依赖。系统不调用模型 API。
+Node、SQLite 与本地文件系统是单机运行前提；PG profile 另外依赖数据库连接与有效证据。宿主提供工具、身份、批准、目标凭据执行策略及可选扫描/push callbacks；目标凭据需要在任务中持久化时，可通过 Artifact 内容接口交给 Taric。连接 Taric 所需的数据库、gateway 和 TLS 凭据仍由宿主单独提供。`reference/` 的冻结输入只用于设计，不是运行时依赖。系统不调用模型 API。
 
 ## 10. 业务规则与约束（代码强制的不变量）
 

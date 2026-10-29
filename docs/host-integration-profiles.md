@@ -1,6 +1,6 @@
 # Taric host integration profiles
 
-Taric is an embeddable memory and governance plugin. It does not run models, select or launch agents, schedule tools, execute target-system operations, or authorize actions. The host/operator owns those responsibilities along with credentials, redaction, retention, and human-review workflow.
+Taric is an embeddable memory and governance plugin. It does not run models, select or launch agents, schedule tools, execute target-system operations, or authorize actions. Authorized task-target credentials may be stored as opaque Artifact bytes and read by a trusted host/operator; the host/operator owns their ACL, encryption, redaction, rotation, revocation, retention and human-review workflow. Taric gateway/authority/TLS credentials are separate host configuration secrets.
 
 ## Profiles
 
@@ -9,8 +9,8 @@ Taric is an embeddable memory and governance plugin. It does not run models, sel
 | Independent plugin baseline | Versioned Core/API, authority and governance state, host/operator interfaces, documented storage and recovery contracts | Select a transport and runtime topology; schedule agents/tools and authorize every target action |
 | Bun in-process embedding (optional) | `@taric/core`, `@taric/schemas`, and `@taric/driver-bun-sqlite` package artifacts with a tested dependency closure | Pin the matching artifacts and host build; own lifecycle, scheduling, tools, authorization, credentials, and deployment paths |
 | Central remote gateway (optional) | Existing Core API through TLS TCP connection-oriented JSON-RPC or HTTPS request/response, fixed token-to-principal mapping | Protect the TLS config/key and tokens, restrict network reachability, provide the current PostgreSQL activation evidence, and decide how remote Artifact bytes and retention are managed |
-| External Artifact reference (optional) | Opaque external references and metadata; Taric does not fetch the referenced payload | Store/read payload bytes and apply credential, redaction, retention, and deletion policy |
-| Taric task-session spool (`taric_stored`, default storage mode) | Bounded integrity-checked storage for opaque bytes after explicit host authorization | Bind each task session to a durable root, protect and back up the spool, decide which bytes Taric may access, and own credential/redaction/retention policy |
+| External Artifact reference (optional) | Opaque external references and metadata; Taric does not fetch the referenced payload | Store/read payload bytes and apply target-credential ACL, encryption, redaction, rotation, revocation, retention, and deletion policy |
+| Taric task-session spool (`taric_stored`, default storage mode) | Bounded integrity-checked storage and explicit raw read for opaque bytes after host authorization, including task-target credentials | Bind each task session to a durable root, protect and back up the spool, grant `content_read` only to trusted readers, and own target-credential/redaction/retention policy |
 | Review material (optional) | Deterministic review pack and attested review submission contract | Select reviewers, call any model, conduct human review, and produce the verdict |
 | State notifications (optional) | Bounded, best-effort state hints with polling recovery | Re-read authoritative state and decide whether any host-side action is appropriate |
 
@@ -18,7 +18,7 @@ These integration paths are independently selected and verified; their existence
 
 ## Version and package pairing
 
-This release exposes runtime components `1.0.1` (`@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, and `@taric/mcp`), while the private root workspace and Hermes plugin remain `1.0.0`; API contract `1.2.0`, schema `1.0.0`, and authority storage contract `authority-storage/3` are unchanged. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions. On 2026-10-27, build, typecheck, matrix validation and the PostgreSQL-configured workspace suites passed (Core 356/356 with no skipped live tests, CLI 37/37, Bun 11/11, MCP 12/12, and Schemas 10/10). Current runtime, backup/restore, multi-host and spool reports were generated for the `1.0.1` build.
+This release exposes root and runtime components at `1.0.2` (`@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/mcp`, and `@taric/hermes-plugin`); API contract `1.2.0`, schema `1.0.0`, and authority storage contract `authority-storage/3` are unchanged. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions. The dated runtime, backup/restore, multi-host and spool reports cited below were generated for the prior `1.0.1` build.
 
 The Bun embedding profile uses versioned package artifacts; public npm publication is not required. Build the artifacts in dependency order:
 
