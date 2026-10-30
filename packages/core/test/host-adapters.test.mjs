@@ -166,6 +166,31 @@ test("Pi 1.4 hooks use explicit host bindings for proposal, checkpoint, and acti
   (await store.close());
 });
 
+test("opaque successful tool results do not become canonical observations or evidence", async () => {
+  const store = new AuthorityStore();
+  const service = (await createCoreService(store));
+  const engagement_id = uuidv7();
+  const adapter = createPiAdapter(service, createPrincipal("host", "pi-host", engagement_id));
+  const extension = richPiExtensionApi();
+  try {
+    await adapter.register(extension);
+    const before = await store.events();
+    const opaqueOutput = {
+      type: "tool_result", toolName: "http", toolCallId: "call-opaque-1", isError: false,
+      content: [{ type: "text", text: "200 OK; this payload has no canonical Resource or Evidence contract" }],
+      observation: { kind: "observation", statement: "caller supplied, not trusted" },
+    };
+    const results = await extension.emit("tool_result", opaqueOutput);
+
+    assert.equal(results.at(-1), undefined, "without an explicit host result mapper, successful output remains adapter-owned data");
+    assert.deepEqual(await store.list(engagement_id, { includeCandidates: true }), [],
+      "tool output does not create Observation, Evidence, or a proposal implicitly");
+    assert.deepEqual(await store.events(), before, "opaque output does not create authority events");
+  } finally {
+    await store.close();
+  }
+});
+
 test("resume packet reports conservative premise checks and stale checkpoint attempt", async () => {
   const store = new AuthorityStore();
   const engagement_id = uuidv7();

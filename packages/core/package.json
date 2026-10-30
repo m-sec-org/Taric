@@ -1,6 +1,6 @@
 {
   "name": "@taric/core",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "test": "node --test --test-concurrency=2"
   },
   "dependencies": {
-    "@taric/schemas": "1.0.2",
+    "@taric/schemas": "1.0.3",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "pg": "^8.23.1"

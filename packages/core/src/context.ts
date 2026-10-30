@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { ADAPTER_CONTRACT_VERSION } from "@taric/schemas";
 import { mkdtempSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -353,7 +354,7 @@ function packPage(state: CursorState, budget: number, keyRoot: string, authority
     priority: recordPriority(item)
   }));
   const result: ContextPack = {
-    context_snapshot_id: state.snapshot_id, read_seq: state.read_seq, schema_version: "1.0.0", adapter_version: "adapter/1.0", budget, budget_unit: "characters", used,
+    context_snapshot_id: state.snapshot_id, read_seq: state.read_seq, schema_version: "1.0.0", adapter_version: `adapter/${ADAPTER_CONTRACT_VERSION}`, budget, budget_unit: "characters", used,
     builder_version: BUILDER_VERSION, policy_version: state.policy_version, items, omitted_count: omittedCount, omitted_count_complete: !state.page_has_more,
     omitted_as_unexamined: omittedCount > 0,
     omitted_ranges: omittedCount ? [{ after_id: lastEmitted?.id, before_id: pending[nextOffset]?.id, count: omittedCount }] : [],

@@ -18,7 +18,7 @@ These integration paths are independently selected and verified; their existence
 
 ## Version and package pairing
 
-This release exposes root and runtime components at `1.0.2` (`@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/mcp`, and `@taric/hermes-plugin`); API contract `1.2.0`, schema `1.0.0`, and authority storage contract `authority-storage/3` are unchanged. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, driver metadata, and certified host versions. The dated runtime, backup/restore, multi-host and spool reports cited below were generated for the prior `1.0.1` build.
+This release exposes root and runtime components at `1.0.3` (`@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/mcp`, and `@taric/hermes-plugin`); API contract `1.3.0`, adapter contract `1.1`, schema `1.0.0`, authority storage contract `authority-storage/3`, and SQL format `authority-sql/4`. The record schema and persistence contracts are unchanged. Check the generated [`compatibility-matrix.json`](../compatibility-matrix.json) before pairing a host with Taric. The matrix records operation schemas/errors, package exports and runtime dependencies, adapter contract version, driver metadata, and certified host versions. The dated runtime, backup/restore, multi-host and spool reports cited below were generated for the prior `1.0.1` build.
 
 The Bun embedding profile uses versioned package artifacts; public npm publication is not required. Build the artifacts in dependency order:
 
@@ -39,7 +39,7 @@ npm pack packages/driver-bun-sqlite
 
 Install the three matching tarballs in the consumer together with the host's locked runtime dependencies. Do not rely on workspace links, TypeScript path aliases, or a separately built source tree. The clean consumer must import `AuthorityStore` and `BunSqliteAuthorityDriver`, open a temporary authority, then run shared runtime and driver-specific conformance. See the [Bun driver guide](authority-driver-guide.md) for the driver API and acceptance scenarios.
 
-Taric uses exact contract-version matching. A host declaring API `1.1.0` is rejected by an API `1.2.0` service; deploy a matching host/Taric pair or a separately maintained earlier release. No compatibility shim or implicit downgrade is provided.
+Taric uses exact contract-version matching. A host declaring API `1.2.0` is rejected by an API `1.3.0` service; deploy a matching host/Taric pair or a separately maintained earlier release. Adapter clients must likewise pair with adapter contract `1.1`; no compatibility shim or implicit downgrade is provided.
 
 ## Verification boundary
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, ContractValidationError, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
@@ -203,22 +204,180 @@ test("run-scoped proposals verify the active Attempt, owner, lease, and task ses
   }
 });
 
-test("service action recommendation flows through host decision and result without execution", async () => {
+test("Core action dispatch audits host decisions and outcomes against the current owner and Attempt without executing targets", async () => {
   const store = new AuthorityStore();
-  const service = (await createCoreService(store));
-  const item = (await workItem(store));
-  const host = createPrincipal("host", "pi", item.engagement_id);
-  const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: host.id, agent_id: "worker" }));
-  const recommendation = (await service.dispatch("action.recommend", host, { engagement_id: item.engagement_id, work_run_id: run.run_id, generation: run.generation, target: "/admin", method: "GET", rationale: "verify exposure", scope: "in-scope" }));
-  assert.equal(recommendation.ok, true);
-  assert.equal(recommendation.data.execution, undefined);
-  const actionId = recommendation.data.recommendation_id;
-  const decision = (await service.dispatch("action.host-decision", host, { engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation, mode: "host_hitl", status: "authorized", host_decision_ref: "decision:1" }));
-  assert.equal(decision.ok, true);
-  const result = (await service.dispatch("action.host-result", host, { engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation, mode: "host_hitl", status: "executed", result_ref: "result:1", host_decision_ref: "decision:1" }));
-  assert.equal(result.ok, true);
-  assert.equal((await store.getActionIntent(actionId)).status, "executed");
-  (await store.close());
+  const service = await createCoreService(store);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "taric-action-dispatch-")));
+  const item = await workItem(store);
+  const session_id = "action-audit-session";
+  const owner = createPrincipal("host", "action-owner", item.engagement_id, [], undefined, session_id);
+  const nonOwner = createPrincipal("host", "action-other-host", item.engagement_id, [], undefined, session_id);
+  const model = createPrincipal("model", "action-model", item.engagement_id);
+  const crossEngagementHost = createPrincipal("host", "action-cross-engagement", uuidv7());
+  const targetServer = createServer((_request, response) => response.end("target must remain untouched"));
+  try {
+    await new Promise((resolve, reject) => {
+      targetServer.once("error", reject);
+      targetServer.listen(0, "127.0.0.1", resolve);
+    });
+    const targetAddress = targetServer.address();
+    assert.ok(targetAddress && typeof targetAddress !== "string");
+    let targetCalls = 0;
+    targetServer.on("request", () => { targetCalls++; });
+    await store.saveArtifactSession({ engagement_id: item.engagement_id, session_id, root: join(root, session_id), binding_id: uuidv7(), created_at: new Date().toISOString(), mode: "host-session" });
+    const run = await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: owner.id, agent_id: "worker", task_session_ref: session_id });
+    const recommendation = await service.dispatch("action.recommend", owner, {
+      engagement_id: item.engagement_id,
+      work_run_id: run.run_id,
+      generation: run.generation,
+      target: `http://127.0.0.1:${targetAddress.port}/must-not-execute`,
+      method: "GET",
+      rationale: "verify exposure",
+      scope: "in-scope",
+    });
+    assert.equal(recommendation.ok, true);
+    assert.equal(recommendation.data.execution, undefined, "recommendation describes a proposed action but does not execute it");
+    const actionId = recommendation.data.recommendation_id;
+    const recommended = await store.getActionIntent(actionId);
+    assert.equal(recommended.status, "recommended");
+    assert.equal(recommended.engagement_id, item.engagement_id);
+    assert.equal(recommended.run_id, run.run_id);
+    assert.equal(recommended.generation, run.generation);
+    assert.equal(recommended.host_id, owner.id);
+    assert.deepEqual(recommended.owner, { host_id: owner.id, agent_id: "worker" });
+
+    const beforeDeniedCalls = await store.events();
+    const modelDecision = await service.dispatch("action.host-decision", model, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "authorized", host_decision_ref: "decision:model",
+    });
+    assert.equal(modelDecision.error.code, "authorization_error");
+    const crossEngagementDecision = await service.dispatch("action.host-decision", crossEngagementHost, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "authorized", host_decision_ref: "decision:cross-engagement",
+    });
+    assert.equal(crossEngagementDecision.error.code, "authorization_error");
+    const nonOwnerDecision = await service.dispatch("action.host-decision", nonOwner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "authorized", host_decision_ref: "decision:non-owner",
+    });
+    assert.equal(nonOwnerDecision.error.code, "authorization_error");
+    const staleDecision = await service.dispatch("action.host-decision", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation + 1,
+      mode: "host_hitl", status: "authorized", host_decision_ref: "decision:stale",
+    });
+    assert.equal(staleDecision.error.code, "stale_version");
+    assert.deepEqual(await store.events(), beforeDeniedCalls, "denied or stale dispatches make no authority or audit mutation");
+    assert.equal((await store.getActionIntent(actionId)).status, "recommended");
+
+    const decision = await service.dispatch("action.host-decision", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "authorized", host_decision_ref: "decision:1", host_id: "forged-body-host", role: "operator",
+    });
+    assert.equal(decision.ok, true);
+    const authorized = await store.getActionIntent(actionId);
+    assert.equal(authorized.status, "authorized");
+    assert.equal(authorized.host_decision_ref, "decision:1");
+    assert.equal(authorized.host_id, owner.id, "Core binds the decision to the authenticated principal, not request fields");
+    assert.equal(authorized.engagement_id, item.engagement_id);
+    assert.equal(authorized.run_id, run.run_id);
+    assert.equal(authorized.generation, run.generation);
+    assert.deepEqual(authorized.owner, { host_id: owner.id, agent_id: "worker" });
+
+    const unknown = await service.dispatch("action.host-result", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "unknown", host_decision_ref: "decision:1",
+    });
+    assert.equal(unknown.ok, true);
+    assert.equal(unknown.data.status, "unknown");
+    assert.equal((await store.pendingActionIntents(run.run_id)).some((action) => action.action_id === actionId && action.status === "unknown"), true);
+    const resumed = await store.resumePacket(run.run_id, owner.id);
+    assert.equal(resumed.pending_actions.some((action) => action.action_id === actionId && action.status === "unknown"), true, "unknown outcomes remain visible for host reconciliation after restart");
+
+    const attemptedReplay = await service.dispatch("action.host-result", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      mode: "host_hitl", status: "executed", result_ref: "result:unreconciled", host_decision_ref: "decision:1",
+    });
+    assert.equal(attemptedReplay.error.code, "conflict", "unknown is not converted into an execution result by an ordinary result report");
+    const modelReconcile = await service.dispatch("action.reconcile", model, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      status: "executed", result_ref: "result:model-reconcile",
+    });
+    assert.equal(modelReconcile.error.code, "authorization_error");
+    const nonOwnerReconcile = await service.dispatch("action.reconcile", nonOwner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      status: "executed", result_ref: "result:non-owner-reconcile",
+    });
+    assert.equal(nonOwnerReconcile.error.code, "authorization_error");
+    const staleReconcile = await service.dispatch("action.reconcile", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation + 1,
+      status: "executed", result_ref: "result:stale-reconcile",
+    });
+    assert.equal(staleReconcile.error.code, "stale_version");
+    assert.equal((await store.getActionIntent(actionId)).status, "unknown");
+
+    const reconciled = await service.dispatch("action.reconcile", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: actionId, generation: run.generation,
+      status: "executed", result_ref: "result:1",
+    });
+    assert.equal(reconciled.ok, true);
+    assert.equal(reconciled.data.status, "executed");
+    assert.equal(reconciled.data.result_ref, "result:1");
+    assert.equal(reconciled.data.host_decision_ref, "decision:1");
+    assert.equal(reconciled.data.host_id, owner.id);
+    assert.equal(reconciled.data.engagement_id, item.engagement_id);
+    assert.equal(reconciled.data.run_id, run.run_id);
+    assert.equal(reconciled.data.generation, run.generation);
+    assert.deepEqual(reconciled.data.owner, { host_id: owner.id, agent_id: "worker" });
+    assert.equal((await store.pendingActionIntents(run.run_id)).some((action) => action.action_id === actionId), false);
+
+    const lifecycle = (await store.events()).filter((event) => event.subject_id === actionId && event.event_type.startsWith("action_intent."));
+    assert.deepEqual(lifecycle.map((event) => event.event_type), ["action_intent.recommended", "action_intent.authorized", "action_intent.unknown", "action_intent.executed"]);
+    for (const event of lifecycle.slice(1)) {
+      assert.equal(event.payload.host_id, owner.id);
+      assert.equal(event.payload.work_run_id, run.run_id);
+      assert.equal(event.payload.generation, run.generation);
+      assert.equal(event.payload.agent_id, "worker");
+    }
+
+    const executionRows = await store.executionCatalogRows({ engagement_id: item.engagement_id, session_id, work_run_id: run.run_id });
+    assert.equal(executionRows.length, 4, "Core records action lifecycle sidecars without a target-execution side effect");
+    for (const row of executionRows) {
+      assert.equal(row.engagement_id, item.engagement_id);
+      assert.equal(row.work_run_id, run.run_id);
+      assert.equal(row.attempt_id, run.attempt_ref);
+      assert.equal(row.generation, run.generation);
+      assert.equal(row.reference_id, actionId);
+      assert.equal(row.sidecar_status, "available", "run-bound action audit sidecar bytes are integrity verified");
+    }
+    assert.deepEqual(executionRows.map((row) => row.kind), ["action", "action", "result", "result"]);
+    assert.equal(JSON.stringify([recommendation.data, decision.data, unknown.data, reconciled.data]).includes("execution"), false, "Core exposes audit results and references, not a target executor result channel");
+    assert.equal(targetCalls, 0, "action recommendation, host decision, result, and reconciliation record intent only; no Core dispatch contacts the target");
+
+    const staleRecommendation = await service.dispatch("action.recommend", owner, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, generation: run.generation,
+      target: "http://127.0.0.1:1/stale-generation", method: "GET", rationale: "verify generation fencing",
+    });
+    assert.equal(staleRecommendation.ok, true);
+    await store.renewWorkRun(run.run_id, run.generation, owner.id, 5);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const replacement = createPrincipal("host", "action-replacement-owner", item.engagement_id, [], undefined, session_id);
+    const nextRun = await store.reclaimWorkRun(run.run_id, replacement.id, "worker-next");
+    assert.equal(nextRun.generation, run.generation + 1);
+    const beforeStaleGeneration = await store.events();
+    const staleGenerationAfterReclaim = await service.dispatch("action.host-decision", replacement, {
+      engagement_id: item.engagement_id, work_run_id: run.run_id, action_id: staleRecommendation.data.recommendation_id,
+      generation: run.generation, mode: "host_hitl", status: "authorized", host_decision_ref: "decision:old-generation",
+    });
+    assert.equal(staleGenerationAfterReclaim.error.code, "stale_version");
+    assert.deepEqual(await store.events(), beforeStaleGeneration, "a prior generation cannot record decisions after reclaim");
+    assert.equal((await store.getActionIntent(staleRecommendation.data.recommendation_id)).status, "recommended");
+    assert.equal(targetCalls, 0);
+  } finally {
+    await new Promise((resolve) => targetServer.close(resolve));
+    await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 async function awaitReclaim(store, runId) {

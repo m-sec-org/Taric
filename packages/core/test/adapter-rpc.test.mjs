@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthorityStore, createCoreService, createPrincipal, listenAdapterHttpsRpc, listenAdapterRpc, listenArtifactBinaryRpc, uuidv7 } from "../dist/index.js";
+import { AdapterDispatchFailure, AuthorityStore, createCoreService, createPrincipal, dispatchWithAdapterRecovery, listenAdapterHttpsRpc, listenAdapterRpc, listenArtifactBinaryRpc, uuidv7 } from "../dist/index.js";
 
 async function request(socketPath, params) {
   return new Promise((resolve, reject) => {
@@ -29,6 +29,185 @@ test("native adapter socket authenticates a scoped host and rejects token or eng
     const cross = await request(path, { token, operation: "engagement.status", request: { engagement_id: uuidv7() } });
     assert.equal(cross.result.error.code, "authorization_error");
   } finally { await listener.close(); (await store.close()); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("adapter recovery retries a known pre-dispatch failure once through the local Unix RPC profile", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-rpc-before-dispatch-"));
+  const store = new AuthorityStore();
+  const engagement_id = uuidv7();
+  await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "retry-before-dispatch" }, "L2");
+  const service = await createCoreService(store);
+  const socketPath = join(dir, "core.sock");
+  const token = "p".repeat(48);
+  const host = createPrincipal("host", "retry-host", engagement_id);
+  let coreDispatches = 0;
+  const listener = await listenAdapterRpc({
+    async dispatch(...args) { coreDispatches++; return await service.dispatch(...args); },
+  }, { socket_path: socketPath, token, principal: host });
+  const calls = [];
+  let attempts = 0;
+  const dispatch = async (operation, principal, requestBody) => {
+    calls.push({ operation, principal, request: structuredClone(requestBody) });
+    attempts++;
+    if (attempts === 1) throw new AdapterDispatchFailure("before_dispatch");
+    const frame = await request(socketPath, { token, operation, request: requestBody });
+    return frame.result;
+  };
+  try {
+    const body = { engagement_id };
+    const result = await dispatchWithAdapterRecovery(dispatch, "engagement.status", host, body);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(attempts, 2, "a known pre-dispatch failure is retried once");
+    assert.equal(coreDispatches, 1, "the failed first attempt never reached Core");
+    assert.equal(calls[0].principal, host);
+    assert.equal(calls[1].principal, host);
+    assert.equal(calls[0].operation, "engagement.status");
+    assert.equal(calls[1].operation, "engagement.status");
+    assert.deepEqual(calls[0].request, body);
+    assert.deepEqual(calls[1].request, body);
+    assert.notEqual(calls[0].request, calls[1].request, "each attempt receives an isolated copy of the same request payload");
+  } finally {
+    await listener.close();
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("adapter retries an idempotent post-dispatch response loss with the exact same binding", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-rpc-after-idempotent-"));
+  const store = new AuthorityStore();
+  const engagement_id = uuidv7();
+  await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "retry-idempotent" }, "L2");
+  const work_item_id = uuidv7();
+  await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "retry", status: "queued", acceptance_criteria: ["finish"] }, "L2");
+  const service = await createCoreService(store);
+  const socketPath = join(dir, "core.sock");
+  const token = "q".repeat(48);
+  const host = createPrincipal("host", "retry-idempotent-host", engagement_id);
+  let coreDispatches = 0;
+  const listener = await listenAdapterRpc({
+    async dispatch(...args) { coreDispatches++; return await service.dispatch(...args); },
+  }, { socket_path: socketPath, token, principal: host });
+  const calls = [];
+  let attempts = 0;
+  const dispatch = async (operation, principal, requestBody) => {
+    calls.push({ operation, principal, request: structuredClone(requestBody) });
+    attempts++;
+    const frame = await request(socketPath, { token, operation, request: requestBody });
+    if (attempts === 1) {
+      requestBody.status = "completed";
+      requestBody.idempotency_key = "transport-mutated-key";
+      throw new AdapterDispatchFailure("after_dispatch"); // response is lost at the adapter boundary
+    }
+    return frame.result;
+  };
+  try {
+    const run = await service.dispatch("work.claim", host, { engagement_id, work_item_id, host_id: host.id, agent_id: "worker" });
+    assert.equal(run.ok, true, JSON.stringify(run));
+    const body = { engagement_id, work_run_id: run.data.run_id, generation: run.data.generation, status: "running", idempotency_key: "retry-after-dispatch" };
+    const result = await dispatchWithAdapterRecovery(dispatch, "work.transition", host, body);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.status, "running");
+    assert.equal(attempts, 2);
+    assert.equal(coreDispatches, 2, "both attempts reach Core, while the idempotency contract prevents duplicate mutation");
+    assert.equal(calls[0].operation, "work.transition");
+    assert.equal(calls[1].operation, "work.transition");
+    assert.equal(calls[0].principal, host);
+    assert.equal(calls[1].principal, host);
+    assert.notEqual(calls[0].request, body);
+    assert.deepEqual(calls[0].request, body);
+    assert.deepEqual(calls[1].request, body, "a transport mutation cannot alter the retried request");
+    assert.equal(calls[0].request.engagement_id, calls[1].request.engagement_id);
+    assert.equal(calls[0].request.idempotency_key, calls[1].request.idempotency_key);
+    assert.deepEqual(calls[1].request, calls[0].request);
+    assert.equal((await store.events()).filter((event) => event.event_type === "work_run.transition").length, 1);
+    const bound = (await store.sql.all("SELECT operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", body.idempotency_key))[0];
+    assert.equal(bound.operation, "work.transition");
+    assert.equal(bound.principal, host.id);
+    assert.equal(bound.engagement_id, engagement_id);
+    assert.match(bound.request_hash, /^sha256:/);
+
+    let persistentLossAttempts = 0;
+    const persistentLoss = async (operation, principal, requestBody) => {
+      persistentLossAttempts++;
+      const frame = await request(socketPath, { token, operation, request: requestBody });
+      assert.equal(frame.result.ok, true, JSON.stringify(frame));
+      throw new AdapterDispatchFailure("after_dispatch");
+    };
+    const completionBody = { engagement_id, work_run_id: run.data.run_id, generation: run.data.generation, status: "completed", idempotency_key: "retry-after-two-lost-responses" };
+    const unresolved = await dispatchWithAdapterRecovery(persistentLoss, "work.transition", host, completionBody);
+    assert.equal(unresolved.ok, false);
+    assert.equal(unresolved.error.code, "indeterminate", "the last idempotent attempt may also have committed despite its lost response");
+    assert.equal(persistentLossAttempts, 2, "the adapter makes at most one automatic retry");
+    assert.equal(coreDispatches, 4);
+    assert.equal((await store.events()).filter((event) => event.event_type === "work_run.transition").length, 2, "the completed transition commits once despite both responses being lost");
+    assert.equal((await store.getWorkRun(run.data.run_id)).status, "completed", "an authoritative read resolves the indeterminate outcome");
+  } finally {
+    await listener.close();
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ambiguous non-idempotent dispatch returns indeterminate without replay and Core business errors pass through", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "taric-rpc-indeterminate-"));
+  const store = new AuthorityStore();
+  const engagement_id = uuidv7();
+  await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "retry-ambiguous" }, "L2");
+  const work_item_id = uuidv7();
+  await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "claim", status: "queued", acceptance_criteria: ["worker"] }, "L2");
+  const service = await createCoreService(store);
+  const socketPath = join(dir, "core.sock");
+  const token = "r".repeat(48);
+  const host = createPrincipal("host", "retry-non-idempotent-host", engagement_id);
+  let coreDispatches = 0;
+  const listener = await listenAdapterRpc({
+    async dispatch(...args) { coreDispatches++; return await service.dispatch(...args); },
+  }, { socket_path: socketPath, token, principal: host });
+  const calls = [];
+  try {
+    let nonIdempotentAttempts = 0;
+    const claimDispatch = async (operation, principal, requestBody) => {
+      calls.push({ operation, principal, request: requestBody });
+      nonIdempotentAttempts++;
+      const frame = await request(socketPath, { token, operation, request: requestBody });
+      if (nonIdempotentAttempts === 1) throw new AdapterDispatchFailure("after_dispatch");
+      return frame.result;
+    };
+    const claimBody = { engagement_id, work_item_id, host_id: "forged-host-is-ignored", agent_id: "worker" };
+    const ambiguous = await dispatchWithAdapterRecovery(claimDispatch, "work.claim", host, claimBody);
+    assert.equal(ambiguous.ok, false);
+    assert.equal(ambiguous.error.code, "indeterminate");
+    assert.equal(nonIdempotentAttempts, 1, "an ambiguous non-idempotent mutation is never automatically replayed");
+    assert.equal(coreDispatches, 1);
+    assert.equal(calls[0].principal, host);
+    assert.deepEqual(calls[0].request, claimBody);
+    const runs = await store.activeWorkRuns(engagement_id);
+    assert.equal(runs.length, 1, "authoritative state can reconcile the committed claim after the lost response");
+    assert.equal(runs[0].work_item_id, work_item_id);
+    assert.equal(runs[0].owner_host, host.id, "request body cannot change the authenticated host bound to the mutation");
+
+    let businessAttempts = 0;
+    let coreBusinessResponse;
+    const businessDispatch = async (operation, principal, requestBody) => {
+      businessAttempts++;
+      const frame = await request(socketPath, { token, operation, request: requestBody });
+      coreBusinessResponse = frame.result;
+      return frame.result;
+    };
+    const businessFailure = await dispatchWithAdapterRecovery(businessDispatch, "work.transition", host, {
+      engagement_id, work_run_id: runs[0].run_id, generation: runs[0].generation, status: "claimed", idempotency_key: "business-validation-error",
+    });
+    assert.equal(businessFailure.ok, false);
+    assert.equal(businessFailure.error.code, "validation_error");
+    assert.equal(businessFailure, coreBusinessResponse, "the Core business rejection is returned unchanged");
+    assert.equal(businessAttempts, 1, "business rejections are not queued or retried as transport failures");
+    assert.equal(coreDispatches, 2);
+  } finally {
+    await listener.close();
+    await service.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("adapter processes pipelined frames, retains partial requests and keeps the connection usable", async () => {

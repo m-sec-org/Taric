@@ -25,7 +25,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前 root workspace 和 runtime components 均为 `1.0.2`，API `1.2.0`、schema `1.0.0`、authority storage `authority-storage/3` 不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前 `1.0.2` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
+当前 root workspace 和 runtime components 均为 `1.0.3`，API 为 `1.3.0`、adapter 为 `1.1`；记录 schema `1.0.0`、authority storage `authority-storage/3` 和 SQL 格式 `authority-sql/4` 保持不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前 `1.0.3` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
 
 ## 2. 技术栈
 
@@ -39,7 +39,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
 
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.1` 进程内驱动；本次 `1.0.1` 包版本完成构建和 Bun driver 11 项验证，不代表 npm registry 发布或第三方宿主认证。
+`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.3` 进程内驱动；本机 Bun driver 12 项验证通过，不代表 npm registry 发布或第三方宿主认证。
 
 ## 3. 仓库与代码结构
 

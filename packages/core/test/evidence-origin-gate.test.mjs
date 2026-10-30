@@ -97,3 +97,85 @@ test("store admission path resolves cited provenance origins and records the ena
     assert.notEqual(admitEvent.payload.policy_digest, policyDigest(DEFAULT_ADMISSION_POLICY));
   } finally { await service.close(); }
 });
+
+test("Evidence uses canonical same-Engagement Resource references and remains a candidate until admission", async () => {
+  const store = new AuthorityStore();
+  const service = await createCoreService(store);
+  const engagement_id = uuidv7();
+  const other_engagement_id = uuidv7();
+  const host = createPrincipal("host", "host-evidence", engagement_id);
+  const operator = createPrincipal("operator", "operator-evidence", engagement_id);
+  const resource = await store.commit({
+    id: uuidv7(), engagement_id, kind: "resource", asset_type: "endpoint", identity: { route: "/health" },
+  }, "L2");
+  const foreignResource = await store.commit({
+    id: uuidv7(), engagement_id: other_engagement_id, kind: "resource", asset_type: "endpoint", identity: { route: "/foreign" },
+  }, "L2");
+  const artifact_ref = {
+    host_ref: "host-managed:response/42",
+    content_hash: `sha256:${"d".repeat(64)}`,
+  };
+  const content = (resource_ref) => ({
+    schema_version: "1.0.0", engagement_id, kind: "evidence", resource_ref,
+    artifact_ref, observed_at: new Date().toISOString(),
+    statement: "The host captured a response for the canonical Resource.",
+    limitations: ["The bytes remain host-managed and were not verified by Taric."],
+  });
+  try {
+    const missingReference = await service.dispatch("proposal.submit", host, {
+      engagement_id, subject_type: "evidence", expected_version: 0,
+      content: content(uuidv7()),
+    });
+    assert.equal(missingReference.ok, false);
+    assert.equal(missingReference.error.code, "validation_error");
+
+    const crossEngagementReference = await service.dispatch("proposal.submit", host, {
+      engagement_id, subject_type: "evidence", expected_version: 0,
+      content: content(foreignResource.id),
+    });
+    assert.equal(crossEngagementReference.ok, false);
+    assert.equal(crossEngagementReference.error.code, "validation_error");
+
+    const submitted = await service.dispatch("proposal.submit", host, {
+      engagement_id, subject_type: "evidence", expected_version: 0,
+      content: content(resource.id),
+    });
+    assert.equal(submitted.ok, true, JSON.stringify(submitted));
+    assert.equal(submitted.data.content.resource_ref, resource.id);
+    assert.equal(submitted.data.content.provenance.host_id, host.id, "Core binds proposal origin to the authenticated host");
+    assert.equal(submitted.data.content.provenance.source_kind, "host");
+    assert.equal((await store.list(engagement_id)).some((record) => record.id === submitted.data.proposal_id), false,
+      "proposal submission alone does not create canonical Evidence");
+
+    const admitted = await service.dispatch("admission.evaluate", operator, {
+      engagement_id, proposal_id: submitted.data.proposal_id,
+      expected_version: 0, policy_digest: policyDigest(),
+    });
+    assert.equal(admitted.ok, true, JSON.stringify(admitted));
+    assert.equal(admitted.data.record.kind, "evidence");
+    assert.equal(admitted.data.record.resource_ref, resource.id);
+    assert.equal(admitted.data.record.trust_level, "L1", "admission is machine-approved evidence, not L2 verification");
+    assert.equal(admitted.data.record.artifact_ref.host_ref, artifact_ref.host_ref);
+    assert.equal(admitted.data.record.artifact_ref.content_hash, artifact_ref.content_hash,
+      "a host-declared digest remains metadata; admission does not fetch or verify external bytes");
+
+    const read_seq = (await store.maintenanceRead((watermarks) => watermarks.read_seq));
+    const evidenceAtWatermark = await service.dispatch("query", host, {
+      engagement_id, as_of: read_seq, include_candidates: true, kind: "evidence", page_size: 10,
+    });
+    assert.equal(evidenceAtWatermark.ok, true, JSON.stringify(evidenceAtWatermark));
+    assert.equal(evidenceAtWatermark.data.read_seq, read_seq);
+    const canonicalEvidence = evidenceAtWatermark.data.records.find((record) => record.id === admitted.data.record.id);
+    assert.ok(canonicalEvidence, "canonical Evidence is discoverable at the returned source watermark");
+    assert.equal(canonicalEvidence.resource_ref, resource.id);
+    const resourceAtWatermark = await service.dispatch("query", host, {
+      engagement_id, as_of: read_seq, include_candidates: true, kind: "resource", page_size: 10,
+    });
+    assert.equal(resourceAtWatermark.ok, true, JSON.stringify(resourceAtWatermark));
+    assert.equal(resourceAtWatermark.data.read_seq, read_seq);
+    assert.equal(resourceAtWatermark.data.records.some((record) => record.id === canonicalEvidence.resource_ref), true,
+      "both ends of the provenance relation resolve in the same pinned Engagement view");
+  } finally {
+    await service.close();
+  }
+});

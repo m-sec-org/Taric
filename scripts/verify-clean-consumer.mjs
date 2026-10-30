@@ -34,7 +34,7 @@ try {
     import { createCoreServiceForPath, createPrincipal } from "@taric/core";
     import { API_CONTRACT_VERSION, SCHEMA_VERSION, coreSchema } from "@taric/schemas";
     import { MCP_PACKAGE } from "@taric/mcp";
-    assert.equal(API_CONTRACT_VERSION, "1.2.0");
+    assert.equal(API_CONTRACT_VERSION, "1.3.0");
     assert.equal(SCHEMA_VERSION, "1.0.0");
     assert.equal(coreSchema.$schema, "https://json-schema.org/draft/2020-12/schema");
     assert.equal(MCP_PACKAGE, "@taric/mcp");
@@ -62,7 +62,7 @@ try {
   const cliPath = join(consumer, "node_modules", "@taric", "cli", "dist", "bin.js");
   const cliEnv = { ...process.env, TARIC_DB: dbPath, TARIC_CONTENT_ROOT: contentRoot };
   const version = await exec(process.execPath, [cliPath, "--version"], { cwd: consumer, env: cliEnv });
-  assert.equal(version.stdout.trim(), "1.2.0");
+  assert.equal(version.stdout.trim(), "1.3.0");
   const cliInitialized = await exec(process.execPath, [cliPath, "engagement.init", JSON.stringify({ name: "isolated CLI consumer", scope: { allowed_targets: ["https://consumer-cli.fixture.invalid"], excluded_targets: [], rules_of_engagement_ref: "fixture:consumer-cli" } })], { cwd: consumer, env: cliEnv });
   const cliEngagement = JSON.parse(cliInitialized.stdout).data;
   const cliStatus = await exec(process.execPath, [cliPath, "engagement.status", JSON.stringify({ engagement_id: cliEngagement.id })], { cwd: consumer, env: { ...cliEnv, TARIC_ENGAGEMENT_ID: cliEngagement.id } });

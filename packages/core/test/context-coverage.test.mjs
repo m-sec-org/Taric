@@ -16,7 +16,11 @@ test("context packs preserve a pinned sequence and mark truncation", async () =>
   const store = new AuthorityStore(); const engagement_id = uuidv7();
   for (let i = 0; i < 3; i++) (await store.commit({ id: uuidv7(), engagement_id, kind: "note", text: "large note".repeat(20) }, "L2"));
   const pack = (await buildContextPack(store, engagement_id, 220));
-  assert.equal(pack.omitted_as_unexamined, true); assert.ok(pack.cursor); assert.ok(pack.read_seq > 0);
+  assert.equal(pack.omitted_as_unexamined, true);
+  assert.equal(pack.omitted_count_complete, true, "the count of omitted records is complete for this exhausted scan");
+  assert.ok(pack.omitted_count > 0 || pack.truncated_count > 0);
+  assert.ok(pack.items.length > 0, "bounded incomplete context is not presented as an empty complete result");
+  assert.ok(pack.cursor); assert.ok(pack.read_seq > 0);
   (await store.close());
 });
 
@@ -34,7 +38,7 @@ test("budget pressure keeps scope and target WorkItem constraints ahead of backg
   assert.equal(pack.omitted_as_unexamined, true);
   assert.ok(pack.manifest.every((source) => typeof source.hash === "string" && source.hash.startsWith("sha256:")));
   assert.equal(pack.schema_version, "1.0.0");
-  assert.equal(pack.adapter_version, "adapter/1.0");
+  assert.equal(pack.adapter_version, "adapter/1.1");
   (await store.close());
 });
 

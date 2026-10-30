@@ -78,7 +78,8 @@ test("pseudo multi-host SQLite declaration blocks before opening SQLite", async 
 
 test("adapter version and health examples run in subprocesses", async () => {
   const version = await execFileAsync(process.execPath, [cliPath, "adapter", "version"], { env: { ...process.env, TARIC_DB: ":memory:" } });
-  assert.equal(JSON.parse(version.stdout).data.contract_version, "1.0");
+  assert.equal(JSON.parse(version.stdout).data.contract_version, "1.1");
+  assert.equal(JSON.parse(version.stdout).data.api_contract_version, "1.3.0");
   const health = await execFileAsync(process.execPath, [cliPath, "adapter", "health"], { env: { ...process.env, TARIC_DB: ":memory:" } });
   const manifest = JSON.parse(health.stdout).data;
   assert.equal(manifest.core_connected, true);

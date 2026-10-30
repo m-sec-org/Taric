@@ -8,8 +8,8 @@ import { SCHEMA_VERSION } from "./version.js";
  * 单机首发实际交付的操作；延期能力必须显式登记为 unsupported 并给出 follow-up。
  */
 
-export const API_CONTRACT_VERSION = "1.2.0" as const;
-export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
+export const API_CONTRACT_VERSION = "1.3.0" as const;
+export const ADAPTER_CONTRACT_VERSION = "1.1" as const;
 
 export type OperationRole = "model" | "host" | "reviewer" | "writer" | "operator";
 export type ContractRef = string;

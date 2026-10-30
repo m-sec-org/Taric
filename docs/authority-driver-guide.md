@@ -2,7 +2,7 @@
 
 Taric 的权威存储以驱动契约为边界：**Core 拥有全部状态迁移、排序与策略；驱动只拥有连接、时钟与方言**。任何满足契约的驱动都可以让宿主在自己的运行时内进程内嵌入权威，而不必经过 RPC 桥。
 
-当前仓库的参考实现是 Core 内的 Node `node:sqlite` 驱动和 `@taric/driver-bun-sqlite@1.0.2`。Bun 驱动依赖 `@taric/core@1.0.2`；API 契约和记录 Schema 分别为 `1.2.0`、`1.0.0`，不随包版本号变化。包当前标记为 private，因此这些版本号不代表已发布到 npm registry。
+当前仓库的参考实现是 Core 内的 Node `node:sqlite` 驱动和 `@taric/driver-bun-sqlite@1.0.3`。Bun 驱动依赖 `@taric/core@1.0.3`；API 契约、adapter 契约和记录 Schema 分别为 `1.3.0`、`1.1`、`1.0.0`，不随 SQL 存储格式变化。包当前标记为 private，因此这些版本号不代表已发布到 npm registry。
 
 ## 契约
 

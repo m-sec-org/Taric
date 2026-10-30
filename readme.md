@@ -10,14 +10,35 @@ Taric 不能消除模型错误、观测遗漏或目标执行风险；它将权�
 
 ## 当前合同与验证状态
 
-- Taric root workspace、CLI、Core、Bun SQLite driver、MCP、Schemas 和 Hermes plugin 当前版本均为 `1.0.2`。API contract `1.2.0`，schema `1.0.0`，authority storage contract `authority-storage/3`。
+- Taric root workspace、CLI、Core、Bun SQLite driver、MCP、Schemas 和 Hermes plugin 当前版本均为 `1.0.3`。API contract `1.3.0`，adapter contract `1.1`，schema `1.0.0`，authority storage contract `authority-storage/3`。
+- 本轮 `1.0.3` 本机验收（2026-10-30）：build、typecheck、兼容矩阵、文档链接、workspace 测试和独立 tarball consumer 通过；Core 360 通过、9 个未配置 live PostgreSQL 的可选测试跳过、0 失败；Bun driver 12、Schemas 11、MCP 12、Hermes 5 和 CLI 测试通过。版本、源码摘要、命令与范围见[本机验证记录](docs/harden-host-authority-integration-local-verification.md)。
 - Schema registry 暴露 57 个 operations；CLI 白名单为 49 项（包括本地 `artifact.store.append-file` helper），MCP 仅暴露 6 个模型工具。这些入口的权限和操作集合不同，不能互相推导。
 - 上一轮 `1.0.1` 验证（2026-10-27）：build、typecheck、兼容矩阵和 PostgreSQL 配置下的全 workspace 测试通过；Core 356/356（无 PostgreSQL 跳过），Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11 全部通过。PostgreSQL runtime、独立备份恢复、双容器租约回收和容器 spool 检查均通过。
-- 当前源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。`1.0.1` 专项报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。容器运行在同一工作站，未验证跨物理机或网络中断恢复。
+- 2026-10-27 的 `1.0.1` 源码在 OrbStack PostgreSQL 17.11 上通过 12/12 runtime scenarios、`enabled/ready` readiness 和独立 `pg_dump`/`pg_restore`；两个独立 host 容器通过共享 PostgreSQL bridge 网络验证并发单 owner lease、容器结束后 reclaim 和旧 generation fencing；两个 Node 22 容器通过同一 bind-mounted spool 的写入、替换与原字节校验。`1.0.1` 专项报告为 `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json`、`/tmp/taric-multihost-current-20261027-1.0.1.json` 和 `/tmp/taric-container-spool-current-20261027-1.0.1.json`。这些是历史构建的证据，不是本轮 `1.0.3` 的 PostgreSQL 验收；容器运行在同一工作站，未验证跨物理机或网络中断恢复。
 - Pi/DeepSeek/Hermes adapter 合同、Bun driver、Hermes plugin 和 gateway 测试均通过；另在 `/tmp` 隔离安装并启动真实 Pi 1.4.0 RPC 进程，Taric 扩展成功通过其 `ExtensionAPI` 注册。本机 smoke 未调用模型或工具；DeepSeek/Hermes 真实宿主及完整 Pi 工作流仍未认证。Gateway 保留本机 Unix socket，并支持可选 TLS TCP 长连接 JSON-RPC 和 HTTPS `POST /rpc`；loopback TLS 端到端测试通过。HTTPS 不提供连接订阅；远程文件路径摄取拒绝，Artifact session root 由 gateway 在其配置的 content root 内派生。多机生产部署仍须单独验收证书、网络、凭据轮换和服务可用性。PostgreSQL runtime 仍要求当前构建匹配的 activation evidence 及目标 schema/lease health；npm registry 分发未支持，workspace 包保留 `private: true`。
-- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于当前 `1.0.2` 的 release report。
+- 质量评估算法已实现；pinned fixture 为 30 条 synthetic samples，人工标注样本为 0。`quality.full_statistical_evaluation` 的运行状态保持 disabled，尚无代表性人工基线证据；旧候选报告中的质量发布结论不等于当前 `1.0.3` 的 release report。
 
 此前候选报告及其 profile 状态见[发布验证记录](openspec/changes/harden-taric-authority-runtime/release-report.md)和[机器报告](openspec/changes/harden-taric-authority-runtime/release-report.json)；二者均绑定旧工作树。
+
+## 1.0.3 本次更新
+
+`harden-host-authority-integration` 完善适用于任意宿主的接入与恢复合同。实际代码新增 adapter 传输恢复入口和 active Attempt 标识，并修正 WorkItem 分页的版本读取；其余工作以既有能力的组合验收、负向测试和接入文档为主，没有新增业务操作或宿主专属领域模型。
+
+| 方向 | 本次交付与支持范围 |
+|---|---|
+| WorkItem 初始化与恢复 | 验证 `proposal.submit` → admission → `work.query` → `work.claim`，覆盖稳定 proposal/幂等键、请求冲突、未 admission 拒绝、同 Engagement 的 canonical Resource/revision 引用及并发单 owner。`work.query` 的 WorkItem 版本固定于分页 `read_seq`；`active_run` 补充 `attempt_id`，表示各页查询时的当前有效运行信息，恢复仍需 `work.resume` 检查租约与 generation。 |
+| 接入身份与权限一致性 | Bun in-process、Unix socket、loopback TLS TCP、HTTPS 使用同一 operation registry 验证 host principal、Engagement 隔离、model/reviewer 拒绝、请求体身份伪造和显式不支持操作。 |
+| 有界重试与不确定结果 | 导出 `dispatchWithAdapterRecovery` 和 `AdapterDispatchFailure`，由 `TaricAdapterClient.call` 复用。已知未 dispatch 的失败至多重试一次；可能已 dispatch 的请求仅在 registry 声明幂等且带有幂等键时重试一次，保留相同 principal、Engagement、operation、key 和 payload。最终可能已提交却未收到响应时返回 `indeterminate`；Core 业务拒绝直接返回。 |
+| Coverage 合同 | 补齐维度稳定、expected-version CAS、引用归属、`not_applicable` 原因、正向结果缺少 Evidence 时保留 gate gap，以及 gate 决策/可见性共享同一 read watermark 的验收。Coverage 和 gate 仍以 Engagement 为边界。 |
+| Action 审计与对账 | 验证宿主回报的 decision、executed/failed/unknown 和显式 reconcile 与 principal、Engagement、WorkRun、Attempt、generation 的关联及 fencing。`unknown` 保持待对账，不能通过普通结果回报直接变成最终结果，也不会触发目标动作重放。 |
+| Artifact 与证据来源 | 验证 external `host_ref` 不被 Taric 拉取、声明 hash 不代表已验证、暂存字节在 commit 前不可见，以及 run-bound publication 的归属与过时代次拒绝。Observation/Evidence 保留 canonical 引用和 L0/L1/L2 治理边界，opaque 工具输出不会自动成为已验证证据。 |
+| 查询完整性与恢复 | 补充 WorkItem/Context 等支持固定读取点的查询的分页、cursor 绑定、遗漏/截断诊断及通知断连后的补查验收；文档明确水位回退和 cursor 不可用时的重新查询方式。通知只提供提示，结果不完整不能被解释成“没有记录”。 |
+
+宿主需要配对 API contract `1.3.0` 和 adapter contract `1.1`；显式声明旧合同的请求或 adapter descriptor 按精确匹配规则拒绝。记录 schema `1.0.0`、authority storage contract `authority-storage/3` 和 SQL 格式 `authority-sql/4` 保持不变。
+
+外部业务 ID 的映射、宿主调度与工具执行、目标动作授权、报告/关闭流程、workspace 和 outbox 仍由宿主管理。Taric 不要求任何宿主把这些对象或流程迁入 Core；本轮开发验收使用本机隔离 authority、内容根目录及 loopback profile，生产凭据、责任人或跨物理机测试不作为完成门槛。
+
+接入步骤见 [Agent 接入指南](docs/agent-integration.md)，字段与恢复语义见 [API 边界](docs/taric-api.md)，可选拓扑与版本配对见 [host integration profiles](docs/host-integration-profiles.md)，源码摘要和验证范围见 [本机验证记录](docs/harden-host-authority-integration-local-verification.md)。
 
 
 ## 设计边界
@@ -138,7 +159,7 @@ node --test scripts/test/profile-verification.test.mjs
 ```bash
 TARIC_TEST_DATABASE_URL=postgresql://taric:taric-local-only@127.0.0.1:55432/taric \
 TARIC_TEST_POSTGRES_CONTAINER=taric-authority-postgres-1 \
-node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.2.json
+node scripts/verify-release.mjs --output /tmp/taric-release-report-1.0.3.json
 ```
 
 `npm test` 会运行各 workspace 的 Node 测试和 Hermes 插件的 Python 测试。单独运行 Hermes 插件测试：

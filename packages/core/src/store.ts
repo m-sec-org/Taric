@@ -1839,7 +1839,7 @@ export class AuthorityStore {
                 body: string;
             }>;
             const records = rows.map((row) => sanitizeSnapshotRecord(JSON.parse(row.body), sensitive) as CanonicalRecord);
-            const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.2", engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
+                const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.3", engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
             return { ...payload, hash: hash(json(payload)) };
         }));
     }
@@ -1876,7 +1876,7 @@ export class AuthorityStore {
                     throw new ContractValidationError("validation_error", "snapshot JSONL contains an invalid record row");
                 return row.record;
             });
-            normalized = { schema_version: manifest.schema_version, core_version: "1.0.2", engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
+            normalized = { schema_version: manifest.schema_version, core_version: "1.0.3", engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
         }
         else
             normalized = snapshot;
@@ -3026,7 +3026,7 @@ export class AuthorityStore {
         status?: string[];
         include_active_runs?: boolean;
     }): Promise<Awaited<{
-        items: Array<CanonicalRecord & { active_run?: { run_id: string; work_item_id: string; generation: number; status: string; owner_host?: string; owner_agent?: string; lease_expires_at?: string; heartbeat_at?: string } }>;
+        items: Array<CanonicalRecord & { active_run?: { run_id: string; work_item_id: string; attempt_id: string; generation: number; status: string; owner_host?: string; owner_agent?: string; lease_expires_at?: string; heartbeat_at?: string } }>;
         has_more: boolean;
         next_cursor?: string;
         read_seq: number;
@@ -3047,7 +3047,8 @@ export class AuthorityStore {
             if (cursor && (cursor.list !== "work_items" || cursor.principal_id !== (input.principal_id ?? "local") || cursor.engagement_id !== input.engagement_id || cursor.page_size !== limit || cursor.filter_digest !== filterDigest))
                 throw new InvalidCursorError("work page cursor binding mismatch");
             const afterId = typeof cursor?.after_id === "string" ? cursor.after_id : "";
-            const rows = (await this.sql.all("SELECT id,body FROM records WHERE engagement_id=? AND kind='work_item' AND id>? ORDER BY id LIMIT ?", input.engagement_id, afterId, scanBudget + 1)) as Array<{ id: string; body: string }>;
+            const workKind = this.sql.jsonValue("rv.body", "kind");
+            const rows = (await this.sql.all(`SELECT rv.id,rv.body FROM record_versions rv WHERE rv.engagement_id=? AND rv.commit_seq<=? AND rv.id>? AND ${workKind}='work_item' AND NOT EXISTS (SELECT 1 FROM record_versions newer WHERE newer.id=rv.id AND newer.commit_seq<=? AND newer.commit_seq>rv.commit_seq) ORDER BY rv.id LIMIT ?`, input.engagement_id, readSeq, afterId, readSeq, scanBudget + 1)) as Array<{ id: string; body: string }>;
             const more = rows.length > scanBudget;
             const scanned = rows.slice(0, scanBudget);
             const wantedRefs = input.resource_refs?.length ? new Set(input.resource_refs) : undefined;
@@ -3064,14 +3065,15 @@ export class AuthorityStore {
                     return true;
                 });
             const selected = matches.slice(0, limit);
-            type ActiveRunSummary = { run_id: string; work_item_id: string; generation: number; status: string; owner_host?: string; owner_agent?: string; lease_expires_at?: string; heartbeat_at?: string };
+            type ActiveRunSummary = { run_id: string; work_item_id: string; attempt_id: string; generation: number; status: string; owner_host?: string; owner_agent?: string; lease_expires_at?: string; heartbeat_at?: string };
             let items: Array<CanonicalRecord & { active_run?: ActiveRunSummary }> = selected;
             if (input.include_active_runs) {
                 const now = new Date(await this.sql.now()).toISOString();
-                const runRows = (await this.sql.all("SELECT run_id,work_item_id,generation,status,owner_host,owner_agent,lease_expires_at,heartbeat_at FROM work_runs WHERE engagement_id=? AND lease_expires_at>? AND status NOT IN ('completed','failed','cancelled','lost')", input.engagement_id, now)) as Array<Record<string, unknown>>;
+                const attemptRef = this.sql.jsonValue("w.body", "attempt_ref");
+                const runRows = (await this.sql.all(`SELECT w.run_id,w.work_item_id,w.generation,w.status,w.owner_host,w.owner_agent,w.lease_expires_at,w.heartbeat_at,a.attempt_id FROM work_runs w JOIN attempts a ON a.attempt_id=${attemptRef} AND a.run_id=w.run_id AND a.generation=w.generation AND a.owner_host=w.owner_host AND a.lease_expires_at=w.lease_expires_at WHERE w.engagement_id=? AND w.lease_expires_at>? AND w.status NOT IN ('completed','failed','cancelled','lost') AND a.status NOT IN ('completed','failed','cancelled','lost')`, input.engagement_id, now)) as Array<Record<string, unknown>>;
                 const byItem = new Map<string, ActiveRunSummary>(runRows.map((row) => {
                     const summary = {
-                        run_id: String(row.run_id), work_item_id: String(row.work_item_id), generation: Number(row.generation), status: String(row.status),
+                        run_id: String(row.run_id), work_item_id: String(row.work_item_id), attempt_id: String(row.attempt_id), generation: Number(row.generation), status: String(row.status),
                         ...(row.owner_host == null ? {} : { owner_host: String(row.owner_host) }),
                         ...(row.owner_agent == null ? {} : { owner_agent: String(row.owner_agent) }),
                         ...(row.lease_expires_at == null ? {} : { lease_expires_at: String(row.lease_expires_at) }),

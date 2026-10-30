@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +96,14 @@ test("incomplete and mismatched uploads stay invisible and session roots reject 
     const bytes = Buffer.from("original body"); const digest = sha256(bytes);
     assert.equal((await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, ordinal: 0, data: bytes.toString("base64"), chunk_hash: sha256(Buffer.from("wrong")) })).error.code, "conflict");
     assert.equal((await ctx.service.dispatch("artifact.store.commit", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: begin.data.upload_id, total_bytes: bytes.length, content_hash: digest })).error.code, "conflict");
+    const staged = (await ctx.service.dispatch("artifact.store.begin", ctx.host, { engagement_id: ctx.engagement_id, session_id, payload_kind: "text", media_type: "text/plain" }));
+    const stagedBytes = Buffer.from("not published before commit");
+    const stagedHash = sha256(stagedBytes);
+    assert.equal((await ctx.service.dispatch("artifact.store.append", ctx.host, { engagement_id: ctx.engagement_id, session_id, upload_id: staged.data.upload_id, ordinal: 0, data: stagedBytes.toString("base64"), chunk_hash: stagedHash })).ok, true);
+    assert.equal((await ctx.service.dispatch("artifact.content.list", ctx.host, { engagement_id: ctx.engagement_id, session_id })).data.items.length, 0,
+      "successfully staged bytes do not appear in the committed catalog");
+    assert.equal((await ctx.store.artifactCatalogRows({ engagement_id: ctx.engagement_id, session_id })).length, 0,
+      "staged bytes are not represented as a committed authority Artifact");
     const outside = mkdtempSync(join(tmpdir(), "taric-outside-")); symlinkSync(outside, join(ctx.dir, "content", "escape"));
     assert.equal((await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id: "escape-session", root: join(ctx.dir, "content", "escape", "sub"), mode: "host-session" })).error.code, "authorization_error");
     rmSync(outside, { recursive: true, force: true });
@@ -136,6 +145,73 @@ test("external references stay external and begin/commit retries are request-bou
     const committed = (await ctx.service.dispatch("artifact.store.commit", ctx.host, commitRequest)); const retried = (await ctx.service.dispatch("artifact.store.commit", ctx.host, commitRequest));
     assert.equal(retried.data.content_ref, committed.data.content_ref);
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
+test("external Artifact declarations keep declared hashes unverified and Core never fetches host_ref", async () => {
+  const ctx = (await setup());
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push(`${request.method} ${request.url}`);
+    response.end("the external owner must remain outside Core");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const host_ref = `http://127.0.0.1:${address.port}/opaque/artifact`;
+  const declaredHash = sha256(Buffer.from("bytes held by an external owner"));
+  try {
+    const session_id = "external-integrity-session";
+    await ctx.service.dispatch("artifact.session.bind", ctx.host, {
+      engagement_id: ctx.engagement_id, session_id,
+      root: join(ctx.dir, "content", session_id), mode: "host-session",
+    });
+    const begun = await ctx.service.dispatch("artifact.store.begin", ctx.host, {
+      engagement_id: ctx.engagement_id, session_id,
+      payload_kind: "binary", media_type: "application/octet-stream",
+      storage_mode: "external", host_ref, expected_hash: declaredHash,
+    });
+    assert.equal(begun.ok, true);
+    assert.equal(begun.data.upload_id, undefined);
+
+    const metadata = await ctx.service.dispatch("artifact.metadata", ctx.host, {
+      engagement_id: ctx.engagement_id, session_id, content_ref: begun.data.content_ref,
+    });
+    assert.equal(metadata.ok, true);
+    assert.equal(metadata.data.storage_mode, "external");
+    assert.equal(metadata.data.content_status, "external");
+    assert.equal(metadata.data.integrity_status, "unverified");
+    assert.equal(metadata.data.content_hash, declaredHash, "a declared digest is retained as metadata");
+    const wrongSessionMetadata = await ctx.service.dispatch("artifact.metadata", ctx.host, {
+      engagement_id: ctx.engagement_id, session_id: "another-host-session", content_ref: begun.data.content_ref,
+    });
+    assert.equal(wrongSessionMetadata.ok, false);
+    assert.equal(wrongSessionMetadata.error.code, "unavailable_host", "catalog references resolve only within the bound Engagement/session");
+    const foreignEngagementMetadata = await ctx.service.dispatch("artifact.metadata", ctx.contentReader, {
+      engagement_id: uuidv7(), session_id, content_ref: begun.data.content_ref,
+    });
+    assert.equal(foreignEngagementMetadata.ok, false);
+    assert.equal(foreignEngagementMetadata.error.code, "authorization_error");
+
+    const listed = await ctx.service.dispatch("artifact.content.list", ctx.host, {
+      engagement_id: ctx.engagement_id, session_id, page_size: 10,
+    });
+    assert.equal(listed.ok, true);
+    assert.equal(listed.data.items.length, 1);
+    assert.equal(listed.data.items[0].integrity_status, "unverified");
+    assert.equal(listed.data.items[0].content_hash, declaredHash);
+    assert.equal("data" in listed.data.items[0], false);
+
+    const read = await ctx.service.dispatch("artifact.content.read", ctx.contentReader, {
+      engagement_id: ctx.engagement_id, session_id, content_ref: begun.data.content_ref,
+    });
+    assert.equal(read.ok, false);
+    assert.equal(read.error.code, "unavailable_host");
+    assert.deepEqual(requests, [], "registration, catalog reads, and content reads never contact the opaque host_ref");
+  } finally {
+    await ctx.store.close();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(ctx.dir, { recursive: true, force: true });
+  }
 });
 
 test("derived Artifact versions retain opaque identity and publish bounded manifest segments", async () => {
@@ -212,6 +288,12 @@ test("run-bound sessions establish the run link atomically and inherit attributi
     assert.equal(committed.data.work_run_id, claimed.data.run_id);
     assert.equal(committed.data.attempt_id, claimed.data.attempt_ref);
     assert.equal(committed.data.generation, claimed.data.generation);
+    const catalogRow = (await ctx.store.artifactCatalogRows({ engagement_id: ctx.engagement_id, session_id }))[0];
+    assert.equal(catalogRow.engagement_id, ctx.engagement_id);
+    assert.equal(catalogRow.session_id, session_id);
+    assert.equal(catalogRow.work_run_id, claimed.data.run_id);
+    assert.equal(catalogRow.attempt_id, claimed.data.attempt_ref);
+    assert.equal(catalogRow.generation, claimed.data.generation);
     assert.equal((await ctx.store.artifactSessions({ engagement_id: ctx.engagement_id, session_id }))[0].mode, "run-bound");
     assert.equal((await ctx.service.dispatch("artifact.session.bind", ctx.model, { engagement_id: ctx.engagement_id, session_id: "model-session", root: join(ctx.dir, "content", "model-session"), mode: "host-session" })).error.code, "authorization_error");
   } finally { (await ctx.store.close()); rmSync(ctx.dir, { recursive: true, force: true }); }

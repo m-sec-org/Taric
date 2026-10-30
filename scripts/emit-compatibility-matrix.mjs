@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { API_CONTRACT_VERSION, SCHEMA_VERSION, contractNames, operationContracts } from "../packages/schemas/dist/src/index.js";
+import { ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION, SCHEMA_VERSION, contractNames, operationContracts } from "../packages/schemas/dist/src/index.js";
 import { AUTHORITY_STORAGE_CONTRACT_VERSION, TARIC_COMPATIBILITY_MANIFEST } from "../packages/core/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,6 +42,7 @@ const matrix = {
   schema_version: SCHEMA_VERSION,
   core_version: corePackage.version,
   api_contract_version: API_CONTRACT_VERSION,
+  adapter_contract_version: ADAPTER_CONTRACT_VERSION,
   storage_contract_version: AUTHORITY_STORAGE_CONTRACT_VERSION,
   runtime_dependency_closure: {
     "@taric/schemas": { version: schemasPackage.version, exports: Object.keys(schemasPackage.exports ?? {}), runtime_dependencies: schemasPackage.dependencies ?? {} },

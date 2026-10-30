@@ -1,4 +1,4 @@
-import { API_CONTRACT_VERSION, ARTIFACT_DEPLOYMENT_PROFILE, AuthorityConfigurationError, ContractValidationError, normalizeDiagnosticDetails, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type RuntimeConfigProvenance, type RuntimeConfigurationPrecedence, type SharedAuthorityConfiguration } from "@taric/core";
+import { ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION, ARTIFACT_DEPLOYMENT_PROFILE, AuthorityConfigurationError, ContractValidationError, normalizeDiagnosticDetails, RuntimeStartupError, createCoreServiceForPath, createPrincipal, discoverRuntimeConfig, openRuntimeService, resolveRuntimeAuthority, type AuthorityStartupDiagnostics, type CoreService, type DeploymentGuardInput, type Principal, type RuntimeConfigProvenance, type RuntimeConfigurationPrecedence, type SharedAuthorityConfiguration } from "@taric/core";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -56,7 +56,7 @@ export async function runCli(argv: string[], service: CoreService, principal: Om
   if (argv[0] === "--version" || argv[0] === "-V") return { exitCode: 0, stdout: `${API_CONTRACT_VERSION}\n`, stderr: "" };
   const operation = normalizeCliOperation(argv);
   if (argv[0] === "adapter" && ["health", "version"].includes(argv[1] ?? "")) {
-    if (argv[1] === "version") return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION } })}\n`, stderr: "" };
+    if (argv[1] === "version") return { exitCode: 0, stdout: `${JSON.stringify({ ok: true, data: { contract_version: ADAPTER_CONTRACT_VERSION, api_contract_version: API_CONTRACT_VERSION } })}\n`, stderr: "" };
     const health = await service.dispatch("capability.status", createPrincipal(principal.role, principal.id, principal.engagement_id, [], undefined, principal.transport_session_id), {});
     const manifest = health.ok ? (health.data as Record<string, unknown>).compatibility_manifest : undefined;
     let adapter_config: Record<string, unknown> = {};

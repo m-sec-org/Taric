@@ -55,6 +55,7 @@ test("coverage.gate matches the library close gate field-for-field", async () =>
     const library = await coverageCloseGate(store, engagement_id);
     assert.equal(dispatched.data.can_close, false);
     assert.deepEqual(dispatched.data, library);
+    assert.equal(dispatched.data.read_seq, await store.maintenanceRead((watermarks) => watermarks.read_seq));
     const kinds = dispatched.data.gaps.map((gap) => gap.kind).sort();
     for (const expected of ["untested", "unverified_positive", "unjustified_not_applicable", "pending_impact"]) assert.ok(kinds.includes(expected), `missing gap kind ${expected}: ${kinds}`);
     assert.equal(dispatched.data.visibility.pending_impact_count, 1);
@@ -172,9 +173,12 @@ test("coverage.query filters, paginates, and isolates engagements", async () => 
     const seen = [];
     let cursor;
     let pages = 0;
+    let read_seq;
     for (;;) {
       const page = await service.dispatch("coverage.query", host, { engagement_id, resource_ref, page_size: 2, ...(cursor ? { cursor } : {}) });
       assert.equal(page.ok, true, JSON.stringify(page));
+      read_seq ??= page.data.read_seq;
+      assert.equal(page.data.read_seq, read_seq, "all pages in the query walk must retain one read watermark");
       seen.push(...page.data.cells.map((item) => item.id));
       pages += 1;
       if (!page.data.has_more) break;

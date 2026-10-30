@@ -15,6 +15,12 @@ node packages/cli/dist/bin.js capability.status
 
 The content root contains both Artifact payloads and the authority-bound cursor key. Back up the SQLite file, the configured content root, and `.taric-context-cursor-key.v1` as one unit. A database-only backup can restore records but cannot preserve existing cursor continuations or local Artifact bytes.
 
+## Host-owned content and projections
+
+Taric's stored Artifact bytes are opaque. `storage_mode: "external"` with `host_ref` records an external locator and optional declared hash/size as metadata; Taric does not fetch it, prove that it is available, or verify that the hash describes retrievable content. A declared hash is not a verification claim. The host owns external availability and any report/projection built from those bytes.
+
+For Taric-stored content, staged chunks remain unavailable through the Artifact catalog until the upload commits and publication checks pass. Run-bound catalog entries retain Engagement, session, WorkRun, Attempt and generation attribution; stale or reclaimed generations cannot publish current content. See [Artifact durability and spool behavior](multi-host-authority-runbook.md#artifact-spool-in-a-shared-deployment) and [Artifact API operations](taric-api.md#task-session-artifact-content).
+
 ## Bounded queries
 
 `query`, `resource.query`, and `evidence.query` return `records`, `next_cursor`, `read_seq`, `committed_seq`, and `projected_seq`. `proposal.list` returns `proposals`, `next_cursor`, and `read_seq`. The default page size is 100; valid sizes are 1–1000. Continue with the exact Engagement, principal, page size, and filters from the first request. The cursor also binds the record kind, candidate visibility, trust filter, and fixed read sequence. Concurrent submissions or admissions cannot insert, omit, or replace entries in the original proposal page sequence. Proposal versions preserve the status observed at that sequence.

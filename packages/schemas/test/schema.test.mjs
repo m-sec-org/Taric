@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 
-const { coreSchema, contractNames, contractRegistry, operationContracts, unsupportedContracts, followUpChanges, isValidOperationName } =
+const { ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION, SCHEMA_VERSION, coreSchema, contractNames, contractRegistry, operationContracts, unsupportedContracts, followUpChanges, isValidOperationName, supportedProfile } =
   await import("@taric/schemas");
 
 const fixtures = JSON.parse(
@@ -15,6 +15,14 @@ ajv.addFormat("uuid", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{
 ajv.addFormat("date-time", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/);
 ajv.addSchema(coreSchema);
 const validators = new Map(contractNames.map((name) => [name, ajv.getSchema(`${coreSchema.$id}#/$defs/${name}`)]));
+
+test("public API, adapter, and schema versions agree across generated manifests", () => {
+  assert.equal(contractRegistry.api_contract_version, "1.3.0");
+  assert.equal(contractRegistry.adapter_contract_version, "1.1");
+  assert.equal(supportedProfile.core_api_version, API_CONTRACT_VERSION);
+  assert.equal(supportedProfile.adapter_api_version, ADAPTER_CONTRACT_VERSION);
+  assert.equal(supportedProfile.schema_version, SCHEMA_VERSION);
+});
 
 test("contract registry covers every supported operation with request, response, error and capability contracts", () => {
   assert.ok(operationContracts.length > 0);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   API_CONTRACT_VERSION,
+  ADAPTER_CONTRACT_VERSION,
   TaricAdapterClient,
   createCoreService,
   createDeepSeekHarnessAdapter,
@@ -28,12 +29,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-const base = { contract_version: "1.0", api_contract_version: API_CONTRACT_VERSION, capabilities: [], supported: false };
+const base = { contract_version: ADAPTER_CONTRACT_VERSION, api_contract_version: API_CONTRACT_VERSION, capabilities: [], supported: false };
 
 test("adapter contract rejects unsupported versions, capabilities and API mismatch", () => {
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, contract_version: "9.0" }).accepted, false);
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, contract_version: "1.0" }).reason, "unsupported contract version");
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "9.0.0" }).accepted, false);
-  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "1.1.0" }).reason, "unsupported API contract version");
+  assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, api_contract_version: "1.2.0" }).reason, "unsupported API contract version");
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, capabilities: ["unknown"] }).accepted, false);
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: true, capabilities: ["proposal_submission"] }).accepted, true);
   assert.equal(validateAdapter({ host_id: "pi", version: "1.4.0", ...base, supported: false }).reason, "unsupported_capability");
@@ -69,6 +71,21 @@ test("custom adapter identities are format-validated metadata and do not grant n
   assert.equal(privileged.ok, false);
   assert.equal(privileged.error.code, "authorization_error");
   await store.close();
+});
+
+test("adapter client reports an unknown non-idempotent transport outcome without replay", async () => {
+  const descriptor = createCustomAdapterDescriptor({ adapter_id: "acme/recovery", framework_package: "@acme/agent", distribution: "agent", version: "1.0.0" });
+  const engagement_id = uuidv7();
+  const principal = createPrincipal("host", "recovery-host", engagement_id);
+  let calls = 0;
+  const client = new TaricAdapterClient(descriptor, {
+    async dispatch() { calls++; throw new Error("response delivery failed"); },
+  }, principal);
+  const result = await client.call("work.claim", { engagement_id, work_item_id: uuidv7(), agent_id: "worker" });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "indeterminate");
+  assert.equal(calls, 1, "the adapter does not replay an operation whose registry contract is non-idempotent");
+  assert.equal(client.status().service_connected, false, "a transport exception is not evidence of a Core response");
 });
 
 test("adapter client never exposes the store and keeps engagement attribution", async () => {

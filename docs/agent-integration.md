@@ -44,6 +44,16 @@ Adopt a dependency-complete path. Adding fewer features does not relax the ident
 
 For real governed Finding wiring, the executable [trusted Node fixture](../packages/core/test/trusted-node-governance.test.mjs) uses separate operator/host/model/reviewer/writer principals through public dispatch. It covers Resource→Observation→Evidence→Claim→Finding, L1, independent review and L2; its tool output/reviews are synthetic. It is not external host or human-review certification.
 
+### Host-neutral collaboration bootstrap and recovery
+
+Keep host job, project, tenant and tool identifiers in the host's own mapping. Taric's authorization boundary is its authenticated principal and Engagement; WorkItems refer to Taric canonical Resource/ResourceRevision IDs. A host should resolve its external IDs to those canonical IDs before submitting proposals, and retain the association on its side. No host namespace becomes a Taric domain object or narrower gate scope.
+
+Bootstrap claimable work through `proposal.submit` with a stable proposal identity and idempotency key, then let the configured host/operator admission policy create the canonical WorkItem. Confirm it through `work.query` before calling `work.claim`; a pending proposal is not claimable. Exact retries must preserve principal, Engagement, operation, key and payload. On a key/payload mismatch, stop and resolve the conflict rather than generating a second request with guessed identity.
+
+Coverage remains per Engagement. Create and update cells through `coverage.record` using the returned `cell_id` and current `expected_version`; keep their identity dimensions stable. `not_applicable` needs a reason, and positive cells without canonical Evidence remain gate gaps. Treat the gate's `read_seq` as the watermark for its decision, gaps and visibility summary. A host's project or test-run identifier may explain its own projection but does not scope Taric's gate.
+
+After host restart, query active WorkRuns with bounded `work.query` pages and `include_active_runs:true`; follow each cursor with the same principal, Engagement and filters at the returned pinned `read_seq`. The result identifies WorkRun, Attempt, owner and generation. Call `work.resume` for each discovered run and honor `blocked`, `premise_checks` and `replan_required`; Taric does not start workers, renew leases or replay tools. Keep host report and projection formats with the host.
+
 ### Principal setup and capability grants
 
 Create principals only in trusted code after authenticating the actual client:
@@ -113,6 +123,8 @@ The proxy runs until SIGINT/SIGTERM, fixes role host regardless of TARIC_PRINCIP
 
 Mount the socket only into the trusted bridge. Keep authority/content-root mounts and token out of model workers. A model process must not control TARIC_CONFIG or privileged CLI environment. Use [the Bun smoke client](../scripts/adapter-rpc-bun-client.mjs) or [the real restart harness](../scripts/benchmark-proxy-restart.mjs) for the supported local topology. The saved [proxy v5 report](benchmarks/proxy-restart-v5.json) records Node 22.21.1/Bun 1.3.13, 26 calls, two restarts, actual socket modes, idempotency/CAS and late-result checks; it does not certify a complete third-party host. `taric proxy` remains local Unix-socket only. The optional `taric gateway` also supports TLS TCP and HTTPS as described below.
 
+When a native host integration uses `TaricAdapterClient.call`, it follows the operation registry's idempotency flag. A known pre-dispatch transport failure gets one retry; a possibly dispatched request is retried only for a registry-idempotent operation with the same nonempty `idempotency_key`, principal, Engagement, operation and payload. A lost response after a non-idempotent dispatch returns adapter error `indeterminate`; the host queries authoritative state before deciding what to do. Core validation, authorization, conflict and stale-version responses are returned as business results, not queued for transport retry. This is one bounded call recovery, not a persistent host outbox. Other transport clients must apply the same contract at their own edge.
+
 ### Optional remote gateway
 
 Use the multi-principal gateway when a host must call Taric without receiving PostgreSQL credentials or network access. It does not replace PostgreSQL coordination: remote hosts still reach the same Core authority through the gateway, and PostgreSQL remains responsible for multi-host transactions, lease ordering, and fencing. Direct host-to-PostgreSQL Core remains the simpler topology when every host is trusted to access that service.
@@ -161,7 +173,7 @@ The resolver defaults ID to operator-local unless a model role/ID was explicitly
 
 ## Bun in-process embedding
 
-Profile selection, artifact packaging, API `1.2.0` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
+Profile selection, artifact packaging, API `1.3.0` and adapter `1.1` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
 
 A Bun host embeds the authority in-process over the driver contract instead of proxying to a Node process. Bun has no `node:sqlite` builtin, so import the reference driver package and construct the store directly:
 
@@ -296,6 +308,8 @@ Projection output uses explicit field allowlists and L2 filtering, with local Gi
 host.state is host/operator-only, limit 1–1000 (default 100), with per-category completeness, scoped opaque watermark and read_time. It reports bounded L1/Conflict/Impact/unknown-action/expired-lease/freshness aggregates. Freshness scans only a limited sample, so incomplete totals are lower bounds; no continuation or reliable events are provided. Time expiry can change a poll without a commit. Use [the abortable polling example](taric-api.md#host-state-polling); reconnect failed service handles and keep retry delay within the deployment's chosen budget.
 
 Core in-process and authenticated adapter RPC expose optional bounded host subscriptions with `read_seq`-based polling/query recovery; signals are best-effort hints, not a persistent event stream. MCP resource subscriptions remain disabled. The [recorded local polling fixture](benchmarks/host-state-poll-v1.json) met its 1000ms budget, so a host should opt into notifications only when its measured polling cost or discovery budget requires them. That result does not establish a network/production SLA or mean arbitrary backoff settings meet the same budget.
+
+For state that must be complete, query the relevant authority operation even when a notification arrives. Retain the last confirmed read sequence and never interpret a missing, truncated, omitted or interrupted page as an empty complete result. Continue with `next_cursor` at its bound `read_seq`; if that continuation is unavailable or invalid, start a fresh bounded query and record the new returned sequence. If a consumer reports a watermark below its last confirmed value, treat it as a lag/recovery condition and rebuild its host-owned projection from a fresh query. Notifications help discover change; they do not replace query recovery.
 
 Operator audit.verify/audit.doctor and reconcile preview are observation paths. `audit.reconcile {}` consumes outbox and reconciles Artifact state; omission of action is not read-only. Explicit replay/rebuild/reconcile select repairs. See [single-host maintenance](authority-storage-runbook.md). Public migration/import is unsupported: historical materials enter through normal proposal/evidence governance, while database recovery uses an isolated operator-managed restore and matching spool.
 

@@ -107,7 +107,9 @@ test("not-applicable cells require a reason and counter-evidence remains an open
   const evidence = (await store.commit({ id: uuidv7(), engagement_id, kind: "evidence", statement: "observed response" }, "L1"));
   try {
     (await assert.rejects(async () => (await createCoverageCell(store, { engagement_id, resource_ref: resource.id, test_category: "tls", status: "not_applicable", limitations: [] })), /explicit reason/));
-    (await createCoverageCell(store, { engagement_id, resource_ref: resource.id, test_category: "tls", status: "not_applicable", not_applicable_reason: "host protocol has no TLS layer", limitations: [] }));
+    (await assert.rejects(async () => (await createCoverageCell(store, { engagement_id, resource_ref: resource.id, test_category: "tls", status: "not_applicable", not_applicable_reason: "  ", limitations: [] })), /explicit reason/));
+    const notApplicable = (await createCoverageCell(store, { engagement_id, resource_ref: resource.id, test_category: "tls", status: "not_applicable", not_applicable_reason: "host protocol has no TLS layer", limitations: [] }));
+    assert.equal(evaluateCoverageGate([notApplicable]).gaps.some((gap) => gap.kind === "unjustified_not_applicable"), false);
     const contradicted = (await createCoverageCell(store, {
       engagement_id,
       resource_ref: resource.id,

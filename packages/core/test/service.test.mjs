@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AuthorityStore, createCoreService, createPrincipal, policyDigest, uuidv7 } from "../dist/index.js";
+import { API_CONTRACT_VERSION, AuthorityStore, createCoreService, createPrincipal, policyDigest, uuidv7 } from "../dist/index.js";
 
 test("Core dispatch keeps proposals private and binds review identity to the verified principal", async () => {
   const store = new AuthorityStore();
@@ -40,8 +40,10 @@ test("Core dispatch distinguishes unauthorized supported operations from unsuppo
   assert.equal((await service.dispatch("work.renew", operator, {})).error.code, "authorization_error");
   assert.equal((await service.dispatch("operation.missing", operator, {})).error.code, "unsupported_capability");
   assert.equal((await service.dispatch("query", operator, undefined)).error.code, "validation_error");
+  assert.equal(API_CONTRACT_VERSION, "1.3.0");
+  assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: API_CONTRACT_VERSION })).ok, true);
   const before = await store.events();
-  assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: "1.0.0" })).error.code, "unsupported_schema_version");
+  assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: "1.2.0" })).error.code, "unsupported_schema_version");
   assert.deepEqual(await store.events(), before, "a request using the prior API contract version is rejected before state changes");
   assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: "9.9.9" })).error.code, "unsupported_schema_version");
   (await store.close());

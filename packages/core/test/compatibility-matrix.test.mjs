@@ -4,9 +4,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { API_CONTRACT_VERSION, AUTHORITY_STORAGE_CONTRACT_VERSION, TARIC_COMPATIBILITY_MANIFEST } from "../dist/index.js";
+import { ADAPTER_CONTRACT_VERSION as CORE_ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION, AUTHORITY_STORAGE_CONTRACT_VERSION, TARIC_COMPATIBILITY_MANIFEST } from "../dist/index.js";
 import { schemaMetadata } from "../dist/identity.js";
-import { operationContracts, SCHEMA_VERSION } from "@taric/schemas";
+import { ADAPTER_CONTRACT_VERSION, operationContracts, SCHEMA_VERSION } from "@taric/schemas";
 
 const root = resolve(new URL("../../..", import.meta.url).pathname);
 
@@ -14,11 +14,13 @@ test("published compatibility matrix covers current contracts, package closure, 
   const matrix = JSON.parse(readFileSync(join(root, "compatibility-matrix.json"), "utf8"));
   assert.equal(matrix.schema_version, SCHEMA_VERSION);
   assert.equal(matrix.api_contract_version, API_CONTRACT_VERSION);
+  assert.equal(matrix.adapter_contract_version, ADAPTER_CONTRACT_VERSION);
+  assert.equal(CORE_ADAPTER_CONTRACT_VERSION, ADAPTER_CONTRACT_VERSION);
   assert.equal(matrix.storage_contract_version, AUTHORITY_STORAGE_CONTRACT_VERSION);
-  assert.equal(schemaMetadata().core_version, "1.0.2");
+  assert.equal(schemaMetadata().core_version, "1.0.3");
   assert.deepEqual(matrix.operations.map(({ operation }) => operation), operationContracts.map(({ operation }) => operation));
   assert.ok(matrix.operations.every(({ request_schema, response_schema, errors }) => request_schema && response_schema && Array.isArray(errors)));
-  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "1.0.2");
+  assert.equal(matrix.runtime_dependency_closure["@taric/core"].runtime_dependencies["@taric/schemas"], "1.0.3");
   assert.ok(matrix.drivers.some(({ name, runtime, exports }) => name === "@taric/driver-bun-sqlite" && runtime === "bun" && exports.includes(".")));
   assert.deepEqual(Object.keys(matrix.certified_hosts), Object.keys(TARIC_COMPATIBILITY_MANIFEST.hosts));
   const credentialBoundary = TARIC_COMPATIBILITY_MANIFEST.non_goals.find(({ id }) => id === "credential_management");

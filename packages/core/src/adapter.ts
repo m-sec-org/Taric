@@ -1,9 +1,10 @@
 import { API_CONTRACT_VERSION, registerTransportPrincipal, type CoreService, type Principal, type PrincipalCapability, type PrincipalRole, type ReviewerAttestation } from "./service.js";
+import { ADAPTER_CONTRACT_VERSION as REGISTERED_ADAPTER_CONTRACT_VERSION, operationContract } from "@taric/schemas";
 import { ContractValidationError } from "./validation.js";
 import type { DiagnosticDetails } from "./validation.js";
 
 /** Adapter 契约版本与 Core API 版本分开演进；两者都必须显式声明。 */
-export const ADAPTER_CONTRACT_VERSION = "1.0" as const;
+export const ADAPTER_CONTRACT_VERSION = REGISTERED_ADAPTER_CONTRACT_VERSION;
 
 export const adapterCapabilities = ["session_lifecycle", "context_injection", "proposal_submission", "worker_attribution", "checkpoint", "action_mode", "host_result", "cancel", "reload"] as const;
 export type AdapterCapability = (typeof adapterCapabilities)[number];
@@ -142,6 +143,71 @@ export interface AdapterClient {
   register(extension: PiExtensionApi, binding?: PiRuntimeBinding): Promise<{ loaded: boolean; callbacks: string[]; hooks: string[]; available_capabilities: AdapterCapability[]; missing_capabilities: AdapterCapability[]; reload_idempotent: boolean }>;
 }
 
+export type AdapterDispatchPhase = "before_dispatch" | "after_dispatch";
+
+/**
+ * A transport uses this error to tell the adapter whether it knows a request
+ * did not reach Core or whether Core may already have applied it. Ordinary
+ * errors are treated as after-dispatch because their delivery point is unknown.
+ */
+export class AdapterDispatchFailure extends Error {
+  constructor(readonly phase: AdapterDispatchPhase) {
+    super("adapter transport failed");
+    this.name = "AdapterDispatchFailure";
+  }
+}
+
+export type AdapterDispatch = (operation: string, principal: Principal, request: Record<string, unknown>) => Promise<{
+  ok: true;
+  data: unknown;
+} | {
+  ok: false;
+  error: AdapterError;
+}>;
+
+/**
+ * Apply the operation-registry retry contract at the adapter edge. There is no
+ * queue: a known pre-dispatch failure gets one retry; a possibly dispatched
+ * call gets one retry only when the operation is registry-idempotent and the
+ * same non-empty idempotency key is present. Calls reuse the exact bound
+ * principal, operation string, and request object. Core business responses are
+ * returned unchanged.
+ */
+export async function dispatchWithAdapterRecovery<T = unknown>(
+  dispatch: AdapterDispatch,
+  operation: string,
+  principal: Principal,
+  request: Record<string, unknown>,
+): Promise<{ ok: true; data: T } | { ok: false; error: AdapterError }> {
+  const contract = operationContract(operation);
+  const requestSnapshot = structuredClone(request);
+  const hasBoundIdempotencyKey = typeof requestSnapshot.idempotency_key === "string" && requestSnapshot.idempotency_key.trim().length > 0;
+  let mayHaveCommitted = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      // A fresh clone protects the retry payload from caller/transport mutation.
+      return await dispatch(operation, principal, structuredClone(requestSnapshot)) as { ok: true; data: T } | { ok: false; error: AdapterError };
+    } catch (cause) {
+      const phase = cause instanceof AdapterDispatchFailure ? cause.phase : "after_dispatch";
+      if (phase === "after_dispatch") mayHaveCommitted = true;
+      if (phase === "before_dispatch" && attempt === 0) continue;
+      if (phase === "after_dispatch" && attempt === 0 && contract?.idempotent === true && hasBoundIdempotencyKey) continue;
+      if (mayHaveCommitted) {
+        return { ok: false, error: {
+          code: "indeterminate",
+          message: "dispatch may have completed; reconcile with authoritative state before retrying",
+          follow_up: "query Taric using the operation's authoritative read contract",
+        } };
+      }
+      return { ok: false, error: {
+        code: "unavailable_host",
+        message: "adapter transport is unavailable; retry the same request when service is restored",
+      } };
+    }
+  }
+  return { ok: false, error: { code: "unavailable_host", message: "adapter transport is unavailable" } };
+}
+
 export function validateAdapter(descriptor: AdapterDescriptor): AdapterResult {
   if (!isValidAdapterId(descriptor.host_id)) return { accepted: false, reason: "invalid adapter id" };
   if (descriptor.framework_package !== undefined && !isValidAdapterId(descriptor.framework_package)) return { accepted: false, reason: "invalid framework package" };
@@ -231,9 +297,12 @@ export class TaricAdapterClient implements AdapterClient {
   }
 
   async call<T = unknown>(operation: string, request: Record<string, unknown>): Promise<{ ok: true; data: T } | { ok: false; error: AdapterError }> {
-    const response = await this.#service.dispatch(operation, this.#principal, request) as { ok: true; data: T } | { ok: false; error: AdapterError };
-    this.#serviceContacted = true;
-    return response;
+    const dispatch: AdapterDispatch = async (name, principal, body) => {
+      const response = await this.#service.dispatch(name, principal, body) as { ok: true; data: unknown } | { ok: false; error: AdapterError };
+      this.#serviceContacted = true;
+      return response;
+    };
+    return await dispatchWithAdapterRecovery<T>(dispatch, operation, this.#principal, request);
   }
 
   status(): AdapterCapabilityReport {

@@ -10,10 +10,15 @@ const workItem = (engagement_id, overrides = {}) => ({
 async function seedRows(store, records) {
   const now = new Date().toISOString();
   await store.sql.transaction("write", async () => {
+    const sequence = Number((await store.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")).seq);
     for (const record of records) {
       await store.sql.run(
         "INSERT INTO records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
         record.id, record.engagement_id, record.kind, "L2", 1, null, JSON.stringify(record), now, now,
+      );
+      await store.sql.run(
+        "INSERT INTO record_versions(id,commit_seq,engagement_id,trust_level,body) VALUES(?,?,?,?,?)",
+        record.id, sequence, record.engagement_id, "L2", JSON.stringify(record),
       );
     }
   });
@@ -112,6 +117,39 @@ test("work.query paginates by keyset without duplicates or skipped matches", asy
     const reused = await service.dispatch("work.query", host, { engagement_id, resource_refs: [resource], page_size: 2, cursor: "v1.not-a-cursor.sig" });
     assert.equal(reused.ok, false);
     assert.equal(reused.error.code, "invalid_cursor");
+  } finally { await service.close(); }
+});
+
+test("work.query continuation keeps WorkItem versions fixed at the first page read sequence", async () => {
+  const store = new AuthorityStore();
+  const service = await createCoreService(store);
+  const engagement_id = uuidv7();
+  const resource_ref = uuidv7();
+  const host = createPrincipal("host", "host-a", engagement_id);
+  const firstItem = workItem(engagement_id, { id: "018f0000-0000-7000-8000-000000000001", title: "first", resource_refs: [resource_ref] });
+  const secondItem = workItem(engagement_id, { id: "018f0000-0000-7000-8000-000000000002", title: "second at first read", resource_refs: [resource_ref] });
+  try {
+    await store.commit({ id: resource_ref, engagement_id, kind: "resource", asset_type: "service", identity: "pinned.internal", revision: 1 }, "L2");
+    await store.commit(firstItem, "L2");
+    const secondVersion = await store.commit(secondItem, "L2");
+    const first = await service.dispatch("work.query", host, { engagement_id, resource_refs: [resource_ref], page_size: 1 });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(first.data.items[0].id, firstItem.id);
+    assert.ok(first.data.next_cursor);
+
+    // Update a not-yet-returned match and add another match after page one.
+    await store.commit({ ...secondVersion, status: "completed", resource_refs: [] }, "L2", undefined, undefined, true, secondVersion.version);
+    const thirdItem = workItem(engagement_id, { id: "018f0000-0000-7000-8000-000000000003", title: "after first read", resource_refs: [resource_ref] });
+    await store.commit(thirdItem, "L2");
+
+    const second = await service.dispatch("work.query", host, { engagement_id, resource_refs: [resource_ref], page_size: 1, cursor: first.data.next_cursor });
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.data.read_seq, first.data.read_seq);
+    assert.equal(second.data.items.length, 1);
+    assert.equal(second.data.items[0].id, secondItem.id);
+    assert.equal(second.data.items[0].status, "queued", "the continuation sees the version from its pinned sequence");
+    assert.equal(second.data.items[0].version, secondVersion.version);
+    assert.equal(second.data.has_more, false, "a WorkItem created after the first page is outside its pinned sequence");
   } finally { await service.close(); }
 });
 
