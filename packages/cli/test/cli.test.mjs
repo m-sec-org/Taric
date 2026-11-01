@@ -18,6 +18,10 @@ test("CLI help lists deterministic Phase 1 commands", async () => {
         assert.ok(cliCommands.includes(command));
     (await store.close());
 });
+test("CLI exposes the governed control-plane operations", () => {
+    for (const operation of ["scope.revise", "scope.invalidate", "scope.query", "coverage.manifest.commit", "coverage.snapshot", "action.audit.query", "report.snapshot.commit", "engagement.close", "engagement.reopen"])
+        assert.ok(cliCommands.includes(operation), operation);
+});
 test("CLI rejects malformed JSON and unknown grouped verbs without dispatch", async () => {
     const store = new AuthorityStore();
     const service = (await createCoreService(store));

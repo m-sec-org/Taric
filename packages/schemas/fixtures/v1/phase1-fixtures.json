@@ -226,6 +226,22 @@
       "evidence_refs": [],
       "origin_reached": false
     },
+    "coverageManifest": {
+      "id": "018f47a1-7c00-7000-8000-000000000003",
+      "schema_version": "1.0.0",
+      "engagement_id": "a76d2d76-3a91-7928-b3c1-b4e80b6e4778",
+      "created_at": "2026-10-09T00:00:00.000Z",
+      "provenance": { "host_id": "pi", "producer_id": "host", "source_kind": "host" },
+      "kind": "coverage_manifest",
+      "scope_revision_ref": "018f47a1-7c00-7000-8000-000000000004",
+      "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected_cells": [{
+        "resource_ref": "702c37b3-7267-7a6e-a660-05026635f9d7",
+        "test_category": "authz",
+        "conditions": ["role=user"]
+      }]
+    },
     "negativeObservation": {
       "id": "6bb41392-499f-7dc0-8e11-ffa9e9fd53d7",
       "schema_version": "1.0.0",
@@ -1607,7 +1623,7 @@
     "artifact_content_stays_host_owned"
   ],
   "counts": {
-    "valid": 31,
+    "valid": 32,
     "negatives": 29
   }
 }

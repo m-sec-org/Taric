@@ -12,6 +12,27 @@ async function workItem(store, engagement_id = uuidv7()) {
   return { id, engagement_id };
 }
 
+async function approveScope(store, engagement, target) {
+  const scope = await store.get(engagement.scope_ref);
+  const artifact_id = uuidv7();
+  const content_ref = `${artifact_id}@v1`;
+  const content_hash = `sha256:${"a".repeat(64)}`;
+  await store.saveArtifactCatalogRow({
+    content_ref, engagement_id: engagement.id, session_id: "roe", artifact_id, version: 1, payload_kind: "text", media_type: "text/plain",
+    storage_mode: "taric_stored", byte_length: 3, chunk_count: 1, content_hash, content_status: "available", integrity_status: "verified",
+    stored_at: new Date().toISOString(), relative_dir: "", manifest_path: "",
+  }, [{ ordinal: 0, offset: 0, bytes: 3, hash: content_hash, path: "roe/chunk" }]);
+  return store.reviseScope({
+    engagement_id: engagement.id, scope_id: scope.id, expected_version: scope.version,
+    policy: {
+      allowed_targets: [target], excluded_targets: [], protocols: ["https"], ports: [{ from: 443, to: 443 }], methods: ["GET"],
+      dns: { require_pinned_addresses: true, reject_private_addresses: true, max_addresses: 8 },
+      redirects: { max_hops: 1, same_scope_only: true }, valid_from: new Date(Date.now() - 60_000).toISOString(), valid_until: new Date(Date.now() + 3_600_000).toISOString(),
+    },
+    roe_artifact_ref: content_ref, roe_artifact_version: 1, idempotency_key: `approve:${engagement.id}`, principal: "operator",
+  });
+}
+
 function checkpoint(run, work_item_ref, extra = {}) {
   return {
     work_item_ref,
@@ -118,9 +139,12 @@ test("action intents cannot skip recommendation or authorization and stale resul
   (await assert.rejects(async () => (await store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "executed", host_decision_ref: "host:decision:1", result_ref: "host:result:1", host_id: "pi" })), /explicit host reconciliation/i));
   const reconciled = (await store.reconcileAction(run.run_id, run.generation, "host:result:1", "executed", action_id, "pi"));
   assert.equal(reconciled.status, "executed");
-  const late = (await store.recordLateResult({ run_id: run.run_id, generation: run.generation - 1, result_ref: "host:result:late", result: { status: "executed" } }));
+  (await store.renewWorkRun(run.run_id, run.generation, "pi", 5));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  (await store.reclaimWorkRun(run.run_id, "pi-next", "worker-next"));
+  const late = (await store.recordLateResult({ engagement_id: item.engagement_id, work_run_id: run.run_id, generation: run.generation, action_id, status: "executed", result_ref: "host:result:late", host_id: "pi" }));
   assert.equal(late.status, "late_result_quarantine");
-  assert.equal((await store.pendingActionIntents(run.run_id)).some((entry) => entry.result_ref === "host:result:late"), false);
+  assert.equal((await store.getActionIntent(action_id)).status, "executed", "quarantined results never change the historic Action projection");
   (await store.close());
 });
 
@@ -208,7 +232,9 @@ test("Core action dispatch audits host decisions and outcomes against the curren
   const store = new AuthorityStore();
   const service = await createCoreService(store);
   const root = realpathSync(mkdtempSync(join(tmpdir(), "taric-action-dispatch-")));
-  const item = await workItem(store);
+  const engagement = await store.initializeEngagement({ name: "action dispatch", scope: { allowed_targets: ["example.test"], excluded_targets: [], rules_of_engagement_ref: "legacy-unverified" } });
+  await approveScope(store, engagement, "example.test");
+  const item = await workItem(store, engagement.id);
   const session_id = "action-audit-session";
   const owner = createPrincipal("host", "action-owner", item.engagement_id, [], undefined, session_id);
   const nonOwner = createPrincipal("host", "action-other-host", item.engagement_id, [], undefined, session_id);
@@ -230,7 +256,7 @@ test("Core action dispatch audits host decisions and outcomes against the curren
       engagement_id: item.engagement_id,
       work_run_id: run.run_id,
       generation: run.generation,
-      target: `http://127.0.0.1:${targetAddress.port}/must-not-execute`,
+      target: "https://example.test/must-not-execute",
       method: "GET",
       rationale: "verify exposure",
       scope: "in-scope",
@@ -356,7 +382,7 @@ test("Core action dispatch audits host decisions and outcomes against the curren
 
     const staleRecommendation = await service.dispatch("action.recommend", owner, {
       engagement_id: item.engagement_id, work_run_id: run.run_id, generation: run.generation,
-      target: "http://127.0.0.1:1/stale-generation", method: "GET", rationale: "verify generation fencing",
+      target: "https://example.test/stale-generation", method: "GET", rationale: "verify generation fencing",
     });
     assert.equal(staleRecommendation.ok, true);
     await store.renewWorkRun(run.run_id, run.generation, owner.id, 5);

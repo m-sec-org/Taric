@@ -1,8 +1,8 @@
-# Taric API Boundary v1.3.0
+# Taric API Boundary v1.4.0
 
 Core owns authority writes and governance. Hosts own model calls, workers, target tools and action authorization. Taric may store and serve authorized task-target credentials as opaque Artifact bytes; hosts own the ACL, encryption, rotation, revocation, retention and deletion policy for those bytes. Gateway tokens, authority database credentials, TLS keys and other Taric integration credentials are separate configuration secrets held by the host and never become task data. An accepted proposal/capture is not a verified Finding.
 
-The Taric root workspace and runtime components `@taric/cli`, `@taric/core`, `@taric/schemas`, `@taric/driver-bun-sqlite`, `@taric/mcp` and `@taric/hermes-plugin` declare version `1.0.3`. These package versions are separate from protocol and persisted-data versions: the public API contract is `1.3.0`, the adapter contract is `1.1`, the record Schema is `1.0.0`, and the authority SQL format is `authority-sql/4`. The packages are currently marked private, so their repository versions do not imply npm registry publication.
+The current source declares package version `1.0.3`; the public API contract has advanced to `1.4.0` for ScopeRevision, fixed complete-domain Coverage snapshots, Action audit reads, and canonical report/close records. The adapter contract remains `1.1`, the record schema remains `1.0.0`, and the SQL layout remains `authority-sql/4` because the new records use the existing versioned-record and event tables. Packages are private, so repository versions do not imply npm registry publication.
 
 The 2026-10-27 repository verification passed build, typecheck, compatibility-matrix validation, and the PostgreSQL-configured workspace suites: schemas 10/10, Core 356/356 with no PostgreSQL skips, CLI 37/37, MCP 12/12, Hermes 5/5, and Bun driver 11/11. Current-source PostgreSQL 17.11 conformance and independent backup/restore passed; separate local-container lease/reclaim and bind-mounted spool checks also passed. A real Pi 1.4.0 RPC process loaded the Taric extension, but no model/tool workflow was run. These results do not certify a physical multi-machine deployment, network partition recovery, or a complete third-party host integration. The optional gateway supports local Unix socket, TLS TCP, and HTTPS transports; remote network rollout still requires deployment-specific verification.
 
@@ -14,7 +14,7 @@ The 2026-10-27 repository verification passed build, typecheck, compatibility-ma
 
 ## Transport and response contract
 
-Use `await service.dispatch(operation, principal, request)` for public calls. `request` must be an object; an optional `contract_version` must equal `1.3.0`. Principals are created by a trusted transport with `createPrincipal` or `registerTransportPrincipal`; object fields alone cannot register a caller. `init()` and `status()` are lower-level service methods without principal parameters, so do not expose the whole service object to untrusted callers. Requests that declare an earlier API contract are rejected; deploy a matching host and Taric contract pair.
+Use `await service.dispatch(operation, principal, request)` for public calls. `request` must be an object; an optional `contract_version` must equal `1.4.0`. Principals are created by a trusted transport with `createPrincipal` or `registerTransportPrincipal`; object fields alone cannot register a caller. `init()` and `status()` are lower-level service methods without principal parameters, so do not expose the whole service object to untrusted callers. Requests that declare an earlier API contract are rejected; deploy a matching host and Taric contract pair.
 
 ```json
 {"ok":true,"data":{}}
@@ -67,12 +67,18 @@ The trusted host session association is a snapshot registered on the principal, 
 
 ## Operation inventory
 
-The current registry contains 57 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. Despite its name, `engagement.status` is a contract probe: after the scoped authorization check it returns only `schema_version` and `schema_supported`, with no Engagement counts or sequence. Use `host.state` for scoped host status.
+The current registry contains 66 supported operations. Roles below are the exact registry roles; capability requirements come from `service.ts`. The model-role registry is broader than the six-tool MCP inventory. Despite its name, `engagement.status` is a contract probe: after the scoped authorization check it returns only `schema_version` and `schema_supported`, with no Engagement counts or sequence. Use `host.state` for scoped host status.
 
 | Operation | Allowed roles | Capability | Writes authority/state |
 |---|---|---|---|
 | `engagement.init` | operator | operator | yes |
 | `engagement.status` | model, host, operator | read | no |
+| `engagement.close` | operator | operator | yes |
+| `engagement.reopen` | operator | operator | yes |
+| `scope.revise` | operator | operator | yes |
+| `scope.invalidate` | operator | operator | yes |
+| `scope.query` | host, operator | read | no |
+| `report.snapshot.commit` | host, operator | propose | yes |
 | `capability.status` | model, host, reviewer, operator | operator | no |
 | `adapter.status` | host, operator | role only | no |
 | `adapter.install` | operator | role only | no |
@@ -101,15 +107,18 @@ The current registry contains 57 supported operations. Roles below are the exact
 | `work.transition` | host | work | yes |
 | `work.resume` | host | work | no |
 | `work.query` | model, host, operator | read | no |
-| `coverage.gate` | host, operator | role only | no |
+| `coverage.gate` | host, operator | read | no |
+| `coverage.manifest.commit` | operator | operator | yes |
 | `coverage.record` | host, operator | propose | yes |
 | `coverage.query` | model, host, operator | read | no |
+| `coverage.snapshot` | host, operator | read | no |
 | `checkpoint.propose` | model, host, operator | propose | yes |
 | `checkpoint.commit` | host | checkpoint | yes |
 | `action.recommend` | model, host, operator | propose | yes |
 | `action.host-decision` | host | action | yes |
 | `action.host-result` | host | action | yes |
 | `action.reconcile` | host | action | yes |
+| `action.audit.query` | host, operator | read | no |
 | `artifact.session.bind` | host, operator | content | yes |
 | `artifact.ingest_file` | host, operator | content | yes |
 | `artifact.store.begin` | host, operator | content | yes |
@@ -264,6 +273,18 @@ After a dropped notification or process restart, use `work.query` and follow all
 `action.recommend` takes target, method, rationale and optional uncertainty/scope/constraints/limitations/memory_refs/evidence_refs. Without a run it creates a proposal; a run also requires generation and produces an advisory ActionIntent. Host decision/result operations take engagement_id, work_run_id, action_id, generation and mode. Decisions are authorized/denied; results executed/failed/unknown; modes llm_recommend/authorized_autonomous/host_hitl. `action.reconcile` takes a result_ref and executed/failed for an unknown result. Authorization and execution stay in the host.
 
 These operations record what the authenticated host reports. Their Engagement, owner, WorkRun, Attempt and generation checks fence writes to the current authority state. Unknown remains pending until explicit reconcile; neither ordinary result submission nor query causes a target retry. The [Core lifecycle test](../packages/core/test/runtime-gaps.test.mjs) uses a loopback sentinel to verify Taric records the report without making a target request.
+
+### Scope, Coverage and close lifecycle
+
+`scope.revise` is an operator-only CAS operation. It requires the current Scope version, a normalized policy and a committed, integrity-verified ROE Artifact reference/version. Core writes an immutable `scope_revision`, updates the Scope's current-revision pointer and appends the audit event in one authority transaction. Its `policy_digest` binds the normalized target/protocol/port/method/DNS/redirect/time-window policy to that exact ROE content digest. `scope.query` reads revision and invalidation facts at a fixed `read_seq`; `scope.invalidate` appends an operator-attributed invalidation and fences later WorkRun/Action/Coverage/report use until a new revision is approved. A revision change never rewrites earlier records.
+
+`coverage.manifest.commit` is an operator-only immutable expected-cell matrix bound to the current approved ScopeRevision and pinned ResourceRevision dimensions. `coverage.snapshot` and `coverage.gate` provide host/operator fixed-watermark complete-domain reads. Snapshot cursors bind principal, Engagement, page size and request filters; the result includes the watermark/time, snapshot digest, expected and returned counts, missing cells, gap and visibility disclosure, truncation state and `complete_domain`. Manifest-derived Scope and resource bindings are canonicalized into the snapshot digest, so omitting redundant explicit Scope fields does not change the same semantic snapshot. Recall-mode pages are for recall and cannot establish complete-domain closure. The gate reads the same snapshot and reports a decision; it does not authorize a target action or close the Engagement.
+
+`action.audit.query` is a host/operator fixed-`read_seq` page over append-only Action lifecycle facts. It can filter by run, Attempt, generation, Action and status, and its records retain authenticated actor/owner bindings plus structured network provenance. The current Action projection remains separate from the history; a stale late result is quarantined and cannot overwrite current state. No Action operation executes or retries a target request.
+
+`report.snapshot.commit` accepts a committed report Artifact, the manifest and its digest, the current ScopeRevision, the complete ResourceRevision set and the Coverage watermark/digest. Core revalidates the manifest, Scope, Resource revisions, Evidence set, Coverage snapshot/gate and Artifact integrity before committing an immutable `report_snapshot`. `engagement.close` is an operator-only CAS over the current Engagement version and authority watermark. It requires that exact current passing snapshot, an effective ScopeRevision, no active WorkRun and no authorized/unknown Action; it commits the immutable `close_decision` and completed Engagement state atomically. Ordinary canonical writes and new WorkRun claims are fenced while closed. `engagement.reopen` requires the current closed decision, appends a superseding decision and reactivates the Engagement. Idempotent retries return their original decision; stale versions and stale decisions fail closed.
+
+The host still generates and stores report content and remains responsible for scheduling, tool execution and action authorization. Taric records the host's submitted report Artifact and the canonical evidence used to close the Engagement; this does not move those host responsibilities into Core. See [Scope revision tests](../packages/core/test/scope-revision.test.mjs), [Coverage snapshot tests](../packages/core/test/coverage-snapshot.test.mjs), [Action audit tests](../packages/core/test/action-audit.test.mjs) and [Report/close tests](../packages/core/test/report-close.test.mjs).
 
 ### Host state polling
 

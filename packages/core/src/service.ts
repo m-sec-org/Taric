@@ -8,7 +8,7 @@ import { buildContextPack, ContextBudgetError, type ContextPack } from "./contex
 import { InvalidCursorError } from "./cursor-key.js";
 import { TARIC_COMPATIBILITY_MANIFEST } from "./compatibility.js";
 import { ContractValidationError, normalizeDiagnosticDetails, schemaValidator, UUID_V7_PATTERN, validateContract, validateProposalEnvelope, type DiagnosticDetails } from "./validation.js";
-import { API_CONTRACT_VERSION, coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
+import { API_CONTRACT_VERSION, coreSchema, operationContract, operationContracts, SCHEMA_VERSION, type ActionNetworkProvenance, type ContractName, type ProposalEnvelope, type ProposalCandidate, type PromotionL2 } from "@taric/schemas";
 import { createAccessDecisionObservation, createControlObservation, validateCoverageCellInput, type AccessDecisionObservationInput, type ControlObservationInput, type CoverageCellInput, coverageGateSnapshot } from "./coverage.js";
 import { ArtifactContentStore, ARTIFACT_CHUNK_BYTES, type ArtifactBeginInput, type ArtifactAppendInput, type ArtifactBinaryAppendStreamInput, type ArtifactCommitInput } from "./artifact-content-store.js";
 import { dirname } from "node:path";
@@ -151,6 +151,15 @@ export interface CoreService {
         };
     }): Promise<ApiResponse<CanonicalRecord>>;
     status(): Promise<ApiResponse<Record<string, unknown>>>;
+    reviseScope(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    invalidateScope(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    scopeQuery(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    coverageSnapshot(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    coverageManifestCommit(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    actionAuditQuery(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    reportSnapshotCommit(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    engagementClose(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
+    engagementReopen(principal: Principal, input: Record<string, unknown>): Promise<ApiResponse<Record<string, unknown>>>;
     buildContext(principal: Principal, input: {
         engagement_id: string;
         budget?: number;
@@ -426,6 +435,51 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             return (await safe(async () => ({ ok: true as const, data: (await store.initializeEngagement(engagement)) })));
         },
         async status() { return { ok: true as const, data: { schema_version: SCHEMA_VERSION, api_contract_version: API_CONTRACT_VERSION, schema_supported: true } }; },
+        async reviseScope(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "scope.revise", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.reviseScope({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
+        async invalidateScope(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "scope.invalidate", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.invalidateScope({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
+        async scopeQuery(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "scope.query", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.scopeQuery({ ...input, principal_id: principal.id, cursor_key_root: contentRoot } as never) as unknown as Record<string, unknown> }));
+        },
+        async coverageSnapshot(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "coverage.snapshot", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.coverageSnapshotPage({ ...input, principal_id: principal.id, cursor_key_root: contentRoot } as never) as unknown as Record<string, unknown> }));
+        },
+        async coverageManifestCommit(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "coverage.manifest.commit", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.commitCoverageManifest({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
+        async actionAuditQuery(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "action.audit.query", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.actionAuditQuery({ ...input, principal_id: principal.id, cursor_key_root: contentRoot } as never) as unknown as Record<string, unknown> }));
+        },
+        async reportSnapshotCommit(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "report.snapshot.commit", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.commitReportSnapshot({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
+        async engagementClose(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "engagement.close", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.closeEngagement({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
+        async engagementReopen(principal: Principal, input: Record<string, unknown>) {
+            const response = authorize(principal, "engagement.reopen", String(input.engagement_id ?? ""));
+            if (!response.ok) return response;
+            return safe(async () => ({ ok: true as const, data: await store.reopenEngagement({ ...input, principal: principal.id } as never) as unknown as Record<string, unknown> }));
+        },
         async artifactSessionBind(principal: Principal, input: {
             engagement_id: string;
             session_id: string;
@@ -915,7 +969,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                     throw new ContractValidationError("validation_error", "include_active_runs must be a boolean");
                 if (input.page_size !== undefined && (!Number.isSafeInteger(input.page_size) || (input.page_size as number) < 1 || (input.page_size as number) > 200))
                     throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
-                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 512))
+                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 4096))
                     throw new ContractValidationError("validation_error", "cursor must be a bounded string");
                 const page = (await store.workItemsPage({
                     engagement_id: engagementId,
@@ -945,11 +999,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (!response.ok)
                 return response;
             return (await safe(async () => {
-                const allowed = new Set(["engagement_id", "contract_version"]);
+                const allowed = new Set(["engagement_id", "as_of", "resource_refs", "manifest_ref", "manifest_digest", "scope_revision_ref", "policy_digest", "test_category", "contract_version"]);
                 if (Object.keys(input).some((field) => !allowed.has(field)))
                     return error("validation_error", "coverage gate contains unsupported fields");
                 const engagementId = String(input.engagement_id);
-                const snapshot = await coverageGateSnapshot(store, engagementId);
+                const options = Object.fromEntries(Object.entries(input).filter(([key]) => key !== "engagement_id" && key !== "contract_version"));
+                const snapshot = await coverageGateSnapshot(store, engagementId, options as never);
                 return {
                     ok: true as const,
                     data: snapshot,
@@ -967,7 +1022,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             return (await safe(async () => {
                 const request = input as unknown as Record<string, unknown>;
                 const allowed = new Set([
-                    "engagement_id", "cell_id", "expected_version", "resource_ref", "resource_revision_ref", "test_category",
+                    "engagement_id", "cell_id", "expected_version", "resource_ref", "resource_revision_ref", "scope_revision_ref", "policy_digest", "test_category",
                     "identity_ref", "operation", "parameter", "conditions", "status", "tested_at", "limitations", "evidence_refs",
                     "control_observation_ref", "origin_reached", "external_result_state", "role", "tenant_ref", "path",
                     "network_condition", "method", "not_applicable_reason", "counter_evidence_refs", "idempotency_key", "contract_version",
@@ -1031,7 +1086,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                     throw new ContractValidationError("validation_error", "include_candidates must be a boolean");
                 if (input.page_size !== undefined && (!Number.isSafeInteger(input.page_size) || (input.page_size as number) < 1 || (input.page_size as number) > 200))
                     throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
-                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 512))
+                if (input.cursor !== undefined && (typeof input.cursor !== "string" || input.cursor.length > 4096))
                     throw new ContractValidationError("validation_error", "cursor must be a bounded string");
                 const page = (await store.coverageCellsPage({
                     engagement_id: engagementId,
@@ -1235,6 +1290,8 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             rationale: string;
             uncertainty?: string;
             scope?: string;
+            scope_revision_ref?: string;
+            policy_digest?: string;
             constraints?: string[];
             limitations?: string[];
             memory_refs?: string[];
@@ -1244,7 +1301,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (!response.ok)
                 return response;
             return (await safe(async () => {
-                const allowed = new Set(["engagement_id", "work_run_id", "generation", "target", "method", "rationale", "uncertainty", "scope", "constraints", "limitations", "memory_refs", "evidence_refs"]);
+                const allowed = new Set(["engagement_id", "work_run_id", "generation", "target", "method", "rationale", "uncertainty", "scope", "scope_revision_ref", "policy_digest", "constraints", "limitations", "memory_refs", "evidence_refs"]);
                 if (Object.keys(input as unknown as Record<string, unknown>).some((key) => !allowed.has(key)))
                     return error("validation_error", "action recommendation contains unsupported fields");
                 if (![input.target, input.method, input.rationale].every((value) => typeof value === "string" && value.trim().length > 0))
@@ -1266,11 +1323,12 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 const content = {
                     id: uuidv7(), engagement_id: input.engagement_id, kind: "action_intent", status: "recommended",
                     target: input.target, method: input.method, rationale: input.rationale, uncertainty: input.uncertainty, scope: input.scope ?? input.engagement_id,
+                    scope_revision_ref: input.scope_revision_ref ?? (typeof run?.scope_revision_ref === "string" ? run.scope_revision_ref : undefined), policy_digest: input.policy_digest ?? (typeof run?.policy_digest === "string" ? run.policy_digest : undefined),
                     constraints: input.constraints ?? [], limitations: input.limitations ?? [], memory_refs: input.memory_refs ?? [], evidence_refs: input.evidence_refs ?? [],
                     work_run_ref: workRunId, attempt_ref: run?.attempt_ref, generation,
                 } as CanonicalRecord;
                 if (run) {
-                    const action = (await store.recordActionIntent({ action_id: content.id, run_id: workRunId!, generation: generation!, mode: "llm_recommend", target: input.target, method: input.method, rationale: input.rationale, uncertainty: input.uncertainty, scope: input.scope ?? input.engagement_id, constraints: input.constraints ?? [], limitations: input.limitations ?? [], memory_refs: input.memory_refs ?? [], evidence_refs: input.evidence_refs ?? [], status: "recommended", host_id: principal.id, actor_role: principal.role === "model" ? "model" : "host" }));
+                    const action = (await store.recordActionIntent({ action_id: content.id, run_id: workRunId!, generation: generation!, mode: "llm_recommend", target: input.target, method: input.method, rationale: input.rationale, uncertainty: input.uncertainty, scope: input.scope ?? input.engagement_id, scope_revision_ref: input.scope_revision_ref ?? (typeof run?.scope_revision_ref === "string" ? run.scope_revision_ref : undefined), policy_digest: input.policy_digest ?? (typeof run?.policy_digest === "string" ? run.policy_digest : undefined), constraints: input.constraints ?? [], limitations: input.limitations ?? [], memory_refs: input.memory_refs ?? [], evidence_refs: input.evidence_refs ?? [], status: "recommended", host_id: principal.id, actor_role: principal.role === "model" ? "model" : "host" }));
                     return { ok: true as const, data: { recommendation_id: action.action_id, target: input.target, method: input.method, rationale: input.rationale, uncertainty: input.uncertainty, scope: input.scope ?? input.engagement_id, constraints: input.constraints ?? [], limitations: input.limitations ?? [], memory_refs: input.memory_refs ?? [], evidence_refs: input.evidence_refs ?? [] } };
                 }
                 const { id: _id, ...candidate } = content;
@@ -1309,11 +1367,18 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             status: "executed" | "failed" | "unknown";
             result_ref?: string;
             host_decision_ref?: string;
+            network_provenance?: ActionNetworkProvenance;
+            scope_revision_ref?: string;
+            policy_digest?: string;
         }) {
             const response = authorize(principal, "action.host-result", input.engagement_id);
             if (!response.ok)
                 return response;
             return (await safe(async () => {
+                const currentRun = await store.getWorkRun(input.work_run_id);
+                if (currentRun?.engagement_id === input.engagement_id && input.generation < Number(currentRun.generation)) {
+                    return { ok: true as const, data: await store.recordLateResult({ ...input, host_id: principal.id }) };
+                }
                 const sessionError = await checkHostTransportSession(store, principal, input.engagement_id, { work_run_id: input.work_run_id, generation: input.generation, request: input as unknown as Record<string, unknown> });
                 if (sessionError)
                     return sessionError;
@@ -1698,7 +1763,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return error("authorization_error", "reviewer identity is bound to the authenticated principal");
             if (operation === "review.submit" && ["reviewer_capability", "reviewer_model", "prompt_digest", "ruleset_digest"].some((field) => Object.prototype.hasOwnProperty.call(request, field)))
                 return error("authorization_error", "reviewer attestation is assigned by the authenticated transport");
-            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit" || operation === "work.transition" || operation === "coverage.record") {
+            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit" || operation === "work.transition" || operation === "coverage.record" || ["engagement.close", "engagement.reopen", "scope.revise", "scope.invalidate", "scope.query", "report.snapshot.commit", "coverage.snapshot", "coverage.manifest.commit", "action.audit.query"].includes(operation)) {
                 const requestContract = operationContract(operation)!.request as ContractName;
                 let validate = operationRequestValidators.get(requestContract);
                 if (!validate) {
@@ -1708,7 +1773,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 if (!validate || !validate(request))
                     return error("validation_error", `invalid ${operation} request`, undefined, normalizeDiagnosticDetails(validate?.errors, requestContract));
             }
-            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "engagement.close": "engagementClose", "engagement.reopen": "engagementReopen", "scope.revise": "reviseScope", "scope.invalidate": "invalidateScope", "scope.query": "scopeQuery", "report.snapshot.commit": "reportSnapshotCommit", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.manifest.commit": "coverageManifestCommit", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "coverage.snapshot": "coverageSnapshot", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "action.audit.query": "actionAuditQuery", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
             aliases["host.state"] = "hostState";
             const methodName = aliases[operation] ?? operation;
             if (operation === "admission.promote_l2")
@@ -1837,7 +1902,7 @@ async function hostTransportAttribution(store: AuthorityStore, principal: Princi
 function capabilityForOperation(operation: string): PrincipalCapability | undefined {
     if (operation === "admission.promote_l2")
         return "writer";
-    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "review.pack", "control.list", "host.state", "engagement.status", "work.query", "coverage.gate", "coverage.query"].includes(operation))
+    if (["context.build", "context.query", "query", "resource.query", "evidence.query", "proposal.list", "review.pack", "control.list", "host.state", "engagement.status", "work.query", "coverage.gate", "coverage.query", "coverage.snapshot", "scope.query", "action.audit.query"].includes(operation))
         return "read";
     if (["proposal.submit", "capture.observation", "checkpoint.propose", "action.recommend"].includes(operation))
         return "propose";
@@ -1848,6 +1913,10 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
     if (["work.claim", "work.renew", "work.reclaim", "work.transition", "work.resume", "error.report"].includes(operation))
         return "work";
     if (operation === "coverage.record")
+        return "propose";
+    if (["engagement.close", "engagement.reopen", "scope.revise", "scope.invalidate", "coverage.manifest.commit"].includes(operation))
+        return "operator";
+    if (operation === "report.snapshot.commit")
         return "propose";
     if (["checkpoint.commit"].includes(operation))
         return "checkpoint";

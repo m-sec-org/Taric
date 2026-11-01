@@ -294,6 +294,55 @@ export interface Scope extends RecordBase, CoreManagedFields {
   valid_from?: Timestamp;
   valid_until?: Timestamp;
   notes?: string;
+  current_revision_ref?: Uuid;
+  revision_number?: number;
+  revision_state?: "approved" | "invalidated";
+  invalidation_ref?: Uuid;
+  policy_digest?: Sha256;
+}
+
+export interface ScopePolicy {
+  allowed_targets: string[];
+  excluded_targets: string[];
+  protocols: Array<"http" | "https" | "tcp" | "udp">;
+  ports: Array<{ from: number; to: number }>;
+  methods: string[];
+  dns: {
+    require_pinned_addresses: boolean;
+    reject_private_addresses: boolean;
+    max_addresses: number;
+  };
+  redirects: {
+    max_hops: number;
+    same_scope_only: boolean;
+  };
+  valid_from: Timestamp;
+  valid_until: Timestamp;
+}
+
+/** Immutable ROE and normalized policy binding for one Scope version. */
+export interface ScopeRevision extends RecordBase, CoreManagedFields {
+  scope_ref: Uuid;
+  revision: number;
+  supersedes?: Uuid;
+  policy: ScopePolicy;
+  roe_artifact_ref: string;
+  roe_artifact_version: number;
+  roe_content_hash: Sha256;
+  policy_digest: Sha256;
+  approval_status: "approved";
+  approved_by: string;
+  approved_at: Timestamp;
+}
+
+/** Immutable invalidation fact for a previously approved ScopeRevision. */
+export interface ScopeInvalidation extends RecordBase, CoreManagedFields {
+  scope_ref: Uuid;
+  scope_revision_ref: Uuid;
+  reason: string;
+  actor_id: string;
+  invalidated_at: Timestamp;
+  idempotency_key: string;
 }
 
 export interface Engagement extends RecordBase, CoreManagedFields {
@@ -301,6 +350,21 @@ export interface Engagement extends RecordBase, CoreManagedFields {
   scope_ref: Uuid;
   status: "active" | "paused" | "completed" | "archived";
   action_mode?: ActionMode;
+}
+
+export interface ReportSnapshot extends RecordBase, CoreManagedFields {
+  manifest_ref: Uuid; manifest_digest: Sha256; scope_revision_ref: Uuid; policy_digest: Sha256;
+  resource_revision_refs: Uuid[]; coverage_read_seq: number; coverage_snapshot_digest: Sha256;
+  coverage_gate_digest: Sha256; coverage_can_close: boolean; coverage_complete_domain: boolean; coverage_gap_kinds: string[];
+  evidence_read_seq: number; evidence_refs: Uuid[]; evidence_snapshot_hash: Sha256;
+  report_artifact_session_id: string; report_artifact_ref: string; report_artifact_id: Uuid; report_artifact_version: number; report_artifact_digest: Sha256;
+  authority_read_seq: number; snapshot_digest: Sha256; committed_at: Timestamp;
+}
+
+export interface CloseDecision extends RecordBase, CoreManagedFields {
+  decision: "closed" | "reopened"; report_snapshot_ref: Uuid; actor_id: string; reason: string;
+  expected_authority_seq: number; snapshot_read_seq: number; scope_revision_ref: Uuid; policy_digest: Sha256;
+  coverage_snapshot_digest: Sha256; evidence_snapshot_hash: Sha256; resource_revision_refs: Uuid[]; supersedes?: Uuid; decided_at: Timestamp;
 }
 
 export interface Resource extends RecordBase, CoreManagedFields {
@@ -467,6 +531,8 @@ export interface Claim extends RecordBase, CoreManagedFields {
 export interface WorkItem extends RecordBase, CoreManagedFields {
   title: string;
   scope_ref?: Uuid;
+  scope_revision_ref?: Uuid;
+  policy_digest?: Sha256;
   target_version?: number;
   status: WorkStatus;
   acceptance_criteria: string[];
@@ -504,6 +570,8 @@ export interface CoverageCell extends RecordBase, CoreManagedFields {
   status: CoverageStatus;
   limitations: string[];
   resource_revision_ref?: Uuid;
+  scope_revision_ref?: Uuid;
+  policy_digest?: Sha256;
   identity_ref?: Uuid;
   operation?: string;
   parameter?: string;
@@ -513,6 +581,29 @@ export interface CoverageCell extends RecordBase, CoreManagedFields {
   control_observation_ref?: Uuid;
   origin_reached?: OriginReached;
   external_result_state?: "ingested" | "pending" | "unavailable";
+}
+
+export interface CoverageDimension {
+  resource_ref: Uuid;
+  resource_revision_ref?: Uuid;
+  test_category: string;
+  identity_ref?: Uuid;
+  role?: string;
+  tenant_ref?: Uuid;
+  operation?: string;
+  path?: string;
+  parameter?: string;
+  method?: string;
+  network_condition?: string;
+  conditions: string[];
+}
+
+/** Immutable host-declared expected matrix, bound to one ScopeRevision. */
+export interface CoverageManifest extends RecordBase, CoreManagedFields {
+  scope_revision_ref: Uuid;
+  policy_digest: Sha256;
+  manifest_digest: Sha256;
+  expected_cells: CoverageDimension[];
 }
 
 export interface NegativeObservation extends RecordBase, CoreManagedFields {
@@ -658,6 +749,8 @@ export interface Attempt extends RecordBase, CoreManagedFields {
 
 export interface WorkRun extends RecordBase, CoreManagedFields {
   work_item_ref: Uuid;
+  scope_revision_ref?: Uuid;
+  policy_digest?: Sha256;
   status: WorkStatus;
   generation: number;
   attempt_ref?: Uuid;
@@ -679,6 +772,8 @@ export interface Checkpoint extends RecordBase, CoreManagedFields {
   target_version: number;
   work_item_version: number;
   scope_version: number;
+  scope_revision_ref?: Uuid;
+  policy_digest?: Sha256;
   owner: OwnerAttribution;
   lease_expires_at: Timestamp;
   source_read_seq: number;
@@ -701,6 +796,26 @@ export interface Checkpoint extends RecordBase, CoreManagedFields {
   artifact_refs?: ArtifactReference[];
 }
 
+export interface ActionNetworkRedirectHop {
+  from: string;
+  to: string;
+  decision: "allowed" | "blocked";
+  decided_at: Timestamp;
+}
+
+/** Host-reported connection provenance; Taric records these facts without executing traffic or verifying them independently. */
+export interface ActionNetworkProvenance {
+  approved_addresses: string[];
+  connected_address: string;
+  ip_family: "ipv4" | "ipv6";
+  protocol: string;
+  port: number;
+  resolved_at: Timestamp;
+  connected_at: Timestamp;
+  completed_at?: Timestamp;
+  redirect_chain: ActionNetworkRedirectHop[];
+}
+
 export interface ActionIntent extends RecordBase, CoreManagedFields {
   target: string;
   method: string;
@@ -721,6 +836,9 @@ export interface ActionIntent extends RecordBase, CoreManagedFields {
   authorization_ref?: string;
   result_ref?: string;
   idempotency_key?: string;
+  scope_revision_ref?: Uuid;
+  policy_digest?: Sha256;
+  network_provenance?: ActionNetworkProvenance;
   recorded_at?: Timestamp;
 }
 
@@ -781,7 +899,11 @@ export type ApiResponse<T = unknown> = ApiSuccess<T> | ApiErrorEnvelope;
 /** 合同名 -> 记录类型。Core/CLI/MCP/Pi 都从这一份映射取类型。 */
 export interface ContractTypeMap {
   scope: Scope;
+  scopeRevision: ScopeRevision;
+  scopeInvalidation: ScopeInvalidation;
   engagement: Engagement;
+  reportSnapshot: ReportSnapshot;
+  closeDecision: CloseDecision;
   resource: Resource;
   resourceRevision: ResourceRevision;
   observation: Observation;
@@ -796,6 +918,7 @@ export interface ContractTypeMap {
   evidence: Evidence;
   finding: Finding;
   coverageCell: CoverageCell;
+  coverageManifest: CoverageManifest;
   negativeObservation: NegativeObservation;
   proposal: Proposal;
   proposalEnvelope: ProposalEnvelope;

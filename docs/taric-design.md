@@ -25,7 +25,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前 root workspace 和 runtime components 均为 `1.0.3`，API 为 `1.3.0`、adapter 为 `1.1`；记录 schema `1.0.0`、authority storage `authority-storage/3` 和 SQL 格式 `authority-sql/4` 保持不变。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前 `1.0.3` 发布证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
+当前 root workspace 和 runtime components 声明版本 `1.0.3`，API 为 `1.4.0`、adapter 为 `1.1`；record schema `1.0.0`、authority storage `authority-storage/4` 和 SQL 格式 `authority-sql/4` 保持不变。API 1.4 增加 immutable ScopeRevision、固定完整域 Coverage snapshot、ActionEvent 审计读取、ReportSnapshot 与 CloseDecision。新增记录复用既有通用 record version/event 布局，不改变 Taric 作为记忆与治理组件、由宿主执行和授权目标动作的定位。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前源码验证证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
 
 ## 2. 技术栈
 
@@ -223,7 +223,7 @@ begin 创建 upload 与服务器分配 Artifact ID/version；append 按 ordinal 
 
 ## 7. API 表面
 
-当前 schema registry 有 57 个 operations、5 个 unsupported declarations、8 个 permanent non-goals；`service.ts` 还单独识别 `storage.backup`/`storage.restore` 两个 deferred 名称。CLI `cliCommands` 有 49 项（含本地 `artifact.store.append-file` helper），MCP 固定六工具，三种清单不等价。完整逐操作角色与 capability 见 [API](taric-api.md#operation-inventory)。
+当前 schema registry 有 66 个 operations、5 个 unsupported declarations、8 个 permanent non-goals；`service.ts` 还单独识别 `storage.backup`/`storage.restore` 两个 deferred 名称。CLI `cliCommands` 有 60 项（含本地 `artifact.store.append-file` helper），MCP 固定六工具，三种清单不等价。完整逐操作角色与 capability 见 [API](taric-api.md#operation-inventory)。
 
 Core service 方法与公开 dispatch 的请求形状不总等于领域 schema：Artifact 请求在 dispatch 编译 schema 校验，其余很多注册项使用 `apiSuccess` 占位并由方法手工检查。不能声称每个输入都会自动套用完整领域 schema 或统一拒绝所有额外字段。错误 envelope 为 `ok:false/error`，11 个稳定 Core 错误码；startup 与 JSON-RPC 另有错误层。
 

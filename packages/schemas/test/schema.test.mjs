@@ -17,7 +17,7 @@ ajv.addSchema(coreSchema);
 const validators = new Map(contractNames.map((name) => [name, ajv.getSchema(`${coreSchema.$id}#/$defs/${name}`)]));
 
 test("public API, adapter, and schema versions agree across generated manifests", () => {
-  assert.equal(contractRegistry.api_contract_version, "1.3.0");
+  assert.equal(contractRegistry.api_contract_version, "1.4.0");
   assert.equal(contractRegistry.adapter_contract_version, "1.1");
   assert.equal(supportedProfile.core_api_version, API_CONTRACT_VERSION);
   assert.equal(supportedProfile.adapter_api_version, ADAPTER_CONTRACT_VERSION);

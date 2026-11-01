@@ -63,6 +63,10 @@ test("SQLite store structurally implements the published authority storage contr
   assert.deepEqual(AUTHORITY_STORAGE_CONTRACT.invariants, [
     "atomic_record_event_idempotency_outbox_commit",
     "expected_version_compare_and_set",
+    "immutable_scope_revision_roe_atomicity",
+    "manifest_bound_complete_coverage_snapshot_and_cursor",
+    "append_only_action_audit_at_fixed_authority_sequence",
+    "canonical_report_snapshot_and_close_decision_atomicity",
     "uuidv7_primary_identity_and_global_display_sequence",
     "strictly_ordered_audit_event_sequence",
     "pinned_snapshot_read_sequence_and_watermarks",

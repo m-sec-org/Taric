@@ -1,12 +1,16 @@
 import type { AuthorityStore, CanonicalRecord, DoctorReport, ReadSnapshot, TrustLevel, AuditEvent } from "./store.js";
 import type { PostgresAuthorityStore } from "./postgres.js";
 
-export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/3" as const;
+export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/4" as const;
 
 /** Observable guarantees all authority backends must implement; database-specific mechanics remain private. */
 export const AUTHORITY_STORAGE_INVARIANTS = [
   "atomic_record_event_idempotency_outbox_commit",
   "expected_version_compare_and_set",
+  "immutable_scope_revision_roe_atomicity",
+  "manifest_bound_complete_coverage_snapshot_and_cursor",
+  "append_only_action_audit_at_fixed_authority_sequence",
+  "canonical_report_snapshot_and_close_decision_atomicity",
   "uuidv7_primary_identity_and_global_display_sequence",
   "strictly_ordered_audit_event_sequence",
   "pinned_snapshot_read_sequence_and_watermarks",
@@ -20,6 +24,15 @@ export type AuthorityStorageInvariant = typeof AUTHORITY_STORAGE_INVARIANTS[numb
 export interface AuthorityStorageContract {
   close(): Promise<void>;
   commit(record: CanonicalRecord, trustLevel?: TrustLevel, idempotencyKey?: string, context?: { operation?: string; principal?: string; engagement_id?: string; expected_version?: number }): Promise<CanonicalRecord>;
+  reviseScope(input: Parameters<AuthorityStore["reviseScope"]>[0]): ReturnType<AuthorityStore["reviseScope"]>;
+  invalidateScope(input: Parameters<AuthorityStore["invalidateScope"]>[0]): ReturnType<AuthorityStore["invalidateScope"]>;
+  scopeQuery(input: Parameters<AuthorityStore["scopeQuery"]>[0]): ReturnType<AuthorityStore["scopeQuery"]>;
+  commitCoverageManifest(input: Parameters<AuthorityStore["commitCoverageManifest"]>[0]): ReturnType<AuthorityStore["commitCoverageManifest"]>;
+  coverageSnapshotPage(input: Parameters<AuthorityStore["coverageSnapshotPage"]>[0]): ReturnType<AuthorityStore["coverageSnapshotPage"]>;
+  actionAuditQuery(input: Parameters<AuthorityStore["actionAuditQuery"]>[0]): ReturnType<AuthorityStore["actionAuditQuery"]>;
+  commitReportSnapshot(input: Parameters<AuthorityStore["commitReportSnapshot"]>[0]): ReturnType<AuthorityStore["commitReportSnapshot"]>;
+  closeEngagement(input: Parameters<AuthorityStore["closeEngagement"]>[0]): ReturnType<AuthorityStore["closeEngagement"]>;
+  reopenEngagement(input: Parameters<AuthorityStore["reopenEngagement"]>[0]): ReturnType<AuthorityStore["reopenEngagement"]>;
   compareAndSet(id: string, expectedVersion: number, patch: Record<string, unknown>, trustLevel?: TrustLevel): Promise<CanonicalRecord>;
   snapshot(engagementId: string, options?: { trustLevel?: TrustLevel; includeCandidates?: boolean; asOf?: number }): Promise<ReadSnapshot>;
   exportSnapshot(engagementId: string, asOf?: number): Promise<{ schema_version: string; engagement_id: string; read_seq: number; committed_seq: number; projected_seq: number; records: CanonicalRecord[]; hash: string }>;
@@ -37,7 +50,7 @@ export type MaybePromise<T> = T | Promise<T>;
 
 /** Core's complete asynchronous persistence surface. Policy remains shared. */
 export const AUTHORITY_BACKEND_METHODS = [
-  "close", "commit", "createRecord", "initializeEngagement", "get", "getAt", "list", "recordsPage", "compareAndSet", "snapshot", "exportSnapshot", "importSnapshot",
+  "close", "commit", "createRecord", "initializeEngagement", "reviseScope", "invalidateScope", "scopeQuery", "commitCoverageManifest", "coverageSnapshotPage", "actionAuditQuery", "commitReportSnapshot", "closeEngagement", "reopenEngagement", "get", "getAt", "list", "recordsPage", "compareAndSet", "snapshot", "exportSnapshot", "importSnapshot",
   "submitProposal", "proposals", "proposalsPage", "submitReview", "reviewPack", "admitProposal", "evaluateAdmission", "promoteFinding",
   "createResourceRevision", "applyPatchSet", "addRelation", "impact",
   "claimWorkRun", "renewWorkRun", "reclaimWorkRun", "getWorkRun", "activeWorkRuns", "workItemsPage", "commitCheckpoint", "resumePacket",

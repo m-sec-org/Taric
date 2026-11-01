@@ -100,6 +100,95 @@
         "host_hitl"
       ]
     },
+    "actionNetworkRedirectHop": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "decision",
+        "decided_at"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "to": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "decision": {
+          "enum": [
+            "allowed",
+            "blocked"
+          ]
+        },
+        "decided_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "actionIpAddress": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^[0-9A-Fa-f:.]+$"
+    },
+    "actionNetworkProvenance": {
+      "type": "object",
+      "required": [
+        "approved_addresses",
+        "connected_address",
+        "ip_family",
+        "protocol",
+        "port",
+        "resolved_at",
+        "connected_at",
+        "redirect_chain"
+      ],
+      "properties": {
+        "approved_addresses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/actionIpAddress"
+          }
+        },
+        "connected_address": {
+          "$ref": "#/$defs/actionIpAddress"
+        },
+        "ip_family": {
+          "enum": [
+            "ipv4",
+            "ipv6"
+          ]
+        },
+        "protocol": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9+.-]*$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "resolved_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "connected_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "completed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "redirect_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/actionNetworkRedirectHop"
+          }
+        }
+      },
+      "unevaluatedProperties": false
+    },
     "artifactReference": {
       "type": "object",
       "description": "Opaque Artifact reference. Content may remain external or be explicitly stored in a bound task session.",
@@ -754,7 +843,143 @@
             },
             "notes": {
               "type": "string"
+            },
+            "current_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision_number": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "revision_state": {
+              "enum": ["approved", "invalidated"]
+            },
+            "invalidation_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
             }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "scopePolicy": {
+      "type": "object",
+      "required": [
+        "allowed_targets",
+        "excluded_targets",
+        "protocols",
+        "ports",
+        "methods",
+        "dns",
+        "redirects",
+        "valid_from",
+        "valid_until"
+      ],
+      "properties": {
+        "allowed_targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "excluded_targets": { "$ref": "#/$defs/stringList" },
+        "protocols": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["http", "https", "tcp", "udp"] }
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "integer", "minimum": 1, "maximum": 65535 },
+              "to": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "methods": { "$ref": "#/$defs/stringList" },
+        "dns": {
+          "type": "object",
+          "required": ["require_pinned_addresses", "reject_private_addresses", "max_addresses"],
+          "properties": {
+            "require_pinned_addresses": { "type": "boolean" },
+            "reject_private_addresses": { "type": "boolean" },
+            "max_addresses": { "type": "integer", "minimum": 1, "maximum": 256 }
+          },
+          "additionalProperties": false
+        },
+        "redirects": {
+          "type": "object",
+          "required": ["max_hops", "same_scope_only"],
+          "properties": {
+            "max_hops": { "type": "integer", "minimum": 0, "maximum": 20 },
+            "same_scope_only": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "valid_from": { "$ref": "#/$defs/timestamp" },
+        "valid_until": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "scopeRevision": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        { "$ref": "#/$defs/coreManagedFields" },
+        {
+          "type": "object",
+          "required": [
+            "scope_ref",
+            "revision",
+            "policy",
+            "roe_artifact_ref",
+            "roe_artifact_version",
+            "roe_content_hash",
+            "policy_digest",
+            "approval_status",
+            "approved_by",
+            "approved_at"
+          ],
+          "properties": {
+            "scope_ref": { "$ref": "#/$defs/uuid" },
+            "revision": { "type": "integer", "minimum": 1 },
+            "supersedes": { "$ref": "#/$defs/uuid" },
+            "policy": { "$ref": "#/$defs/scopePolicy" },
+            "roe_artifact_ref": { "$ref": "#/$defs/nonEmptyString" },
+            "roe_artifact_version": { "type": "integer", "minimum": 1 },
+            "roe_content_hash": { "$ref": "#/$defs/sha256" },
+            "policy_digest": { "$ref": "#/$defs/sha256" },
+            "approval_status": { "const": "approved" },
+            "approved_by": { "$ref": "#/$defs/nonEmptyString" },
+            "approved_at": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "scopeInvalidation": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        { "$ref": "#/$defs/coreManagedFields" },
+        {
+          "type": "object",
+          "required": ["scope_ref", "scope_revision_ref", "reason", "actor_id", "invalidated_at", "idempotency_key"],
+          "properties": {
+            "scope_ref": { "$ref": "#/$defs/uuid" },
+            "scope_revision_ref": { "$ref": "#/$defs/uuid" },
+            "reason": { "$ref": "#/$defs/nonEmptyString" },
+            "actor_id": { "$ref": "#/$defs/nonEmptyString" },
+            "invalidated_at": { "$ref": "#/$defs/timestamp" },
+            "idempotency_key": { "$ref": "#/$defs/nonEmptyString" }
           }
         }
       ],
@@ -794,6 +1019,69 @@
             "action_mode": {
               "$ref": "#/$defs/actionMode"
             }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "reportSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        { "$ref": "#/$defs/coreManagedFields" },
+        {
+          "type": "object",
+          "required": ["manifest_ref", "manifest_digest", "scope_revision_ref", "policy_digest", "resource_revision_refs", "coverage_read_seq", "coverage_snapshot_digest", "coverage_gate_digest", "coverage_can_close", "coverage_complete_domain", "coverage_gap_kinds", "evidence_read_seq", "evidence_refs", "evidence_snapshot_hash", "report_artifact_session_id", "report_artifact_ref", "report_artifact_id", "report_artifact_version", "report_artifact_digest", "authority_read_seq", "snapshot_digest", "committed_at"],
+          "properties": {
+            "manifest_ref": { "$ref": "#/$defs/uuidV7" },
+            "manifest_digest": { "$ref": "#/$defs/sha256" },
+            "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+            "policy_digest": { "$ref": "#/$defs/sha256" },
+            "resource_revision_refs": { "$ref": "#/$defs/uuidList" },
+            "coverage_read_seq": { "type": "integer", "minimum": 0 },
+            "coverage_snapshot_digest": { "$ref": "#/$defs/sha256" },
+            "coverage_gate_digest": { "$ref": "#/$defs/sha256" },
+            "coverage_can_close": { "type": "boolean" },
+            "coverage_complete_domain": { "type": "boolean" },
+            "coverage_gap_kinds": { "$ref": "#/$defs/stringList" },
+            "evidence_read_seq": { "type": "integer", "minimum": 0 },
+            "evidence_refs": { "$ref": "#/$defs/uuidList" },
+            "evidence_snapshot_hash": { "$ref": "#/$defs/sha256" },
+            "report_artifact_session_id": { "$ref": "#/$defs/nonEmptyString" },
+            "report_artifact_ref": { "$ref": "#/$defs/nonEmptyString" },
+            "report_artifact_id": { "$ref": "#/$defs/uuidV7" },
+            "report_artifact_version": { "type": "integer", "minimum": 1 },
+            "report_artifact_digest": { "$ref": "#/$defs/sha256" },
+            "authority_read_seq": { "type": "integer", "minimum": 0 },
+            "snapshot_digest": { "$ref": "#/$defs/sha256" },
+            "committed_at": { "$ref": "#/$defs/timestamp" }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "closeDecision": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        { "$ref": "#/$defs/coreManagedFields" },
+        {
+          "type": "object",
+          "required": ["decision", "report_snapshot_ref", "actor_id", "reason", "expected_authority_seq", "snapshot_read_seq", "scope_revision_ref", "policy_digest", "coverage_snapshot_digest", "evidence_snapshot_hash", "resource_revision_refs", "decided_at"],
+          "properties": {
+            "decision": { "enum": ["closed", "reopened"] },
+            "report_snapshot_ref": { "$ref": "#/$defs/uuidV7" },
+            "actor_id": { "$ref": "#/$defs/nonEmptyString" },
+            "reason": { "$ref": "#/$defs/nonEmptyString" },
+            "expected_authority_seq": { "type": "integer", "minimum": 0 },
+            "snapshot_read_seq": { "type": "integer", "minimum": 0 },
+            "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+            "policy_digest": { "$ref": "#/$defs/sha256" },
+            "coverage_snapshot_digest": { "$ref": "#/$defs/sha256" },
+            "evidence_snapshot_hash": { "$ref": "#/$defs/sha256" },
+            "resource_revision_refs": { "$ref": "#/$defs/uuidList" },
+            "supersedes": { "$ref": "#/$defs/uuidV7" },
+            "decided_at": { "$ref": "#/$defs/timestamp" }
           }
         }
       ],
@@ -1144,6 +1432,12 @@
             "scope_ref": {
               "$ref": "#/$defs/uuid"
             },
+            "scope_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
+            },
             "target_version": {
               "type": "integer",
               "minimum": 0
@@ -1362,6 +1656,12 @@
             "resource_revision_ref": {
               "$ref": "#/$defs/uuid"
             },
+            "scope_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
+            },
             "test_category": {
               "$ref": "#/$defs/nonEmptyString"
             },
@@ -1432,6 +1732,47 @@
             },
             "counter_evidence_refs": {
               "$ref": "#/$defs/uuidList"
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "coverageManifest": {
+      "allOf": [
+        { "$ref": "#/$defs/recordBase" },
+        { "$ref": "#/$defs/coreManagedFields" },
+        {
+          "type": "object",
+          "required": ["scope_revision_ref", "policy_digest", "manifest_digest", "expected_cells"],
+          "properties": {
+            "scope_revision_ref": { "$ref": "#/$defs/uuid" },
+            "policy_digest": { "$ref": "#/$defs/sha256" },
+            "manifest_digest": { "$ref": "#/$defs/sha256" },
+            "expected_cells": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 500,
+              "items": {
+                "type": "object",
+                "required": ["resource_ref", "test_category", "conditions"],
+                "properties": {
+                  "resource_ref": { "$ref": "#/$defs/uuid" },
+                  "resource_revision_ref": { "$ref": "#/$defs/uuid" },
+                  "test_category": { "$ref": "#/$defs/nonEmptyString" },
+                  "identity_ref": { "$ref": "#/$defs/uuid" },
+                  "role": { "type": "string" },
+                  "tenant_ref": { "$ref": "#/$defs/uuid" },
+                  "operation": { "type": "string" },
+                  "path": { "type": "string" },
+                  "parameter": { "type": "string" },
+                  "method": { "type": "string" },
+                  "network_condition": { "type": "string" },
+                  "conditions": { "$ref": "#/$defs/stringList" }
+                },
+                "additionalProperties": false
+              }
             }
           }
         }
@@ -2246,6 +2587,12 @@
             "work_item_ref": {
               "$ref": "#/$defs/uuid"
             },
+            "scope_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
+            },
             "attempt_ref": {
               "$ref": "#/$defs/uuid"
             },
@@ -2395,6 +2742,12 @@
             },
             "scope_ref": {
               "$ref": "#/$defs/uuid"
+            },
+            "scope_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
             },
             "target_version": {
               "type": "integer",
@@ -2567,6 +2920,15 @@
             },
             "result_ref": {
               "$ref": "#/$defs/nonEmptyString"
+            },
+            "scope_revision_ref": {
+              "$ref": "#/$defs/uuid"
+            },
+            "policy_digest": {
+              "$ref": "#/$defs/sha256"
+            },
+            "network_provenance": {
+              "$ref": "#/$defs/actionNetworkProvenance"
             },
             "idempotency_key": {
               "$ref": "#/$defs/nonEmptyString"
@@ -3527,7 +3889,7 @@
         },
         "cursor": {
           "type": "string",
-          "maxLength": 512
+          "maxLength": 4096
         }
       },
       "additionalProperties": false
@@ -3672,9 +4034,172 @@
         },
         "cursor": {
           "type": "string",
-          "maxLength": 512
+          "maxLength": 4096
         }
       }
+    },
+    "scopeRevisionRequest": {
+      "type": "object",
+      "required": ["engagement_id", "scope_id", "expected_version", "policy", "roe_artifact_ref", "roe_artifact_version", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "scope_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_version": { "type": "integer", "minimum": 1 },
+        "policy": { "$ref": "#/$defs/scopePolicy" },
+        "roe_artifact_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "roe_artifact_version": { "type": "integer", "minimum": 1 },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "scopeInvalidateRequest": {
+      "type": "object",
+      "required": ["engagement_id", "scope_id", "scope_revision_ref", "expected_version", "reason", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "scope_id": { "$ref": "#/$defs/uuidV7" },
+        "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+        "expected_version": { "type": "integer", "minimum": 1 },
+        "reason": { "$ref": "#/$defs/nonEmptyString" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "scopeQueryRequest": {
+      "type": "object",
+      "required": ["engagement_id", "scope_id"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "scope_id": { "$ref": "#/$defs/uuidV7" },
+        "as_of": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string", "maxLength": 2048 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "coverageManifestCommitRequest": {
+      "type": "object",
+      "required": ["engagement_id", "scope_revision_ref", "policy_digest", "expected_cells", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+        "policy_digest": { "$ref": "#/$defs/sha256" },
+        "expected_cells": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "required": ["resource_ref", "test_category", "conditions"],
+            "properties": {
+              "resource_ref": { "$ref": "#/$defs/uuidV7" },
+              "resource_revision_ref": { "$ref": "#/$defs/uuidV7" },
+              "test_category": { "$ref": "#/$defs/nonEmptyString" },
+              "identity_ref": { "$ref": "#/$defs/uuidV7" },
+              "role": { "type": "string" },
+              "tenant_ref": { "$ref": "#/$defs/uuidV7" },
+              "operation": { "type": "string" },
+              "path": { "type": "string" },
+              "parameter": { "type": "string" },
+              "method": { "type": "string" },
+              "network_condition": { "type": "string" },
+              "conditions": { "$ref": "#/$defs/stringList" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "coverageSnapshotRequest": {
+      "type": "object",
+      "required": ["engagement_id"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "manifest_ref": { "$ref": "#/$defs/uuidV7" },
+        "manifest_digest": { "$ref": "#/$defs/sha256" },
+        "resource_refs": { "type": "array", "maxItems": 500, "uniqueItems": true, "items": { "$ref": "#/$defs/uuidV7" } },
+        "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+        "policy_digest": { "$ref": "#/$defs/sha256" },
+        "test_category": { "type": "string", "maxLength": 128 },
+        "status": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "enum": ["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"] } },
+        "visibility_mode": { "enum": ["complete", "recall"] },
+        "include_candidates": { "type": "boolean" },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "cursor": { "type": "string", "maxLength": 4096 },
+        "as_of": { "type": "integer", "minimum": 0 },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "actionAuditQueryRequest": {
+      "type": "object",
+      "required": ["engagement_id"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "action_id": { "$ref": "#/$defs/uuidV7" },
+        "work_run_id": { "$ref": "#/$defs/uuidV7" },
+        "attempt_id": { "$ref": "#/$defs/uuidV7" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["recommended", "authorized", "denied", "executed", "failed", "unknown", "late_result_quarantine"] },
+        "read_seq": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string", "maxLength": 4096 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "reportSnapshotCommitRequest": {
+      "type": "object",
+      "required": ["engagement_id", "expected_authority_seq", "manifest_ref", "manifest_digest", "scope_revision_ref", "resource_revision_refs", "coverage_read_seq", "coverage_snapshot_digest", "report_artifact_session_id", "report_artifact_ref", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_authority_seq": { "type": "integer", "minimum": 0 },
+        "manifest_ref": { "$ref": "#/$defs/uuidV7" },
+        "manifest_digest": { "$ref": "#/$defs/sha256" },
+        "scope_revision_ref": { "$ref": "#/$defs/uuidV7" },
+        "resource_revision_refs": { "$ref": "#/$defs/uuidList" },
+        "coverage_read_seq": { "type": "integer", "minimum": 0 },
+        "coverage_snapshot_digest": { "$ref": "#/$defs/sha256" },
+        "report_artifact_session_id": { "$ref": "#/$defs/nonEmptyString" },
+        "report_artifact_ref": { "$ref": "#/$defs/nonEmptyString" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "engagementCloseRequest": {
+      "type": "object",
+      "required": ["engagement_id", "expected_engagement_version", "expected_authority_seq", "report_snapshot_ref", "reason", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_engagement_version": { "type": "integer", "minimum": 1 },
+        "expected_authority_seq": { "type": "integer", "minimum": 0 },
+        "report_snapshot_ref": { "$ref": "#/$defs/uuidV7" },
+        "reason": { "$ref": "#/$defs/nonEmptyString" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "engagementReopenRequest": {
+      "type": "object",
+      "required": ["engagement_id", "expected_engagement_version", "expected_authority_seq", "close_decision_ref", "reason", "idempotency_key"],
+      "properties": {
+        "engagement_id": { "$ref": "#/$defs/uuidV7" },
+        "expected_engagement_version": { "type": "integer", "minimum": 1 },
+        "expected_authority_seq": { "type": "integer", "minimum": 0 },
+        "close_decision_ref": { "$ref": "#/$defs/uuidV7" },
+        "reason": { "$ref": "#/$defs/nonEmptyString" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "contract_version": { "type": "string" }
+      },
+      "additionalProperties": false
     },
     "coverageRecordRequest": {
       "type": "object",
@@ -3693,6 +4218,8 @@
         "expected_version": { "type": "integer", "minimum": 0 },
         "resource_ref": { "$ref": "#/$defs/uuid" },
         "resource_revision_ref": { "$ref": "#/$defs/uuid" },
+        "scope_revision_ref": { "$ref": "#/$defs/uuid" },
+        "policy_digest": { "$ref": "#/$defs/sha256" },
         "test_category": { "$ref": "#/$defs/nonEmptyString" },
         "identity_ref": { "$ref": "#/$defs/uuid" },
         "operation": { "type": "string" },

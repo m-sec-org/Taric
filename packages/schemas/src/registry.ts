@@ -8,7 +8,7 @@ import { SCHEMA_VERSION } from "./version.js";
  * 单机首发实际交付的操作；延期能力必须显式登记为 unsupported 并给出 follow-up。
  */
 
-export const API_CONTRACT_VERSION = "1.3.0" as const;
+export const API_CONTRACT_VERSION = "1.4.0" as const;
 export const ADAPTER_CONTRACT_VERSION = "1.1" as const;
 
 export type OperationRole = "model" | "host" | "reviewer" | "writer" | "operator";
@@ -79,6 +79,12 @@ const COMMON_WRITE_ERRORS: ApiErrorCode[] = [
 export const operationContracts: OperationContract[] = [
   { operation: "engagement.init", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: false },
   { operation: "engagement.status", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "engagement.close", roles: ["operator"], request: "engagementCloseRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "engagement.reopen", roles: ["operator"], request: "engagementReopenRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "scope.revise", roles: ["operator"], request: "scopeRevisionRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "scope.invalidate", roles: ["operator"], request: "scopeInvalidateRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
+  { operation: "scope.query", roles: ["host", "operator"], request: "scopeQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "report.snapshot.commit", roles: ["host", "operator"], request: "reportSnapshotCommitRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "capability.status", roles: ["model", "host", "reviewer", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "adapter.status", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: false },
   { operation: "adapter.install", roles: ["operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: false, engagement_scoped: false },
@@ -107,15 +113,18 @@ export const operationContracts: OperationContract[] = [
   { operation: "work.transition", roles: ["host"], request: "workTransitionRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "work.resume", roles: ["host"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "work.query", roles: ["model", "host", "operator"], request: "workQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
-  { operation: "coverage.gate", roles: ["host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "coverage.gate", roles: ["host", "operator"], request: "coverageSnapshotRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "coverage.manifest.commit", roles: ["operator"], request: "coverageManifestCommitRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "coverage.record", roles: ["host", "operator"], request: "coverageRecordRequest", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "coverage.query", roles: ["model", "host", "operator"], request: "coverageQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
+  { operation: "coverage.snapshot", roles: ["host", "operator"], request: "coverageSnapshotRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "checkpoint.propose", roles: ["model", "host", "operator"], request: "apiSuccess", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "checkpoint.commit", roles: ["host"], request: "checkpoint", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.recommend", roles: ["model", "host", "operator"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.host-decision", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.host-result", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
   { operation: "action.reconcile", roles: ["host"], request: "actionIntent", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: false, mutates_authority: true, engagement_scoped: true },
+  { operation: "action.audit.query", roles: ["host", "operator"], request: "actionAuditQueryRequest", response: "apiSuccess", errors: COMMON_READ_ERRORS, idempotent: false, mutates_authority: false, engagement_scoped: true },
   { operation: "artifact.session.bind", roles: ["host", "operator"], request: "artifactSessionBinding", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "artifact.store.begin", roles: ["host", "operator"], request: "artifactStoreBegin", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },
   { operation: "artifact.ingest_file", roles: ["host", "operator"], request: "artifactIngestFile", response: "apiSuccess", errors: COMMON_WRITE_ERRORS, idempotent: true, mutates_authority: true, engagement_scoped: true },

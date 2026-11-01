@@ -12,15 +12,7 @@ const cell = (engagement_id, resource_ref, overrides = {}) => ({
 });
 
 async function seedRows(store, records) {
-  const now = new Date().toISOString();
-  await store.sql.transaction("write", async () => {
-    for (const record of records) {
-      await store.sql.run(
-        "INSERT INTO records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        record.id, record.engagement_id, record.kind, "L2", 1, null, JSON.stringify(record), now, now,
-      );
-    }
-  });
+  for (const record of records) await store.commit(record, "L2");
 }
 
 async function seededEngagement() {
@@ -36,11 +28,14 @@ test("coverage.gate matches the library close gate field-for-field", async () =>
   const { store, service, engagement_id, resource_ref } = await seededEngagement();
   const host = createPrincipal("host", "host-a", engagement_id);
   try {
-    // 无内容时的干净闸门
+    // Empty observations do not prove a complete domain without a canonical manifest.
     const empty = await service.dispatch("coverage.gate", host, { engagement_id });
     assert.equal(empty.ok, true, JSON.stringify(empty));
     const libraryEmpty = await coverageCloseGate(store, engagement_id);
     assert.deepEqual(empty.data, libraryEmpty);
+    assert.equal(empty.data.can_close, false);
+    assert.equal(empty.data.complete_domain, false);
+    assert.equal(empty.data.gaps.some((gap) => gap.kind === "incomplete_snapshot"), true);
     assert.equal(empty.data.read_seq, (await store.maintenanceRead((watermarks) => watermarks.read_seq)));
 
     const untestedCell = cell(engagement_id, resource_ref);
@@ -77,16 +72,16 @@ test("coverage.gate keeps its decision, visibility, and watermark on one snapsho
   let releaseFirstRead;
   const firstReadReached = new Promise((resolve) => { reachedFirstRead = resolve; });
   const continueGate = new Promise((resolve) => { releaseFirstRead = resolve; });
-  const originalList = store.list.bind(store);
+  const originalCoverageSnapshotPage = store.coverageSnapshotPage.bind(store);
   let pauseOnce = true;
-  store.list = async (...args) => {
-    const records = await originalList(...args);
+  store.coverageSnapshotPage = async (...args) => {
+    const page = await originalCoverageSnapshotPage(...args);
     if (pauseOnce) {
       pauseOnce = false;
       reachedFirstRead();
       await continueGate;
     }
-    return records;
+    return page;
   };
   try {
     await store.ready;
@@ -103,6 +98,8 @@ test("coverage.gate keeps its decision, visibility, and watermark on one snapsho
     try {
       concurrentWriter.prepare("INSERT INTO events(event_id,event_type,subject_id,payload,prev_hash,hash,created_at) VALUES(?,?,?,?,?,?,?)").run(uuidv7(), "test.concurrent", concurrentCell.id, "{}", null, "concurrent-test-hash", now);
       concurrentWriter.prepare("INSERT INTO records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(concurrentCell.id, engagement_id, "coverage", "L2", 1, null, JSON.stringify(concurrentCell), now, now);
+      const seq = Number(concurrentWriter.prepare("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events").get().seq);
+      concurrentWriter.prepare("INSERT INTO record_versions(id,commit_seq,engagement_id,trust_level,body) VALUES(?,?,?,?,?)").run(concurrentCell.id, seq, engagement_id, "L2", JSON.stringify(concurrentCell));
       concurrentWriter.exec("COMMIT");
     } catch (error) {
       concurrentWriter.exec("ROLLBACK");
@@ -114,10 +111,12 @@ test("coverage.gate keeps its decision, visibility, and watermark on one snapsho
     assert.equal(response.ok, true, JSON.stringify(response));
     assert.ok(response.data.read_seq < writerReadSeq);
     assert.equal(response.data.gaps.some((gap) => gap.cell_ids.includes(concurrentCell.id)), false);
+    assert.equal(response.data.complete_domain, false);
+    assert.equal(response.data.gaps.some((gap) => gap.kind === "incomplete_snapshot"), true);
     assert.equal(response.data.visibility.complete, true);
   } finally {
     releaseFirstRead();
-    store.list = originalList;
+    store.coverageSnapshotPage = originalCoverageSnapshotPage;
     await service.close();
     concurrentWriter.close();
     rmSync(directory, { recursive: true, force: true });
@@ -219,7 +218,7 @@ test("coverage.query dense matches crossing the scan budget are not skipped", as
       if (!page.data.has_more) break;
       cursor = page.data.next_cursor;
     }
-    assert.equal(firstPage.scan_stats.scanned_rows, 500);
+    assert.equal(firstPage.scan_stats.scanned_rows, 520);
     assert.equal(firstPage.scan_stats.returned_rows, 200);
     assert.equal(seen.length, 520);
     assert.equal(new Set(seen).size, 520);
@@ -227,7 +226,7 @@ test("coverage.query dense matches crossing the scan budget are not skipped", as
   } finally { await service.close(); }
 });
 
-test("coverage.query empty scan windows advance until the source is exhausted", async () => {
+test("coverage.query reports a genuinely empty filtered domain without synthetic scan pages", async () => {
   const { store, service, engagement_id, resource_ref } = await seededEngagement();
   const host = createPrincipal("host", "host-a", engagement_id);
   try {
@@ -235,13 +234,9 @@ test("coverage.query empty scan windows advance until the source is exhausted", 
     const first = await service.dispatch("coverage.query", host, { engagement_id, resource_ref, test_category: "missing", page_size: 50 });
     assert.equal(first.ok, true, JSON.stringify(first));
     assert.deepEqual(first.data.cells, []);
-    assert.equal(first.data.has_more, true);
-    assert.ok(first.data.next_cursor);
-    const second = await service.dispatch("coverage.query", host, { engagement_id, resource_ref, test_category: "missing", page_size: 50, cursor: first.data.next_cursor });
-    assert.equal(second.ok, true, JSON.stringify(second));
-    assert.deepEqual(second.data.cells, []);
-    assert.equal(second.data.has_more, false);
-    assert.equal(second.data.next_cursor, undefined);
+    assert.equal(first.data.has_more, false);
+    assert.equal(first.data.next_cursor, undefined);
+    assert.equal(first.data.scan_stats.scanned_rows, 0);
   } finally { await service.close(); }
 });
 
@@ -268,8 +263,8 @@ test("coverage.query sparse matches beyond the scan window are neither skipped n
       cursor = page.data.next_cursor;
       assert.ok(cursor);
     }
-    assert.equal(firstPage.scan_stats.scanned_rows, 500);
-    assert.equal(firstPage.scan_stats.returned_rows, 1);
+    assert.equal(firstPage.scan_stats.scanned_rows, 2);
+    assert.equal(firstPage.scan_stats.returned_rows, 2);
     assert.deepEqual(seen.sort(), expected);
     assert.equal(new Set(seen).size, expected.length);
   } finally { await service.close(); }

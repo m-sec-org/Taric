@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
   "core_version": "1.0.3",
-  "api_contract_version": "1.3.0",
+  "api_contract_version": "1.4.0",
   "adapter_contract_version": "1.1",
-  "storage_contract_version": "authority-storage/3",
+  "storage_contract_version": "authority-storage/4",
   "runtime_dependency_closure": {
     "@taric/schemas": {
       "version": "1.0.3",
@@ -80,6 +80,126 @@
       ],
       "idempotent": false,
       "mutates_authority": false,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "engagement.close",
+      "roles": [
+        "operator"
+      ],
+      "request_schema": "engagementCloseRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "engagement.reopen",
+      "roles": [
+        "operator"
+      ],
+      "request_schema": "engagementReopenRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "scope.revise",
+      "roles": [
+        "operator"
+      ],
+      "request_schema": "scopeRevisionRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "scope.invalidate",
+      "roles": [
+        "operator"
+      ],
+      "request_schema": "scopeInvalidateRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "scope.query",
+      "roles": [
+        "host",
+        "operator"
+      ],
+      "request_schema": "scopeQueryRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "report.snapshot.commit",
+      "roles": [
+        "host",
+        "operator"
+      ],
+      "request_schema": "reportSnapshotCommitRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
       "engagement_scoped": true
     },
     {
@@ -655,7 +775,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "coverageSnapshotRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -666,6 +786,26 @@
       ],
       "idempotent": false,
       "mutates_authority": false,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "coverage.manifest.commit",
+      "roles": [
+        "operator"
+      ],
+      "request_schema": "coverageManifestCommitRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "stale_version",
+        "conflict",
+        "unsupported_schema_version",
+        "internal_error",
+        "idempotency_conflict"
+      ],
+      "idempotent": true,
+      "mutates_authority": true,
       "engagement_scoped": true
     },
     {
@@ -697,6 +837,25 @@
         "operator"
       ],
       "request_schema": "coverageQueryRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "coverage.snapshot",
+      "roles": [
+        "host",
+        "operator"
+      ],
+      "request_schema": "coverageSnapshotRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -831,6 +990,25 @@
       ],
       "idempotent": false,
       "mutates_authority": true,
+      "engagement_scoped": true
+    },
+    {
+      "operation": "action.audit.query",
+      "roles": [
+        "host",
+        "operator"
+      ],
+      "request_schema": "actionAuditQueryRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
       "engagement_scoped": true
     },
     {

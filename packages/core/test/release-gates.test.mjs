@@ -228,10 +228,13 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
     assert.equal(resumed.pending_actions.length, 1);
     assert.equal(resumed.checkpoint.checkpoint_id, checkpoint.checkpoint_id);
     assert.ok(resumed.current_read_seq >= pack.read_seq, "resume reports the current authority watermark");
-    const late = (await store.recordLateResult({ run_id: run.run_id, generation: run.generation - 1, result_ref: "host:result:late", result: { status: "executed" } }));
+    (await store.renewWorkRun(run.run_id, run.generation, "pi", 5));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    (await store.reclaimWorkRun(run.run_id, "pi-next", "worker-next"));
+    const late = (await store.recordLateResult({ engagement_id, work_run_id: run.run_id, generation: run.generation, action_id: action.action_id, status: "executed", result_ref: "host:result:late", host_id: "pi" }));
     assert.equal(late.status, "late_result_quarantine");
-    assert.equal(late.generation, run.generation - 1, "a late result keeps its original generation attribution");
-    assert.equal((await store.pendingActionIntents(run.run_id)).some((item) => item.result_ref === "host:result:late"), false, "a quarantined late result never enters current action state");
+    assert.equal(late.generation, run.generation, "a late result keeps its original generation attribution");
+    assert.equal((await store.getActionIntent(action.action_id)).status, "unknown", "a quarantined late result never enters current action state");
     (await assert.rejects(async () => (await store.recordActionIntent({ run_id: run.run_id, generation: run.generation - 1, mode: "authorized_autonomous", status: "executed", host_id: "pi" })), /stale action intent generation/, "a stale generation cannot attach a result to the current run"));
   } finally {
     (await store.close());

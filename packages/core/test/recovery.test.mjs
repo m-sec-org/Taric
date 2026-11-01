@@ -19,7 +19,13 @@ test("stale action result is quarantined with original attribution", async () =>
   const store = new AuthorityStore(); const engagement_id = uuidv7(); const work_item_id = uuidv7();
   (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["record evidence"] }, "L2"));
   const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi", agent_id: "a" }));
-  const late = (await store.recordLateResult({ run_id: run.run_id, generation: run.generation - 1, result_ref: "host:result:1", result: { status: "unknown" } }));
-  assert.equal(late.status, "late_result_quarantine"); assert.equal(late.generation, run.generation - 1);
+  const action = (await store.recordActionIntent({ run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "recommended", target: "/admin", method: "GET", host_id: "pi" }));
+  (await store.recordActionIntent({ action_id: action.action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "authorized", host_decision_ref: "host:decision:1", host_id: "pi" }));
+  (await store.renewWorkRun(run.run_id, run.generation, "pi", 5));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  (await store.reclaimWorkRun(run.run_id, "pi-next", "a-next"));
+  const late = (await store.recordLateResult({ engagement_id, work_run_id: run.run_id, generation: run.generation, action_id: action.action_id, status: "unknown", result_ref: "host:result:1", host_id: "pi" }));
+  assert.equal(late.status, "late_result_quarantine"); assert.equal(late.generation, run.generation);
+  assert.equal((await store.getActionIntent(action.action_id)).status, "authorized");
   (await store.close());
 });

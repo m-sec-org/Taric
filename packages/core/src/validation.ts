@@ -226,12 +226,16 @@ export function validateProposalCandidate(subjectType: string, content: Record<s
  */
 export const referenceKinds: Readonly<Record<string, readonly string[]>> = Object.freeze({
   scope_ref: ["scope", "engagement"],
+  scope_revision_ref: ["scope_revision"],
+  manifest_ref: ["coverage_manifest"],
+  report_snapshot_ref: ["report_snapshot"],
   applicable_scope_ref: ["scope"],
   resource_ref: ["resource", "endpoint", "service", "note"],
   resource_revision_ref: ["resource_revision"],
   resource_revision_refs: ["resource_revision"],
-  supersedes: ["resource_revision", "protective_control_revision"],
-  current_revision_ref: ["protective_control_revision"],
+  supersedes: ["resource_revision", "protective_control_revision", "scope_revision", "close_decision"],
+  current_revision_ref: ["protective_control_revision", "scope_revision"],
+  invalidation_ref: ["scope_invalidation"],
   control_revision_ref: ["protective_control_revision"],
   control_revision_refs: ["protective_control_revision"],
   protected_resource_revision_refs: ["resource_revision"],

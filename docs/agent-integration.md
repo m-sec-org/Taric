@@ -173,7 +173,7 @@ The resolver defaults ID to operator-local unless a model role/ID was explicitly
 
 ## Bun in-process embedding
 
-Profile selection, artifact packaging, API `1.3.0` and adapter `1.1` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
+Profile selection, artifact packaging, API `1.4.0` and adapter `1.1` pairing, and host/operator ownership boundaries are summarized in [host integration profiles](host-integration-profiles.md).
 
 A Bun host embeds the authority in-process over the driver contract instead of proxying to a Node process. Bun has no `node:sqlite` builtin, so import the reference driver package and construct the store directly:
 

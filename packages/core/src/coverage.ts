@@ -9,7 +9,7 @@ export type AccessDecision = "allow" | "deny" | "challenge" | "filtered" | "unkn
 export type OriginOutcome = "reached" | "not_reached" | "unknown";
 
 export interface CoverageCell extends CanonicalRecord {
-  kind: "coverage"; resource_ref: string; resource_revision_ref?: string; test_category: string;
+  kind: "coverage"; resource_ref: string; resource_revision_ref?: string; scope_revision_ref?: string; policy_digest?: string; test_category: string;
   counter_evidence_refs?: string[];
   identity_ref?: string; operation?: string; parameter?: string; conditions: string[]; status: CoverageStatus;
   /** Remaining coverage-matrix dimensions. A cell is never merged across these (task 2.1). */
@@ -50,7 +50,7 @@ export interface AccessDecisionObservationInput {
 }
 export interface CoverageGateResult {
   can_close: boolean; action_authorized: false;
-  gaps: Array<{ kind: "untested" | "blocked" | "blocked_by_control" | "negative_only" | "unverified_positive" | "conflicting" | "un_ingested_external" | "unjustified_not_applicable" | "contradicted" | "pending_impact" | "pending_revalidation"; cell_ids: string[]; reason: string }>;
+  gaps: Array<{ kind: "untested" | "blocked" | "blocked_by_control" | "negative_only" | "unverified_positive" | "conflicting" | "un_ingested_external" | "unjustified_not_applicable" | "contradicted" | "pending_impact" | "pending_revalidation" | "missing_manifest_cell" | "incomplete_snapshot"; cell_ids: string[]; reason: string; resource_refs?: string[]; expected_cells?: CoverageDimension[] }>;
 }
 
 function stringList(value: unknown, name: string): string[] {
@@ -106,7 +106,7 @@ export async function createAccessDecisionObservation(store: AuthorityStore, inp
   return observation;
 }
 export interface CoverageCellInput {
-  engagement_id: string; resource_ref: string; resource_revision_ref?: string; test_category: string;
+  engagement_id: string; resource_ref: string; resource_revision_ref?: string; scope_revision_ref?: string; policy_digest?: string; test_category: string;
   identity_ref?: string; operation?: string; parameter?: string; conditions?: string[]; status: CoverageStatus;
   tested_at?: string; limitations: string[]; evidence_refs?: string[]; control_observation_ref?: string;
   origin_reached?: boolean | "unknown"; external_result_state?: "ingested" | "pending" | "unavailable";
@@ -116,10 +116,32 @@ export interface CoverageCellInput {
   /** Counter-evidence that contradicts this cell's outcome (task 2.2). */
   counter_evidence_refs?: string[];
 }
+export type CoverageDimension = Pick<CoverageCell, "resource_ref" | "resource_revision_ref" | "test_category" | "identity_ref" | "role" | "tenant_ref" | "operation" | "path" | "parameter" | "method" | "network_condition" | "conditions">;
+export interface CoverageManifestInput {
+  engagement_id: string; scope_revision_ref: string; policy_digest: string; expected_cells: CoverageDimension[];
+}
+export function validateCoverageManifestInput(input: CoverageManifestInput): void {
+  if (!input.engagement_id || !input.scope_revision_ref || !/^sha256:[a-f0-9]{64}$/.test(input.policy_digest))
+    throw new ContractValidationError("validation_error", "Coverage manifest requires an Engagement, ScopeRevision and policy digest");
+  if (!Array.isArray(input.expected_cells) || input.expected_cells.length < 1 || input.expected_cells.length > 500)
+    throw new ContractValidationError("validation_error", "Coverage manifest must contain between 1 and 500 expected cells");
+  const normalized = input.expected_cells.map((cell) => ({ ...cell, conditions: [...new Set(stringList(cell.conditions ?? [], "conditions"))].sort() }));
+  if (normalized.some((cell) => !cell.resource_ref || !cell.test_category?.trim()))
+    throw new ContractValidationError("validation_error", "Coverage manifest dimensions require resource_ref and test_category");
+  const keys = normalized.map((cell) => coverageDimensions({
+    id: "", engagement_id: input.engagement_id, kind: "coverage", ...cell,
+    scope_revision_ref: input.scope_revision_ref, policy_digest: input.policy_digest,
+  } as CoverageCell));
+  if (new Set(keys).size !== keys.length)
+    throw new ContractValidationError("validation_error", "Coverage manifest contains duplicate dimensions");
+}
 export function validateCoverageCellInput(input: CoverageCellInput): void {
   const conditions = [...new Set(stringList(input.conditions ?? [], "conditions"))].sort(); const evidence = stringList(input.evidence_refs ?? [], "evidence_refs");
   const counterEvidence = stringList(input.counter_evidence_refs ?? [], "counter_evidence_refs");
   if (!input.resource_ref || !input.test_category) throw new ContractValidationError("validation_error", "coverage requires resource_ref and test_category");
+  if ((input.scope_revision_ref === undefined) !== (input.policy_digest === undefined)) throw new ContractValidationError("validation_error", "scope_revision_ref and policy_digest must be supplied together");
+  if (input.scope_revision_ref !== undefined && (typeof input.scope_revision_ref !== "string" || !input.scope_revision_ref.trim())) throw new ContractValidationError("validation_error", "scope_revision_ref must be a non-empty reference");
+  if (input.policy_digest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(input.policy_digest)) throw new ContractValidationError("validation_error", "policy_digest must be a SHA-256 digest");
   if (!["not_tested", "queued", "in_progress", "tested_no_observation", "positive", "inconclusive", "blocked", "blocked_by_control", "not_applicable"].includes(input.status)) throw new ContractValidationError("validation_error", "invalid coverage status");
   if (input.status === "blocked_by_control" && input.origin_reached === true) throw new ContractValidationError("validation_error", "blocked_by_control cannot claim origin_reached=true");
   if (input.status === "blocked_by_control" && !input.control_observation_ref && !input.limitations.length) throw new ContractValidationError("validation_error", "blocked_by_control requires control evidence or limitations");
@@ -156,6 +178,8 @@ export function coverageDimensions(cell: CoverageCell): string {
   return JSON.stringify([
     cell.resource_ref,
     cell.resource_revision_ref ?? null,
+    cell.scope_revision_ref ?? null,
+    cell.policy_digest ?? null,
     cell.test_category,
     cell.identity_ref ?? null,
     cell.role ?? null,
@@ -165,7 +189,7 @@ export function coverageDimensions(cell: CoverageCell): string {
     cell.parameter ?? null,
     cell.method ?? null,
     cell.network_condition ?? null,
-    [...cell.conditions].sort(),
+    [...(Array.isArray(cell.conditions) ? cell.conditions : [])].sort(),
   ]);
 }
 function dimensions(cell: CoverageCell): string { return coverageDimensions(cell); }
@@ -199,15 +223,40 @@ export interface CoverageVisibilitySummary {
 
 export interface CoverageGateSnapshot extends CoverageGateResult {
   engagement_id: string;
+  manifest_ref?: string;
+  manifest_digest?: string;
+  resource_refs?: string[];
+  scope_revision_ref?: string;
+  policy_digest?: string;
   visibility: CoverageVisibilitySummary;
   read_seq: number;
+  read_time: string;
+  snapshot_id: string;
+  snapshot_digest: string;
+  expected_cell_count: number;
+  expected_cell_count_complete: boolean;
+  returned_cell_count: number;
+  expected_items_source: "canonical_manifest" | "observed_cells" | "host_supplied_scope_unverified";
+  manifest_binding_verified: boolean;
+  manifest_binding_state: "not_provided" | "approved" | "stale" | "invalidated" | "outside_validity_window" | "unavailable";
+  missing_items: Array<CoverageDimension & { scope_revision_ref?: string; policy_digest?: string }>;
+  missing_items_complete: boolean;
+  unexpected_dimension_count: number;
+  gap_summary: Record<string, number>;
+  visibility_disclosure: Awaited<ReturnType<AuthorityStore["coverageSnapshotPage"]>>["visibility_disclosure"];
+  complete_domain: boolean;
+  truncated: boolean;
 }
 
 export function coverageCloseGate(source: CoverageCell[]): Promise<CoverageGateResult>;
-export function coverageCloseGate(source: AuthorityStore, engagementId: string): Promise<CoverageGateSnapshot>;
-export async function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string): Promise<CoverageGateResult | CoverageGateSnapshot> {
+export function coverageCloseGate(source: AuthorityStore, engagementId: string, options?: CoverageGateSnapshotOptions): Promise<CoverageGateSnapshot>;
+export async function coverageCloseGate(source: CoverageCell[] | AuthorityStore, engagementId?: string, options?: CoverageGateSnapshotOptions): Promise<CoverageGateResult | CoverageGateSnapshot> {
   if (Array.isArray(source)) return evaluateCoverageGate(source);
-  return coverageGateSnapshot(source, engagementId ?? "");
+  return coverageGateSnapshot(source, engagementId ?? "", options);
+}
+
+export interface CoverageGateSnapshotOptions {
+  as_of?: number; resource_refs?: string[]; manifest_ref?: string; manifest_digest?: string; scope_revision_ref?: string; policy_digest?: string; test_category?: string;
 }
 
 export interface CoverageVisibility {
@@ -260,19 +309,77 @@ function summarizeCoverageVisibility(visibility: CoverageVisibility): CoverageVi
   };
 }
 
+function staleResourceRevisionCellIds(cells: CoverageCell[], records: CanonicalRecord[]): string[] {
+  const resources = new Map(records.filter((record) => record.kind === "resource").map((record) => [record.id, record]));
+  const revisions = new Map(records.filter((record) => record.kind === "resource_revision").map((record) => [record.id, record]));
+  return cells
+    .filter((cell) => typeof cell.resource_revision_ref === "string")
+    .filter((cell) => {
+      const revision = revisions.get(cell.resource_revision_ref!);
+      const resource = revision && typeof revision.resource_ref === "string" ? resources.get(revision.resource_ref) : undefined;
+      return !revision || !resource || Number(resource.revision) !== Number(revision.revision) || resource.id !== cell.resource_ref;
+    })
+    .map((cell) => cell.id);
+}
+
 /** Gate decision, operator visibility and watermark from one authority read snapshot. */
-export async function coverageGateSnapshot(store: AuthorityStore, engagementId: string): Promise<CoverageGateSnapshot> {
-  return store.maintenanceRead(async ({ read_seq }) => {
-    const current = (await store.list(engagementId, { includeCandidates: true })).filter((record) => record.kind === "coverage") as CoverageCell[];
-    const visibleRecords = await store.list(engagementId, { includeCandidates: true, includeRecalled: true });
-    const visibility = coverageVisibilityFromRecords(visibleRecords);
-    return {
-      ...addVisibilityGaps(evaluateCoverageGate(current), visibility),
-      engagement_id: engagementId,
-      visibility: summarizeCoverageVisibility(visibility),
-      read_seq,
-    };
-  });
+export async function coverageGateSnapshot(store: AuthorityStore, engagementId: string, options: CoverageGateSnapshotOptions = {}): Promise<CoverageGateSnapshot> {
+  const query = { engagement_id: engagementId, ...options, include_candidates: true, visibility_mode: "complete" as const, page_size: 200 };
+  const first = await store.coverageSnapshotPage(query);
+  const cells = [...first.cells as CoverageCell[]];
+  let last = first;
+  let cursor = first.next_cursor;
+  while (cursor) {
+    const page = await store.coverageSnapshotPage({ ...query, cursor });
+    if (page.read_seq !== first.read_seq || page.snapshot_id !== first.snapshot_id || page.snapshot_digest !== first.snapshot_digest)
+      throw new ContractValidationError("conflict", "Coverage snapshot changed while reading pages");
+    cells.push(...page.cells as CoverageCell[]);
+    last = page;
+    cursor = page.next_cursor;
+  }
+  const fixed = await store.snapshot(engagementId, { asOf: first.read_seq, readTime: first.read_time, includeCandidates: true, includeRecalled: true });
+  const visibility = coverageVisibilityFromRecords(fixed.records);
+  const result = addVisibilityGaps(evaluateCoverageGate(cells), visibility);
+  const staleResourceCells = staleResourceRevisionCellIds(cells, fixed.records);
+  if (staleResourceCells.length > 0) {
+    result.gaps.push({ kind: "pending_revalidation", cell_ids: staleResourceCells, reason: "Coverage cell is pinned to a ResourceRevision that is no longer current at the snapshot watermark" });
+    result.can_close = false;
+  }
+  if (!last.complete_domain || last.truncated) {
+    result.gaps.push({ kind: "incomplete_snapshot", cell_ids: [], reason: "Coverage snapshot has excluded trust or visibility states, or was truncated" });
+    result.can_close = false;
+  }
+  if (first.missing_items.length) {
+    result.gaps.push({ kind: "missing_manifest_cell", cell_ids: [], expected_cells: first.missing_items.map(({ scope_revision_ref: _scope, policy_digest: _policy, ...dimension }) => dimension), reason: "manifest expected dimensions have no matching Coverage cell in this snapshot" });
+    result.can_close = false;
+  }
+  return {
+    ...result,
+    engagement_id: engagementId,
+    ...(options.manifest_ref === undefined ? {} : { manifest_ref: options.manifest_ref }),
+    ...(options.manifest_digest === undefined ? {} : { manifest_digest: options.manifest_digest }),
+    ...(options.resource_refs === undefined ? {} : { resource_refs: [...new Set(options.resource_refs)].sort() }),
+    ...(options.scope_revision_ref === undefined ? {} : { scope_revision_ref: options.scope_revision_ref }),
+    ...(options.policy_digest === undefined ? {} : { policy_digest: options.policy_digest }),
+    visibility: summarizeCoverageVisibility(visibility),
+    read_seq: first.read_seq,
+    read_time: first.read_time,
+    snapshot_id: first.snapshot_id,
+    snapshot_digest: first.snapshot_digest,
+    expected_cell_count: first.expected_cell_count,
+    expected_cell_count_complete: first.expected_cell_count_complete,
+    returned_cell_count: cells.length,
+    expected_items_source: first.expected_items_source,
+    manifest_binding_verified: first.manifest_binding_verified,
+    manifest_binding_state: first.manifest_binding_state,
+    missing_items: first.missing_items,
+    missing_items_complete: first.missing_items_complete,
+    unexpected_dimension_count: first.unexpected_dimension_count,
+    gap_summary: last.gap_summary,
+    visibility_disclosure: last.visibility_disclosure,
+    complete_domain: last.complete_domain && !last.truncated && staleResourceCells.length === 0,
+    truncated: last.truncated,
+  };
 }
 
 /**

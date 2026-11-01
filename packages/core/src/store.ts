@@ -1,15 +1,18 @@
 import { SqliteAuthorityDriver, type AuthoritySqlDriver } from "./sql-driver.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { performance } from "node:perf_hooks";
+import { isIP } from "node:net";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { InvalidCursorError, loadAuthorityCursorKey } from "./cursor-key.js";
 import { uuidv7 } from "./identity.js";
+import { coverageDimensions, coverageGateSnapshot, evaluateCoverageGate, validateCoverageManifestInput, type CoverageCell, type CoverageDimension } from "./coverage.js";
 import { DEFAULT_ADMISSION_POLICY, evaluateAdmission, policyDigest, riskClassOf, type AdmissionDecision, type AdmissionPolicy, type AdmissionReview, type PinnedEvidence, type RiskClass } from "./policy.js";
-import { contractNames, SCHEMA_VERSION, type ContractName } from "@taric/schemas";
+import { contractNames, SCHEMA_VERSION, type ContractName, type ScopePolicy } from "@taric/schemas";
 import { ContractValidationError, authorityReferenceIds, UUID_V7_PATTERN, validateCanonicalRecord, validateContract, validateAuthorityReferences, validateProposalEnvelope, validateProposalCandidate } from "./validation.js";
-import type { ProposalEnvelope, ProposalCandidate } from "@taric/schemas";
+import { normalizeScopePolicy } from "./scope-revision.js";
+import type { ActionNetworkProvenance, ProposalEnvelope, ProposalCandidate } from "@taric/schemas";
 export type TrustLevel = "L0" | "L1" | "L2";
 export interface CanonicalRecord {
     id: string;
@@ -155,6 +158,34 @@ export interface ResourceRevisionInput {
     valid_until?: string;
     principal?: string;
 }
+export interface ScopeRevisionInput {
+    engagement_id: string;
+    scope_id: string;
+    expected_version: number;
+    policy: ScopePolicy;
+    roe_artifact_ref: string;
+    roe_artifact_version: number;
+    idempotency_key: string;
+    principal?: string;
+}
+export interface ScopeInvalidationInput {
+    engagement_id: string;
+    scope_id: string;
+    scope_revision_ref: string;
+    expected_version: number;
+    reason: string;
+    idempotency_key: string;
+    principal?: string;
+}
+export interface ScopeQueryInput {
+    engagement_id: string;
+    scope_id: string;
+    as_of?: number;
+    cursor?: string;
+    page_size?: number;
+    principal_id?: string;
+    cursor_key_root?: string;
+}
 export interface PatchOperation {
     op?: "upsert" | "replace" | "add_relation" | "remove_relation";
     kind?: string;
@@ -201,7 +232,69 @@ export interface ImpactResult {
     continuation?: string;
     pending_watermark: number;
 }
+export interface ActionAuditEntry {
+    event_id: string;
+    commit_seq: number;
+    event_type: string;
+    action_id: string;
+    engagement_id: string;
+    work_run_id: string;
+    attempt_id: string;
+    generation: number;
+    status: string;
+    created_at: string;
+    hash: string;
+    payload: Record<string, unknown>;
+}
+export interface ActionAuditQueryResult {
+    events: ActionAuditEntry[];
+    has_more: boolean;
+    next_cursor?: string;
+    read_seq: number;
+    read_time?: string;
+}
 const hash = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
+function assertCredentialFreeNetworkReference(value: string, field: string): void {
+    const absoluteUrl = value.includes("://");
+    const sensitiveParameter = /(?:token|secret|credential|password|passwd|authorization|cookie|api[_-]?key|client[_-]?secret)/i;
+    if (/(?:^|[?&;])(?:token|secret|credential|password|passwd|authorization|cookie|api[_-]?key|client[_-]?secret)=/i.test(value))
+        throw new ContractValidationError("validation_error", field + " must not contain credential query parameters");
+    try {
+        const url = new URL(value, "https://taric.invalid");
+        if ((absoluteUrl && (url.username || url.password)) || [...url.searchParams.keys()].some((key) => sensitiveParameter.test(key)) || sensitiveParameter.test(url.hash))
+            throw new ContractValidationError("validation_error", field + " must not contain credentials");
+    }
+    catch (cause) {
+        if (cause instanceof ContractValidationError) throw cause;
+        if (absoluteUrl) throw new ContractValidationError("validation_error", field + " must be a valid network reference");
+    }
+}
+function validateActionNetworkProvenance(value: ActionNetworkProvenance | undefined): void {
+    if (!value) return;
+    const approved = new Set(value.approved_addresses);
+    if (approved.size !== value.approved_addresses.length || value.approved_addresses.some((address) => isIP(address) === 0))
+        throw new ContractValidationError("validation_error", "network provenance approved_addresses must be unique IP addresses");
+    const family = isIP(value.connected_address);
+    if (!approved.has(value.connected_address) || family === 0 || value.ip_family !== `ipv${family}`)
+        throw new ContractValidationError("validation_error", "network provenance connected address must be pinned from the approved address set with the matching IP family");
+    if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535 || !/^[a-z][a-z0-9+.-]*$/.test(value.protocol))
+        throw new ContractValidationError("validation_error", "network provenance protocol or port is invalid");
+    const resolved = Date.parse(value.resolved_at);
+    const connected = Date.parse(value.connected_at);
+    const completed = value.completed_at === undefined ? undefined : Date.parse(value.completed_at);
+    if (![resolved, connected, ...(completed === undefined ? [] : [completed])].every(Number.isFinite) || resolved > connected || (completed !== undefined && connected > completed))
+        throw new ContractValidationError("validation_error", "network provenance timestamps are invalid or out of order");
+    for (const [index, hop] of value.redirect_chain.entries()) {
+        assertCredentialFreeNetworkReference(hop.from, `network_provenance.redirect_chain[${index}].from`);
+        assertCredentialFreeNetworkReference(hop.to, `network_provenance.redirect_chain[${index}].to`);
+        if (!Number.isFinite(Date.parse(hop.decided_at)))
+            throw new ContractValidationError("validation_error", "network provenance redirect decision time is invalid");
+    }
+}
+function actionAuditSnapshot(body: Record<string, unknown>): Record<string, unknown> {
+    const fields = ["action_id", "engagement_id", "run_id", "attempt_ref", "generation", "owner", "host_id", "mode", "target", "method", "rationale", "uncertainty", "scope", "scope_revision_ref", "policy_digest", "constraints", "limitations", "memory_refs", "evidence_refs", "status", "host_decision_ref", "authorization_ref", "result_ref", "network_provenance", "idempotency_key", "recorded_at"];
+    return Object.fromEntries(fields.filter((field) => body[field] !== undefined).map((field) => [field, body[field]]));
+}
 function encodeListCursor(state: Record<string, unknown>, secret: Buffer): string {
     const body = Buffer.from(JSON.stringify(state), "utf8").toString("base64url");
     const sig = createHmac("sha256", secret).update(body).digest("base64url");
@@ -242,7 +335,7 @@ function proposalEnvelope(proposal: Proposal): ProposalEnvelope {
 /** 必须经过共享校验器的 Phase 1 领域合同 kind。 */
 const phaseOneContracts = new Set<string>(contractNames.filter((name) => !["apiSuccess", "apiError", "auditEvent"].includes(name)));
 const recordContractNames: Record<string, ContractName> = {
-    resource_revision: "resourceRevision", test_hypothesis: "testHypothesis", attack_path: "attackPath", patch_set: "patchSet", conflict: "conflict", impact_event: "impactEvent", protective_control_revision: "protectiveControlRevision", control_applicability_event: "controlApplicabilityEvent",
+    scope_revision: "scopeRevision", scope_invalidation: "scopeInvalidation", report_snapshot: "reportSnapshot", close_decision: "closeDecision", resource_revision: "resourceRevision", coverage_manifest: "coverageManifest", test_hypothesis: "testHypothesis", attack_path: "attackPath", patch_set: "patchSet", conflict: "conflict", impact_event: "impactEvent", protective_control_revision: "protectiveControlRevision", control_applicability_event: "controlApplicabilityEvent",
 };
 /** ActionIntent 的合法状态迁移；denied 不得再进入执行态。 */
 const actionTransitions: Record<string, string[]> = {
@@ -1508,6 +1601,13 @@ export class AuthorityStore {
         const normalized = { schema_version: SCHEMA_VERSION, created_at: now, provenance: { host_id: "taric-core", producer_id: "taric-core", source_kind: "host" }, ...source } as unknown as CanonicalRecord;
         if (record.schema_version !== undefined && record.schema_version !== SCHEMA_VERSION)
             throw new ContractValidationError("unsupported_schema_version", "record schema version is not supported");
+        if (kind === "scope_revision") {
+            const canonicalPolicy = normalizeScopePolicy(normalized.policy);
+            if (json(stablePayload(canonicalPolicy)) !== json(stablePayload(normalized.policy)))
+                throw new ContractValidationError("validation_error", "ScopeRevision policy must use canonical normalized values");
+            validateContract("scopeRevision", normalized);
+        }
+        if (kind === "scope_invalidation") validateContract("scopeInvalidation", normalized);
         // 声明了 schema_version 的 Phase 1 领域记录必须通过共享 JSON Schema 合同，不允许只做形状检查。
         // Internal updates originate from a previously validated canonical record. They still
         // pass cross-field validation below, while ordinary caller writes that declare a schema
@@ -1543,6 +1643,243 @@ export class AuthorityStore {
             return result;
         }));
     }
+    async reviseScope(input: ScopeRevisionInput): Promise<Awaited<{ scope: CanonicalRecord; revision: CanonicalRecord }>> {
+        const allowed = new Set(["engagement_id", "scope_id", "expected_version", "policy", "roe_artifact_ref", "roe_artifact_version", "idempotency_key", "principal"]);
+        if (Object.keys(input).some((field) => !allowed.has(field)))
+            throw new ContractValidationError("validation_error", "scope.revise contains an unknown field");
+        if (!Number.isSafeInteger(input.expected_version) || input.expected_version < 1)
+            throw new ContractValidationError("validation_error", "scope.revise requires a positive expected Scope version");
+        if (!Number.isSafeInteger(input.roe_artifact_version) || input.roe_artifact_version < 1)
+            throw new ContractValidationError("validation_error", "ROE Artifact version must be a positive integer");
+        if (typeof input.roe_artifact_ref !== "string" || input.roe_artifact_ref.length === 0 || input.roe_artifact_ref !== input.roe_artifact_ref.trim())
+            throw new ContractValidationError("validation_error", "ROE Artifact reference must be a canonical content_ref");
+        if (typeof input.idempotency_key !== "string" || input.idempotency_key.length === 0 || input.idempotency_key !== input.idempotency_key.trim())
+            throw new ContractValidationError("validation_error", "scope.revise requires a non-empty idempotency key");
+        const policy = normalizeScopePolicy(input.policy);
+        const operation = "scope.revise";
+        const principal = input.principal ?? "core";
+        const requestHash = hash(json(stablePayload({
+            engagement_id: input.engagement_id,
+            scope_id: input.scope_id,
+            expected_version: input.expected_version,
+            policy,
+            roe_artifact_ref: input.roe_artifact_ref,
+            roe_artifact_version: input.roe_artifact_version,
+        })));
+        return (await this.transaction(async () => {
+            const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", input.idempotency_key)) as {
+                result?: string;
+                operation?: string;
+                principal?: string;
+                engagement_id?: string;
+                request_hash?: string;
+            } | undefined;
+            if (prior) {
+                if (prior.request_hash !== requestHash || prior.operation !== operation || prior.principal !== principal || prior.engagement_id !== input.engagement_id)
+                    throw new ContractValidationError("idempotency_conflict", "idempotency key is bound to another scope revision request");
+                return JSON.parse(prior.result!) as { scope: CanonicalRecord; revision: CanonicalRecord };
+            }
+            const scopeRow = (await this.sql.get("SELECT engagement_id,version,body FROM records WHERE id=? AND kind='scope'", input.scope_id)) as {
+                engagement_id?: string;
+                version?: number;
+                body?: string;
+            } | undefined;
+            if (!scopeRow || scopeRow.engagement_id !== input.engagement_id || !scopeRow.body)
+                throw new ContractValidationError("validation_error", "scope_id must reference a Scope in the Engagement");
+            if (Number(scopeRow.version) !== input.expected_version)
+                throw new ContractValidationError("stale_version", "Scope changed before revision was committed");
+            const currentScope = JSON.parse(scopeRow.body) as CanonicalRecord;
+            const artifactRow = (await this.sql.get("SELECT body FROM artifact_catalog WHERE engagement_id=? AND content_ref=?", input.engagement_id, input.roe_artifact_ref)) as { body?: string } | undefined;
+            const artifact = artifactRow?.body ? JSON.parse(artifactRow.body) as Record<string, unknown> : undefined;
+            if (!artifact || artifact.content_ref !== input.roe_artifact_ref || Number(artifact.version) !== input.roe_artifact_version || typeof artifact.artifact_id !== "string")
+                throw new ContractValidationError("validation_error", "ROE Artifact reference and version must match committed Artifact metadata in this Engagement");
+            if (artifact.content_status !== "available" || artifact.integrity_status !== "verified" || typeof artifact.content_hash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(artifact.content_hash))
+                throw new ContractValidationError("conflict", "ROE Artifact must be committed, available, integrity-verified, and carry a SHA-256 digest");
+            const previousRef = typeof currentScope.current_revision_ref === "string" ? currentScope.current_revision_ref : undefined;
+            let revisionNumber = 1;
+            if (previousRef) {
+                const previousRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", previousRef)) as { engagement_id?: string; body?: string } | undefined;
+                const previous = previousRow?.body ? JSON.parse(previousRow.body) as CanonicalRecord : undefined;
+                if (!previous || previousRow?.engagement_id !== input.engagement_id || previous.scope_ref !== input.scope_id || Number(previous.revision) !== Number(currentScope.revision_number) || previous.approval_status !== "approved")
+                    throw new ContractValidationError("conflict", "Scope current revision pointer is inconsistent");
+                revisionNumber = Number(previous.revision) + 1;
+            } else if (currentScope.revision_number !== undefined || currentScope.policy_digest !== undefined) {
+                throw new ContractValidationError("conflict", "Scope revision pointer metadata is incomplete");
+            }
+            const createdAt = await this.sql.now();
+            const policyDigest = hash(json(stablePayload({
+                scope_ref: input.scope_id,
+                revision: revisionNumber,
+                policy,
+                roe_artifact_ref: input.roe_artifact_ref,
+                roe_artifact_version: input.roe_artifact_version,
+                roe_content_hash: artifact.content_hash,
+            })));
+            const revisionId = uuidv7();
+            const revision = await this.commit({
+                id: revisionId,
+                schema_version: SCHEMA_VERSION,
+                created_at: createdAt,
+                engagement_id: input.engagement_id,
+                provenance: { host_id: principal, producer_id: principal, source_kind: "host" },
+                kind: "scope_revision",
+                scope_ref: input.scope_id,
+                revision: revisionNumber,
+                ...(previousRef ? { supersedes: previousRef } : {}),
+                policy,
+                roe_artifact_ref: input.roe_artifact_ref,
+                roe_artifact_version: input.roe_artifact_version,
+                roe_content_hash: artifact.content_hash,
+                policy_digest: policyDigest,
+                approval_status: "approved",
+                approved_by: principal,
+                approved_at: createdAt,
+            }, "L2", undefined, { operation, principal, engagement_id: input.engagement_id }, false, 0);
+            const { invalidation_ref: _oldInvalidation, ...scopeBase } = currentScope;
+            const scope = await this.commit({
+                ...scopeBase,
+                allowed_targets: policy.allowed_targets,
+                excluded_targets: policy.excluded_targets,
+                rules_of_engagement_ref: input.roe_artifact_ref,
+                valid_from: policy.valid_from,
+                valid_until: policy.valid_until,
+                current_revision_ref: revisionId,
+                revision_number: revisionNumber,
+                revision_state: "approved",
+                policy_digest: policyDigest,
+            }, (currentScope.trust_level as TrustLevel) ?? "L2", undefined, { operation, principal, engagement_id: input.engagement_id }, true, input.expected_version);
+            await this.nextEvent("scope.revise", {
+                engagement_id: input.engagement_id,
+                scope_ref: input.scope_id,
+                scope_revision_ref: revisionId,
+                revision: revisionNumber,
+                policy_digest: policyDigest,
+                roe_artifact_ref: input.roe_artifact_ref,
+                roe_artifact_version: input.roe_artifact_version,
+                roe_content_hash: artifact.content_hash,
+                expected_version: input.expected_version,
+                actor_id: principal,
+                idempotency_key: input.idempotency_key,
+            }, revisionId);
+            const result = { scope, revision };
+            await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", input.idempotency_key, operation, principal, input.engagement_id, requestHash, json(result));
+            return result;
+        }));
+    }
+    async invalidateScope(input: ScopeInvalidationInput): Promise<Awaited<{ scope: CanonicalRecord; invalidation: CanonicalRecord }>> {
+        const allowed = new Set(["engagement_id", "scope_id", "scope_revision_ref", "expected_version", "reason", "idempotency_key", "principal"]);
+        if (Object.keys(input).some((field) => !allowed.has(field)))
+            throw new ContractValidationError("validation_error", "scope.invalidate contains an unknown field");
+        if (!Number.isSafeInteger(input.expected_version) || input.expected_version < 1)
+            throw new ContractValidationError("validation_error", "scope.invalidate requires a positive expected Scope version");
+        if (typeof input.reason !== "string" || input.reason.trim().length === 0 || input.reason.length > 2048)
+            throw new ContractValidationError("validation_error", "scope invalidation requires a reason of at most 2048 characters");
+        if (typeof input.idempotency_key !== "string" || input.idempotency_key.length === 0 || input.idempotency_key !== input.idempotency_key.trim())
+            throw new ContractValidationError("validation_error", "scope.invalidate requires a non-empty idempotency key");
+        const operation = "scope.invalidate";
+        const principal = input.principal ?? "core";
+        const reason = input.reason.trim();
+        const requestHash = hash(json(stablePayload({
+            engagement_id: input.engagement_id,
+            scope_id: input.scope_id,
+            scope_revision_ref: input.scope_revision_ref,
+            expected_version: input.expected_version,
+            reason,
+        })));
+        return (await this.transaction(async () => {
+            const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", input.idempotency_key)) as {
+                result?: string;
+                operation?: string;
+                principal?: string;
+                engagement_id?: string;
+                request_hash?: string;
+            } | undefined;
+            if (prior) {
+                if (prior.request_hash !== requestHash || prior.operation !== operation || prior.principal !== principal || prior.engagement_id !== input.engagement_id)
+                    throw new ContractValidationError("idempotency_conflict", "idempotency key is bound to another scope invalidation request");
+                return JSON.parse(prior.result!) as { scope: CanonicalRecord; invalidation: CanonicalRecord };
+            }
+            const scopeRow = (await this.sql.get("SELECT engagement_id,version,body FROM records WHERE id=? AND kind='scope'", input.scope_id)) as { engagement_id?: string; version?: number; body?: string } | undefined;
+            if (!scopeRow || scopeRow.engagement_id !== input.engagement_id || !scopeRow.body)
+                throw new ContractValidationError("validation_error", "scope_id must reference a Scope in the Engagement");
+            if (Number(scopeRow.version) !== input.expected_version)
+                throw new ContractValidationError("stale_version", "Scope changed before invalidation was committed");
+            const currentScope = JSON.parse(scopeRow.body) as CanonicalRecord;
+            if (currentScope.current_revision_ref !== input.scope_revision_ref || currentScope.revision_state !== "approved" || typeof currentScope.policy_digest !== "string")
+                throw new ContractValidationError("stale_version", "only the current approved ScopeRevision can be invalidated");
+            const revisionRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", input.scope_revision_ref)) as { engagement_id?: string; body?: string } | undefined;
+            const revision = revisionRow?.body ? JSON.parse(revisionRow.body) as CanonicalRecord : undefined;
+            if (!revision || revisionRow?.engagement_id !== input.engagement_id || revision.scope_ref !== input.scope_id || revision.policy_digest !== currentScope.policy_digest || revision.approval_status !== "approved")
+                throw new ContractValidationError("conflict", "ScopeRevision approval binding is inconsistent");
+            const invalidatedAt = await this.sql.now();
+            const invalidationId = uuidv7();
+            const invalidation = await this.commit({
+                id: invalidationId,
+                schema_version: SCHEMA_VERSION,
+                created_at: invalidatedAt,
+                engagement_id: input.engagement_id,
+                provenance: { host_id: principal, producer_id: principal, source_kind: "host" },
+                kind: "scope_invalidation",
+                scope_ref: input.scope_id,
+                scope_revision_ref: input.scope_revision_ref,
+                reason,
+                actor_id: principal,
+                invalidated_at: invalidatedAt,
+                idempotency_key: input.idempotency_key,
+            }, "L2", undefined, { operation, principal, engagement_id: input.engagement_id }, false, 0);
+            const scope = await this.commit({
+                ...currentScope,
+                revision_state: "invalidated",
+                invalidation_ref: invalidationId,
+            }, (currentScope.trust_level as TrustLevel) ?? "L2", undefined, { operation, principal, engagement_id: input.engagement_id }, true, input.expected_version);
+            await this.nextEvent("scope.invalidate", {
+                engagement_id: input.engagement_id,
+                scope_ref: input.scope_id,
+                scope_revision_ref: input.scope_revision_ref,
+                invalidation_ref: invalidationId,
+                reason,
+                actor_id: principal,
+                invalidated_at: invalidatedAt,
+                idempotency_key: input.idempotency_key,
+            }, invalidationId);
+            const result = { scope, invalidation };
+            await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", input.idempotency_key, operation, principal, input.engagement_id, requestHash, json(result));
+            return result;
+        }));
+    }
+    async scopeQuery(input: ScopeQueryInput): Promise<Awaited<{
+        records: CanonicalRecord[];
+        read_seq: number;
+        committed_seq: number;
+        next_cursor?: string;
+    }>> {
+        const limit = input.page_size ?? 100;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+            throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 1000");
+        return (await this.readTransaction(async () => {
+            const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as { seq: number }).seq);
+            const cursor = input.cursor ? decodeListCursor(input.cursor, this.listCursorKey(false, input.cursor_key_root)) : undefined;
+            const readSeq = input.as_of ?? (typeof cursor?.read_seq === "number" ? cursor.read_seq : current);
+            if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current)
+                throw new ContractValidationError("conflict", `unsupported authority sequence: ${readSeq}`);
+            const filterDigest = hash(json({ scope_id: input.scope_id }));
+            if (cursor && (cursor.list !== "scope_history" || cursor.principal_id !== (input.principal_id ?? "local") || cursor.engagement_id !== input.engagement_id || cursor.page_size !== limit || cursor.read_seq !== readSeq || cursor.filter_digest !== filterDigest))
+                throw new InvalidCursorError("scope query cursor binding mismatch");
+            const after = typeof cursor?.after_id === "string" ? cursor.after_id : "";
+            const kind = this.sql.jsonValue("rv.body", "kind");
+            const scopeRef = this.sql.jsonValue("rv.body", "scope_ref");
+            const rows = (await this.sql.all(`SELECT rv.id,rv.body FROM record_versions rv WHERE rv.engagement_id=? AND rv.commit_seq<=? AND rv.id>? AND ${kind} IN ('scope_revision','scope_invalidation') AND ${scopeRef}=? AND NOT EXISTS (SELECT 1 FROM record_versions newer WHERE newer.id=rv.id AND newer.commit_seq<=? AND newer.commit_seq>rv.commit_seq) ORDER BY rv.id LIMIT ?`, input.engagement_id, readSeq, after, input.scope_id, readSeq, limit + 1)) as Array<{ id: string; body: string }>;
+            const hasMore = rows.length > limit;
+            const records = rows.slice(0, limit).map((row) => JSON.parse(row.body) as CanonicalRecord);
+            const last = records.at(-1);
+            return {
+                records,
+                read_seq: readSeq,
+                committed_seq: current,
+                ...(hasMore && last ? { next_cursor: encodeListCursor({ v: 1, list: "scope_history", principal_id: input.principal_id ?? "local", engagement_id: input.engagement_id, page_size: limit, read_seq: readSeq, filter_digest: filterDigest, after_id: last.id }, this.listCursorKey(true, input.cursor_key_root)) } : {}),
+            };
+        }));
+    }
     async initializeEngagement(input: {
         name?: string;
         scope?: {
@@ -1571,7 +1908,16 @@ export class AuthorityStore {
         const operation = context?.operation ?? "record.commit";
         const principal = context?.principal ?? "core";
         const engagementId = context?.engagement_id ?? normalized.engagement_id;
+        if (importedVersion === undefined && normalized.kind === "scope_revision" && operation !== "scope.revise")
+            throw new ContractValidationError("conflict", "ScopeRevision records can only be issued by scope.revise");
+        if (importedVersion === undefined && normalized.kind === "scope_invalidation" && operation !== "scope.invalidate")
+            throw new ContractValidationError("conflict", "Scope invalidation records can only be issued by scope.invalidate");
         const requestHash = hash(json(stablePayload({ record, expected_version: expectedVersion })));
+        const recordKind = String(normalized.kind ?? normalized.type ?? "record");
+        if (!internal && recordKind === "report_snapshot" && operation !== "report.snapshot.commit")
+            throw new ContractValidationError("conflict", "ReportSnapshot records must be committed through report.snapshot.commit");
+        if (!internal && recordKind === "close_decision" && !["engagement.close", "engagement.reopen"].includes(operation))
+            throw new ContractValidationError("conflict", "CloseDecision records must be committed through engagement.close or engagement.reopen");
             if (idempotencyKey) {
                 const prior = (await this.sql.get("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", idempotencyKey)) as {
                     result?: string;
@@ -1586,6 +1932,11 @@ export class AuthorityStore {
                     return JSON.parse(prior.result!) as CanonicalRecord;
                 }
             }
+            if (!internal && !["engagement.close", "engagement.reopen"].includes(operation)) {
+                const engagement = await this.get(normalized.engagement_id);
+                if (engagement?.kind === "engagement" && engagement.status === "completed")
+                    throw new ContractValidationError("conflict", "completed Engagements are read-only until an audited reopen decision");
+            }
             const now = (await this.sql.now());
             const existing = (await this.sql.get("SELECT version,body,display_id FROM records WHERE id=?", normalized.id)) as {
                 version?: number;
@@ -1593,7 +1944,7 @@ export class AuthorityStore {
                 display_id?: string;
             } | undefined;
             if (existing) {
-                if (["resource_revision", "relation", "test_hypothesis", "attack_path", "protective_control_revision"].includes(String(normalized.kind ?? normalized.type)))
+                if (["scope_revision", "scope_invalidation", "report_snapshot", "close_decision", "resource_revision", "coverage_manifest", "relation", "test_hypothesis", "attack_path", "protective_control_revision"].includes(String(normalized.kind ?? normalized.type)))
                     throw new ContractValidationError("conflict", "immutable revision records must be appended, not overwritten");
                 if (expectedVersion === undefined || Number(existing.version) !== expectedVersion)
                     throw new ContractValidationError("stale_version", "canonical update requires the current expected version");
@@ -1601,8 +1952,10 @@ export class AuthorityStore {
                 const nextKind = String(normalized.kind ?? normalized.type ?? "record");
                 if (prior.engagement_id !== normalized.engagement_id || String(prior.kind ?? prior.type ?? "record") !== nextKind)
                     throw new ContractValidationError("conflict", "canonical engagement ownership and kind are immutable");
+                if (nextKind === "scope" && !["scope.revise", "scope.invalidate"].includes(String(context?.operation)))
+                    throw new ContractValidationError("conflict", "Scope authority changes must use scope.revise or scope.invalidate");
                 const immutableFields = ["identity", "logical_identity", "resource_ref", "control_ref"];
-                if (nextKind === "coverage") immutableFields.push("resource_revision_ref", "test_category", "identity_ref", "operation", "parameter", "conditions", "role", "tenant_ref", "path", "network_condition", "method");
+                if (nextKind === "coverage") immutableFields.push("resource_revision_ref", "scope_revision_ref", "policy_digest", "test_category", "identity_ref", "operation", "parameter", "conditions", "role", "tenant_ref", "path", "network_condition", "method");
                 for (const field of immutableFields) {
                     if (prior[field] !== undefined && json(stablePayload(prior[field])) !== json(stablePayload(normalized[field])))
                         throw new ContractValidationError("conflict", "canonical logical identity is immutable");
@@ -1619,9 +1972,13 @@ export class AuthorityStore {
             if (aliasSequence !== undefined)
                 (await this.sql.run("UPDATE metadata SET value=? WHERE key='display_sequence'", String(aliasSequence + 1)));
             const old = existing?.body ? JSON.parse(existing.body) as CanonicalRecord : undefined;
-            const committed = { ...normalized, version, trust_level: trustLevel, display_id: existing?.display_id ?? importedDisplayId ?? (aliasSequence === undefined ? undefined : `TAR-${String(aliasSequence).padStart(6, "0")}`) };
+            const committed = { ...normalized, version, trust_level: trustLevel, display_id: existing?.display_id ?? importedDisplayId ?? (aliasSequence === undefined ? undefined : `TAR-${String(aliasSequence).padStart(6, "0")}`) } as CanonicalRecord;
             if (!referencesValidated)
                 validateAuthorityReferences(committed, (await this.referenceIndex(committed, normalized.engagement_id)), normalized.engagement_id);
+            if (importedVersion === undefined && String(committed.kind ?? committed.type ?? "") === "scope_revision")
+                await this.validateScopeRevisionRecord(committed);
+            if (importedVersion === undefined && String(committed.kind ?? committed.type ?? "") === "scope")
+                await this.validateScopeRevisionPointer(committed as CanonicalRecord);
             (await this.sql.run("INSERT INTO records(id,engagement_id,kind,trust_level,version,display_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,trust_level=excluded.trust_level,version=excluded.version,updated_at=excluded.updated_at", normalized.id, normalized.engagement_id, String(normalized.kind ?? normalized.type ?? "record"), trustLevel, version, committed.display_id ?? null, json(committed), now, now));
             (await this.sql.run("INSERT INTO object_refs(id,engagement_id,kind) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET engagement_id=excluded.engagement_id,kind=excluded.kind", normalized.id, normalized.engagement_id, String(normalized.kind ?? normalized.type ?? "record")));
             const event = (await this.nextEvent("record.commit", { version, imported_version: importedVersion, trust_level: trustLevel, actor_id: context?.principal ?? "taric-core", before_hash: old ? hash(json(old)) : null, after_hash: hash(json(committed)), changed_fields: Object.keys(committed).filter((key) => !old || json(old[key]) !== json((committed as Record<string, unknown>)[key])) }, normalized.id));
@@ -1664,6 +2021,7 @@ export class AuthorityStore {
     async snapshot(engagementId: string, options: {
         trustLevel?: TrustLevel;
         includeCandidates?: boolean;
+        includeRecalled?: boolean;
         asOf?: number;
         readTime?: string;
         diagnostics?: (stage: "snapshot_hydration" | "snapshot_filter" | "snapshot_sort", elapsedMs: number) => void;
@@ -1696,7 +2054,7 @@ export class AuthorityStore {
                     if (seen.has(body.id)) return false;
                     seen.add(body.id);
                     const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime);
-                    return row.trust_level !== "L0" && !recalled && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel);
+                    return row.trust_level !== "L0" && (options.includeRecalled || !recalled) && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel);
                 }).map(({ body }) => body);
                 options.diagnostics("snapshot_filter", performance.now() - filterStarted);
                 const sortStarted = performance.now();
@@ -1705,7 +2063,7 @@ export class AuthorityStore {
             } else {
                 const seen = new Set<string>();
                 records = rows.filter((row) => { const body = JSON.parse(row.body) as CanonicalRecord; if (seen.has(body.id))
-                    return false; seen.add(body.id); const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime); return row.trust_level !== "L0" && !recalled && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel); }).map((row) => JSON.parse(row.body) as CanonicalRecord).sort((a, b) => a.id.localeCompare(b.id));
+                    return false; seen.add(body.id); const recalled = ["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"].includes(String(body.status ?? "active")) || body.recall_excluded === true || (typeof body.expires_at === "string" && Date.parse(body.expires_at) <= asOfTime) || (typeof body.review_after === "string" && Date.parse(body.review_after) <= asOfTime); return row.trust_level !== "L0" && (options.includeRecalled || !recalled) && (options.includeCandidates || row.trust_level !== "L1" || options.trustLevel === "L1") && (!options.trustLevel || row.trust_level === options.trustLevel); }).map((row) => JSON.parse(row.body) as CanonicalRecord).sort((a, b) => a.id.localeCompare(b.id));
             }
             const projected = (await this.projectedSequence());
             return { read_seq: seq, committed_seq: current, projected_seq: Math.min(projected, seq), read_time: readTime, records };
@@ -2513,6 +2871,67 @@ export class AuthorityStore {
         (await this.nextEvent("proposal.reject", { input_hash: proposal.content_hash, reason, actor_id: "core" }, proposal.id));
         return { ok: false, reason, proposal: { ...proposal, status: "rejected" } };
     }
+    private async scopeRevisionIsEffective(engagementId: string, revisionRef: string, policyDigest: string, at: string | number): Promise<boolean> {
+        const row = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", revisionRef)) as { engagement_id?: string; body?: string } | undefined;
+        const revision = row?.body ? JSON.parse(row.body) as Record<string, unknown> : undefined;
+        const policy = revision?.policy as Record<string, unknown> | undefined;
+        const instant = typeof at === "number" ? at : Date.parse(at);
+        const validFrom = policy && typeof policy.valid_from === "string" ? Date.parse(policy.valid_from) : NaN;
+        const validUntil = policy && typeof policy.valid_until === "string" ? Date.parse(policy.valid_until) : NaN;
+        return Boolean(row && row.engagement_id === engagementId && revision?.approval_status === "approved" && revision.policy_digest === policyDigest && Number.isFinite(instant) && Number.isFinite(validFrom) && Number.isFinite(validUntil) && instant >= validFrom && instant < validUntil);
+    }
+    /** Validate an immutable revision against the current Scope predecessor and committed ROE bytes. */
+    private async validateScopeRevisionRecord(revision: CanonicalRecord): Promise<void> {
+        const scopeRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope'", String(revision.scope_ref ?? ""))) as { engagement_id?: string; body?: string } | undefined;
+        const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as CanonicalRecord : undefined;
+        if (!scope || scopeRow?.engagement_id !== revision.engagement_id)
+            throw new ContractValidationError("validation_error", "ScopeRevision scope_ref must resolve to a Scope in the same Engagement");
+        await this.validateScopeRevisionPointer(scope);
+        const priorRef = typeof scope.current_revision_ref === "string" ? scope.current_revision_ref : undefined;
+        const expectedNumber = priorRef ? Number(scope.revision_number) + 1 : 1;
+        if (Number(revision.revision) !== expectedNumber || (priorRef ? revision.supersedes !== priorRef : revision.supersedes !== undefined))
+            throw new ContractValidationError("stale_version", "ScopeRevision must supersede the current revision with the next revision number");
+        const artifactRow = (await this.sql.get("SELECT body FROM artifact_catalog WHERE engagement_id=? AND content_ref=?", revision.engagement_id, revision.roe_artifact_ref)) as { body?: string } | undefined;
+        const artifact = artifactRow?.body ? JSON.parse(artifactRow.body) as Record<string, unknown> : undefined;
+        if (!artifact || artifact.content_ref !== revision.roe_artifact_ref || Number(artifact.version) !== Number(revision.roe_artifact_version) || artifact.content_status !== "available" || artifact.integrity_status !== "verified" || typeof artifact.content_hash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(artifact.content_hash) || revision.roe_content_hash !== artifact.content_hash)
+            throw new ContractValidationError("conflict", "ScopeRevision must bind the matching committed, available, integrity-verified ROE Artifact version and digest");
+        const expectedDigest = hash(json(stablePayload({ scope_ref: revision.scope_ref, revision: revision.revision, policy: revision.policy, roe_artifact_ref: revision.roe_artifact_ref, roe_artifact_version: revision.roe_artifact_version, roe_content_hash: artifact.content_hash })));
+        if (revision.policy_digest !== expectedDigest)
+            throw new ContractValidationError("conflict", "ScopeRevision policy_digest does not match its normalized policy and ROE Artifact");
+    }
+    /** A Scope's mutable projection may only point at its own immutable revision. */
+    private async validateScopeRevisionPointer(scope: CanonicalRecord): Promise<void> {
+        const revisionRef = scope.current_revision_ref;
+        if (revisionRef === undefined) {
+            if (scope.revision_number !== undefined || scope.revision_state !== undefined || scope.policy_digest !== undefined || scope.invalidation_ref !== undefined)
+                throw new ContractValidationError("conflict", "Scope revision metadata requires current_revision_ref");
+            return;
+        }
+        if (typeof revisionRef !== "string" || !UUID_V7_PATTERN.test(revisionRef))
+            throw new ContractValidationError("validation_error", "Scope current_revision_ref must be a UUIDv7");
+        const revisionRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", revisionRef)) as { engagement_id?: string; body?: string } | undefined;
+        const revision = revisionRow?.body ? JSON.parse(revisionRow.body) as Record<string, unknown> : undefined;
+        if (!revision || revisionRow?.engagement_id !== scope.engagement_id || revision.scope_ref !== scope.id || revision.approval_status !== "approved")
+            throw new ContractValidationError("conflict", "Scope current_revision_ref must point to an approved revision in the same Engagement");
+        if (Number(scope.revision_number) !== Number(revision.revision) || scope.policy_digest !== revision.policy_digest)
+            throw new ContractValidationError("conflict", "Scope revision number and policy digest must match current ScopeRevision");
+        const policy = revision.policy as Record<string, unknown> | undefined;
+        if (!policy || !samePayload(scope.allowed_targets, policy.allowed_targets) || !samePayload(scope.excluded_targets, policy.excluded_targets) || scope.rules_of_engagement_ref !== revision.roe_artifact_ref || scope.valid_from !== policy.valid_from || scope.valid_until !== policy.valid_until)
+            throw new ContractValidationError("conflict", "Scope projection does not match current ScopeRevision policy");
+        const state = scope.revision_state;
+        if (state !== "approved" && state !== "invalidated")
+            throw new ContractValidationError("validation_error", "Scope revision_state must be approved or invalidated");
+        if (state === "approved" && scope.invalidation_ref !== undefined)
+            throw new ContractValidationError("conflict", "approved Scope cannot carry an invalidation reference");
+        if (state === "invalidated") {
+            if (typeof scope.invalidation_ref !== "string" || !UUID_V7_PATTERN.test(scope.invalidation_ref))
+                throw new ContractValidationError("conflict", "invalidated Scope requires a UUIDv7 invalidation reference");
+            const invalidationRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_invalidation'", scope.invalidation_ref)) as { engagement_id?: string; body?: string } | undefined;
+            const invalidation = invalidationRow?.body ? JSON.parse(invalidationRow.body) as Record<string, unknown> : undefined;
+            if (!invalidation || invalidationRow?.engagement_id !== scope.engagement_id || invalidation.scope_ref !== scope.id || invalidation.scope_revision_ref !== revisionRef)
+                throw new ContractValidationError("conflict", "Scope invalidation reference does not match the current ScopeRevision");
+        }
+    }
     async claimWorkRun(input: {
         run_id?: string;
         work_item_id: string;
@@ -2528,6 +2947,10 @@ export class AuthorityStore {
         return (await this.transaction(async () => {
             const now = new Date(await this.sql.now());
             const expiry = new Date(now.getTime() + (input.ttl_ms ?? 60000)).toISOString();
+            const engagementRow = await this.sql.get<{ body: string }>("SELECT body FROM records WHERE id=? AND kind='engagement'", input.engagement_id);
+            const engagement = engagementRow?.body ? JSON.parse(engagementRow.body) as Record<string, unknown> : undefined;
+            if (engagement && ["completed", "archived"].includes(String(engagement.status)))
+                throw new ContractValidationError("conflict", "closed Engagements cannot claim WorkRuns");
             const prior = (await this.sql.get("SELECT generation,status,lease_expires_at,engagement_id,work_item_id,body FROM work_runs WHERE run_id=?", runId)) as any;
             if (prior && prior.engagement_id !== input.engagement_id)
                 throw new ContractValidationError("authorization_error", "work run belongs to another engagement");
@@ -2579,23 +3002,40 @@ export class AuthorityStore {
             const body: Record<string, unknown> = { run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", owner, generation, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as any).seq), work_item_version: Number(workItemRow.version), target_version: Number(item.target_version ?? workItemRow.version) };
             if (taskSessionRef)
                 body.task_session_ref = taskSessionRef;
-            const engagementBody = (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='engagement'", input.engagement_id)) as {
-                body?: string;
-            } | undefined;
-            const engagement = engagementBody?.body ? JSON.parse(engagementBody.body) as Record<string, unknown> : {};
-            const scopeRef = typeof item.scope_ref === "string" ? item.scope_ref : typeof engagement.scope_ref === "string" ? engagement.scope_ref : undefined;
+            const engagementState = engagement ?? {};
+            const scopeRef = typeof item.scope_ref === "string" ? item.scope_ref : typeof engagementState.scope_ref === "string" ? engagementState.scope_ref : undefined;
             const scopeVersion = scopeRef ? Number(((await this.sql.get("SELECT version FROM records WHERE id=? AND kind='scope' AND engagement_id=?", scopeRef, input.engagement_id)) as {
                 version?: number;
             } | undefined)?.version ?? -1) : 0;
             if (scopeVersion < 0)
                 throw new ContractValidationError("validation_error", "WorkItem scope must reference a Scope in the engagement");
+            const scopeRow = scopeRef ? (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", scopeRef, input.engagement_id)) as { body?: string } | undefined : undefined;
+            const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+            const scopeRevisionRef = typeof scope.current_revision_ref === "string" ? scope.current_revision_ref : undefined;
+            const scopePolicyDigest = typeof scope.policy_digest === "string" ? scope.policy_digest : undefined;
+            if (scopeRevisionRef) {
+                const revisionRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", scopeRevisionRef)) as { engagement_id?: string; body?: string } | undefined;
+                const revision = revisionRow?.body ? JSON.parse(revisionRow.body) as Record<string, unknown> : undefined;
+                if (!revision || revisionRow?.engagement_id !== input.engagement_id || revision.scope_ref !== scopeRef || revision.policy_digest !== scopePolicyDigest || revision.approval_status !== "approved" || scope.revision_state !== "approved")
+                    throw new ContractValidationError("conflict", "Scope revision pointer is inconsistent");
+                if (!(await this.scopeRevisionIsEffective(input.engagement_id, scopeRevisionRef, scopePolicyDigest!, now.toISOString())))
+                    throw new ContractValidationError("stale_version", "ScopeRevision is outside its effective time window");
+                if (item.scope_revision_ref !== undefined && (item.scope_revision_ref !== scopeRevisionRef || item.policy_digest !== scopePolicyDigest))
+                    throw new ContractValidationError("stale_version", "WorkItem is pinned to a superseded ScopeRevision");
+            } else if (item.scope_revision_ref !== undefined) {
+                throw new ContractValidationError("stale_version", "WorkItem ScopeRevision binding is unavailable");
+            }
             body.scope_ref = scopeRef;
             body.scope_version = scopeVersion;
+            if (scopeRevisionRef && scopePolicyDigest) {
+                body.scope_revision_ref = scopeRevisionRef;
+                body.policy_digest = scopePolicyDigest;
+            }
             const attemptId = uuidv7();
             const attempt = { attempt_id: attemptId, run_id: runId, work_item_id: input.work_item_id, engagement_id: input.engagement_id, status: "claimed", generation, owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), ...(taskSessionRef ? { task_session_ref: taskSessionRef } : {}) };
             const provenance = { host_id: input.host_id, producer_id: input.agent_id, source_kind: "host" };
             const recordBase = { schema_version: SCHEMA_VERSION, engagement_id: input.engagement_id, created_at: now.toISOString(), provenance };
-            validateContract("workRun", { ...recordBase, id: runId, kind: "work_run", work_item_ref: input.work_item_id, status: "claimed", generation, attempt_ref: attemptId, owner: body.owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: body.read_seq });
+            validateContract("workRun", { ...recordBase, id: runId, kind: "work_run", work_item_ref: input.work_item_id, status: "claimed", generation, attempt_ref: attemptId, owner: body.owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), read_seq: body.read_seq, ...(scopeRevisionRef ? { scope_revision_ref: scopeRevisionRef, policy_digest: scopePolicyDigest } : {}) });
             validateContract("attempt", { ...recordBase, id: attemptId, kind: "attempt", work_item_ref: input.work_item_id, work_run_ref: runId, status: "claimed", generation, owner: body.owner, lease_expires_at: expiry, heartbeat_at: now.toISOString(), started_at: now.toISOString() });
             (await this.sql.run("INSERT INTO work_runs(run_id,work_item_id,engagement_id,status,owner_host,owner_agent,generation,lease_expires_at,heartbeat_at,read_seq,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET status=excluded.status,owner_host=excluded.owner_host,owner_agent=excluded.owner_agent,generation=excluded.generation,lease_expires_at=excluded.lease_expires_at,heartbeat_at=excluded.heartbeat_at,read_seq=excluded.read_seq,body=excluded.body,updated_at=excluded.updated_at", runId, input.work_item_id, input.engagement_id, "claimed", input.host_id, input.agent_id, generation, expiry, now.toISOString(), body.read_seq as number, json(body), now.toISOString(), now.toISOString()));
             (await this.sql.run("INSERT INTO attempts(attempt_id,run_id,work_item_id,engagement_id,status,generation,owner_host,owner_agent,lease_expires_at,heartbeat_at,body,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", attemptId, runId, input.work_item_id, input.engagement_id, "claimed", generation, input.host_id, input.agent_id, expiry, now.toISOString(), json(attempt), now.toISOString(), now.toISOString()));
@@ -2615,6 +3055,13 @@ export class AuthorityStore {
             const now = new Date(await this.sql.now());
             if (!row || row.owner_host !== hostId || Number(row.generation) !== generation || !row.lease_expires_at || row.lease_expires_at <= now.toISOString() || ["completed", "failed", "cancelled", "lost"].includes(String(row.status)))
                 throw new ContractValidationError("stale_version", "work run lease is expired or fenced");
+            const runBody = JSON.parse(row.body) as Record<string, unknown>;
+            if (typeof runBody.scope_revision_ref === "string") {
+                const scopeRow = (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, row.engagement_id)) as { version?: number; body?: string } | undefined;
+                const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+                if (Number(scopeRow?.version) !== Number(runBody.scope_version) || scope.revision_state !== "approved" || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || !(await this.scopeRevisionIsEffective(row.engagement_id, String(runBody.scope_revision_ref), String(runBody.policy_digest), now.toISOString())))
+                    throw new ContractValidationError("stale_version", "work run ScopeRevision is stale or outside its effective time window");
+            }
             const expiry = new Date(now.getTime() + ttlMs).toISOString();
             const updated = (await this.sql.run("UPDATE work_runs SET lease_expires_at=?,heartbeat_at=?,updated_at=? WHERE run_id=? AND generation=? AND owner_host=? AND lease_expires_at>? AND status NOT IN ('completed','failed','cancelled','lost')", expiry, now.toISOString(), now.toISOString(), runId, generation, hostId, now.toISOString()));
             if (Number(updated.changes) !== 1)
@@ -2702,11 +3149,24 @@ export class AuthorityStore {
                 throw new ContractValidationError("stale_version", "checkpoint scope does not match the current WorkItem scope");
             if (!expectedScope && checkpoint.scope_ref !== undefined)
                 throw new ContractValidationError("validation_error", "checkpoint declares a scope not present on the current WorkItem or Engagement");
-            const currentScopeVersion = expectedScope ? Number(((await this.sql.get("SELECT version FROM records WHERE id=? AND kind='scope' AND engagement_id=?", expectedScope, row.engagement_id)) as {
+            const currentScopeRow = expectedScope ? (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", expectedScope, row.engagement_id)) as {
                 version?: number;
-            } | undefined)?.version ?? -1) : 0;
+                body?: string;
+            } | undefined : undefined;
+            const currentScopeVersion = expectedScope ? Number(currentScopeRow?.version ?? -1) : 0;
             if (currentScopeVersion < 0 || Number(checkpoint.scope_version) !== currentScopeVersion)
                 throw new ContractValidationError("stale_version", "checkpoint Scope version is stale");
+            const currentScope = currentScopeRow?.body ? JSON.parse(currentScopeRow.body) as Record<string, unknown> : {};
+            const currentScopeRevisionRef = typeof currentScope.current_revision_ref === "string" ? currentScope.current_revision_ref : undefined;
+            const currentPolicyDigest = typeof currentScope.policy_digest === "string" ? currentScope.policy_digest : undefined;
+            if (currentScopeRevisionRef) {
+                if (currentScope.revision_state !== "approved" || !currentPolicyDigest || runBody.scope_revision_ref !== currentScopeRevisionRef || runBody.policy_digest !== currentPolicyDigest || checkpoint.scope_revision_ref !== currentScopeRevisionRef || checkpoint.policy_digest !== currentPolicyDigest)
+                    throw new ContractValidationError("stale_version", "checkpoint ScopeRevision binding is stale");
+                if (!(await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, currentPolicyDigest!, await this.sql.now())))
+                    throw new ContractValidationError("stale_version", "checkpoint ScopeRevision is outside its effective time window");
+            } else if (runBody.scope_revision_ref !== undefined || runBody.policy_digest !== undefined || checkpoint.scope_revision_ref !== undefined || checkpoint.policy_digest !== undefined) {
+                throw new ContractValidationError("stale_version", "checkpoint ScopeRevision binding is unavailable");
+            }
             if (owner?.host_id !== row.owner_host || owner?.agent_id !== row.owner_agent || checkpoint.lease_expires_at !== row.lease_expires_at)
                 throw new ContractValidationError("authorization_error", "checkpoint owner and lease must match the active host attestation");
             if (Number(checkpoint.source_read_seq) > currentSeq || Number(contextManifest.read_seq) !== Number(checkpoint.source_read_seq) || typeof contextManifest.context_snapshot_id !== "string" || typeof contextManifest.builder_version !== "string")
@@ -3098,7 +3558,604 @@ export class AuthorityStore {
             };
         }));
     }
-    /** Keyset-paged coverage cell query with single-value dimension filters. */
+    async commitCoverageManifest(input: {
+        engagement_id: string;
+        scope_revision_ref: string;
+        policy_digest: string;
+        expected_cells: CoverageDimension[];
+        idempotency_key?: string;
+        principal?: string;
+    }): Promise<Awaited<CanonicalRecord>> {
+        validateCoverageManifestInput(input);
+        return this.transaction(async () => {
+        const scopeRevision = await this.get(input.scope_revision_ref);
+        if (!scopeRevision || scopeRevision.kind !== "scope_revision" || scopeRevision.engagement_id !== input.engagement_id || scopeRevision.trust_level !== "L2")
+            throw new ContractValidationError("validation_error", "Coverage manifest ScopeRevision must belong to this Engagement");
+        if (scopeRevision.policy_digest !== input.policy_digest)
+            throw new ContractValidationError("stale_version", "Coverage manifest policy digest does not match its ScopeRevision");
+        const scope = await this.get(String(scopeRevision.scope_ref ?? ""));
+        if (!scope || scope.kind !== "scope" || scope.engagement_id !== input.engagement_id || scope.current_revision_ref !== input.scope_revision_ref || scope.revision_state !== "approved" || scope.policy_digest !== input.policy_digest)
+            throw new ContractValidationError("stale_version", "Coverage manifest requires the current approved ScopeRevision");
+        if (!(await this.scopeRevisionIsEffective(input.engagement_id, input.scope_revision_ref, input.policy_digest, await this.sql.now())))
+            throw new ContractValidationError("stale_version", "Coverage manifest ScopeRevision is outside its effective time window");
+        const expectedCells = input.expected_cells.map((cell) => ({
+            ...cell,
+            conditions: [...new Set(cell.conditions ?? [])].sort(),
+        })).sort((left, right) => coverageDimensions({ id: "", engagement_id: input.engagement_id, kind: "coverage", ...left, scope_revision_ref: input.scope_revision_ref, policy_digest: input.policy_digest } as CoverageCell)
+            .localeCompare(coverageDimensions({ id: "", engagement_id: input.engagement_id, kind: "coverage", ...right, scope_revision_ref: input.scope_revision_ref, policy_digest: input.policy_digest } as CoverageCell)));
+        for (const dimension of expectedCells) {
+            const resource = await this.get(dimension.resource_ref);
+            if (!resource || resource.engagement_id !== input.engagement_id || !["resource", "resource_revision", "service", "endpoint"].includes(String(resource.kind)))
+                throw new ContractValidationError("validation_error", "Coverage manifest resource must belong to this Engagement");
+            if (dimension.resource_revision_ref) {
+                const revision = await this.get(dimension.resource_revision_ref);
+                if (!revision || revision.kind !== "resource_revision" || revision.engagement_id !== input.engagement_id || revision.resource_ref !== dimension.resource_ref)
+                    throw new ContractValidationError("validation_error", "Coverage manifest ResourceRevision must match its Resource");
+            }
+            for (const ref of [dimension.identity_ref, dimension.tenant_ref]) {
+                if (!ref) continue;
+                const related = await this.get(ref);
+                if (!related || related.engagement_id !== input.engagement_id)
+                    throw new ContractValidationError("validation_error", "Coverage manifest dimension references must belong to this Engagement");
+            }
+        }
+        const manifestDigest = hash(json(stablePayload({
+            engagement_id: input.engagement_id,
+            scope_revision_ref: input.scope_revision_ref,
+            policy_digest: input.policy_digest,
+            expected_cells: expectedCells,
+        })));
+        const principal = input.principal ?? "core";
+        return this.createRecord({
+            schema_version: SCHEMA_VERSION,
+            engagement_id: input.engagement_id,
+            kind: "coverage_manifest",
+            scope_revision_ref: input.scope_revision_ref,
+            policy_digest: input.policy_digest,
+            expected_cells: expectedCells,
+            manifest_digest: manifestDigest,
+            provenance: { host_id: principal, producer_id: principal, source_kind: "host" },
+        } as Omit<CanonicalRecord, "id">, "L1", input.idempotency_key, { operation: "coverage.manifest.commit", principal, engagement_id: input.engagement_id });
+        });
+    }
+
+    /** Fixed-watermark Coverage snapshot page with explicit domain visibility. */
+    async coverageSnapshotPage(input: {
+        engagement_id: string;
+        principal_id?: string;
+        cursor_key_root?: string;
+        cursor?: string;
+        page_size?: number;
+        as_of?: number;
+        resource_refs?: string[];
+        manifest_ref?: string;
+        manifest_digest?: string;
+        scope_revision_ref?: string;
+        policy_digest?: string;
+        test_category?: string;
+        status?: string[];
+        include_candidates?: boolean;
+        visibility_mode?: "complete" | "recall";
+    }): Promise<Awaited<{
+        engagement_id: string;
+        manifest_ref?: string;
+        manifest_digest?: string;
+        scope_revision_ref?: string;
+        policy_digest?: string;
+        resource_refs?: string[];
+        cells: Array<Record<string, unknown>>;
+        has_more: boolean;
+        next_cursor?: string;
+        read_seq: number;
+        read_time: string;
+        snapshot_id: string;
+        snapshot_digest: string;
+        expected_cell_count: number;
+        expected_cell_count_complete: boolean;
+        domain_cell_count: number;
+        returned_cell_count: number;
+        expected_items_source: "canonical_manifest" | "observed_cells" | "host_supplied_scope_unverified";
+        manifest_binding_verified: boolean;
+        manifest_binding_state: "not_provided" | "approved" | "stale" | "invalidated" | "outside_validity_window" | "unavailable";
+        missing_items: Array<CoverageDimension & { scope_revision_ref?: string; policy_digest?: string }>;
+        missing_items_complete: boolean;
+        unexpected_dimension_count: number;
+        gap_summary: Record<string, number>;
+        complete_domain: boolean;
+        visibility_disclosure: {
+            mode: "complete" | "recall";
+            included_trust_levels: string[];
+            excluded_trust_count: number;
+            l0_count: number;
+            l1_count: number;
+            l2_count: number;
+            recall_excluded_count: number;
+            expired_count: number;
+            review_due_count: number;
+            inconclusive_count: number;
+        };
+        truncated: boolean;
+        scanned_rows: number;
+    }>> {
+        const limit = input.page_size ?? 50;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
+            throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
+        const resourceRefs = [...new Set(input.resource_refs ?? [])].sort();
+        if (resourceRefs.length > 500 || resourceRefs.some((ref) => typeof ref !== "string" || ref.length === 0))
+            throw new ContractValidationError("validation_error", "resource_refs must contain at most 500 non-empty references");
+        if (input.status && (input.status.length > 16 || input.status.some((status) => typeof status !== "string")))
+            throw new ContractValidationError("validation_error", "status must contain at most 16 status values");
+        const visibilityMode = input.visibility_mode ?? "complete";
+        if (visibilityMode !== "complete" && visibilityMode !== "recall")
+            throw new ContractValidationError("validation_error", "visibility_mode must be complete or recall");
+        const includeCandidates = Boolean(input.include_candidates);
+        const filterPayload = {
+            resource_refs: resourceRefs,
+            manifest_ref: input.manifest_ref ?? null,
+            manifest_digest: input.manifest_digest ?? null,
+            scope_revision_ref: input.scope_revision_ref ?? null,
+            policy_digest: input.policy_digest ?? null,
+            test_category: input.test_category ?? null,
+            status: [...(input.status ?? [])].sort(),
+            include_candidates: includeCandidates,
+            visibility_mode: visibilityMode,
+        };
+        const filterDigest = hash(json(stablePayload(filterPayload)));
+        const now = Date.parse(await this.sql.now());
+        const cursor = input.cursor ? decodeListCursor(input.cursor, this.listCursorKey(false, input.cursor_key_root)) : undefined;
+        const cursorReadSeq = typeof cursor?.read_seq === "number" ? cursor.read_seq : undefined;
+        return (await this.readTransaction(async () => {
+            const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as { seq: number }).seq);
+            const readSeq = cursorReadSeq ?? input.as_of ?? current;
+            if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current)
+                throw new InvalidCursorError("invalid coverage page read sequence");
+            if (cursor && (cursor.list !== "coverage_snapshot" || cursor.principal_id !== (input.principal_id ?? "local") || cursor.engagement_id !== input.engagement_id || cursor.page_size !== limit || cursor.filter_digest !== filterDigest || (input.as_of !== undefined && input.as_of !== readSeq)))
+                throw new InvalidCursorError("coverage page cursor binding mismatch");
+            const asOfTime = typeof cursor?.read_time === "string"
+                ? cursor.read_time
+                : String(((await this.sql.get("SELECT created_at FROM events WHERE commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", readSeq)) as { created_at?: string } | undefined)?.created_at ?? "1970-01-01T00:00:00.000Z");
+            const expiresAt = typeof cursor?.expires_at === "string" ? Date.parse(cursor.expires_at) : undefined;
+            if (cursor && (expiresAt === undefined || !Number.isFinite(expiresAt) || now >= expiresAt))
+                throw new InvalidCursorError("coverage snapshot cursor expired");
+            if (!Number.isFinite(Date.parse(asOfTime))) throw new InvalidCursorError("coverage snapshot read time is invalid");
+
+            let manifest: CanonicalRecord | undefined;
+            if (input.manifest_ref) {
+                const manifestRow = await this.sql.get<{ body: string; trust_level: string }>("SELECT body,trust_level FROM record_versions WHERE id=? AND engagement_id=? AND commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", input.manifest_ref, input.engagement_id, readSeq);
+                if (!manifestRow || manifestRow.trust_level === "L0") throw new ContractValidationError("validation_error", "Coverage manifest is not available in this Engagement at the requested watermark");
+                manifest = JSON.parse(manifestRow.body) as CanonicalRecord;
+                if (manifest.kind !== "coverage_manifest" || !Array.isArray(manifest.expected_cells) || typeof manifest.manifest_digest !== "string")
+                    throw new ContractValidationError("validation_error", "manifest_ref does not identify a Coverage manifest");
+                if (input.manifest_digest && input.manifest_digest !== manifest.manifest_digest)
+                    throw new ContractValidationError("stale_version", "Coverage manifest digest does not match the immutable manifest");
+                if (input.scope_revision_ref && input.scope_revision_ref !== manifest.scope_revision_ref)
+                    throw new ContractValidationError("stale_version", "Coverage manifest ScopeRevision binding does not match");
+                if (input.policy_digest && input.policy_digest !== manifest.policy_digest)
+                    throw new ContractValidationError("stale_version", "Coverage manifest policy binding does not match");
+            }
+            const manifestCells = (Array.isArray(manifest?.expected_cells) ? manifest.expected_cells : []) as CoverageDimension[];
+            if (manifest) {
+                const canonicalManifestCells = manifestCells.map((dimension) => ({ ...dimension, conditions: [...new Set(dimension.conditions ?? [])].sort() }))
+                    .sort((left, right) => coverageDimensions({ id: "", engagement_id: input.engagement_id, kind: "coverage", ...left, scope_revision_ref: manifest!.scope_revision_ref, policy_digest: manifest!.policy_digest } as CoverageCell)
+                        .localeCompare(coverageDimensions({ id: "", engagement_id: input.engagement_id, kind: "coverage", ...right, scope_revision_ref: manifest!.scope_revision_ref, policy_digest: manifest!.policy_digest } as CoverageCell)));
+                const calculatedDigest = hash(json(stablePayload({
+                    engagement_id: input.engagement_id,
+                    scope_revision_ref: manifest.scope_revision_ref,
+                    policy_digest: manifest.policy_digest,
+                    expected_cells: canonicalManifestCells,
+                })));
+                if (calculatedDigest !== manifest.manifest_digest)
+                    throw new ContractValidationError("conflict", "Coverage manifest integrity digest does not match its expected dimensions");
+            }
+            const manifestResourceRefs = [...new Set(manifestCells.map((cell) => cell.resource_ref))].sort();
+            const scopedResourceRefs = resourceRefs.length ? resourceRefs : (manifest ? manifestResourceRefs : []);
+            const scopeRevisionRef = String(manifest?.scope_revision_ref ?? input.scope_revision_ref ?? "") || undefined;
+            const policyDigest = String(manifest?.policy_digest ?? input.policy_digest ?? "") || undefined;
+            const snapshotFilterDigest = hash(json(stablePayload({
+                resource_refs: scopedResourceRefs,
+                manifest_ref: manifest?.id ?? input.manifest_ref ?? null,
+                manifest_digest: manifest?.manifest_digest ?? input.manifest_digest ?? null,
+                scope_revision_ref: scopeRevisionRef ?? null,
+                policy_digest: policyDigest ?? null,
+                test_category: input.test_category ?? null,
+                status: [...new Set(input.status ?? [])].sort(),
+                include_candidates: includeCandidates,
+                visibility_mode: visibilityMode,
+            })));
+            let scopeBindingState: "not_provided" | "approved" | "stale" | "invalidated" | "outside_validity_window" | "unavailable" = scopeRevisionRef ? "unavailable" : "not_provided";
+            if (scopeRevisionRef && policyDigest) {
+                const revisionRow = await this.sql.get<{ body: string; trust_level: string }>("SELECT body,trust_level FROM record_versions WHERE id=? AND engagement_id=? AND commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", scopeRevisionRef, input.engagement_id, readSeq);
+                const revision = revisionRow?.body ? JSON.parse(revisionRow.body) as CanonicalRecord : undefined;
+                if (revision?.kind === "scope_revision" && revisionRow?.trust_level === "L2" && revision.policy_digest === policyDigest) {
+                    const scopeRow = await this.sql.get<{ body: string }>("SELECT body FROM record_versions WHERE id=? AND engagement_id=? AND commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", String(revision.scope_ref ?? ""), input.engagement_id, readSeq);
+                    const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as CanonicalRecord : undefined;
+                    const policy = revision.policy as Record<string, unknown> | undefined;
+                    const validFrom = typeof policy?.valid_from === "string" ? Date.parse(policy.valid_from) : NaN;
+                    const validUntil = typeof policy?.valid_until === "string" ? Date.parse(policy.valid_until) : NaN;
+                    const instant = Date.parse(asOfTime);
+                    scopeBindingState = scope?.revision_state === "invalidated" ? "invalidated"
+                        : scope?.current_revision_ref !== scopeRevisionRef || scope.policy_digest !== policyDigest ? "stale"
+                        : revision.approval_status !== "approved" || scope.revision_state !== "approved" ? "unavailable"
+                        : !Number.isFinite(validFrom) || !Number.isFinite(validUntil) || instant < validFrom || instant >= validUntil ? "outside_validity_window"
+                        : "approved";
+                }
+            }
+            const predicates = ["rv.engagement_id=?", "rv.commit_seq<=?", "NOT EXISTS (SELECT 1 FROM record_versions newer WHERE newer.id=rv.id AND newer.commit_seq<=? AND newer.commit_seq>rv.commit_seq)", `${this.sql.jsonValue("rv.body", "kind")}='coverage'`];
+            const values: Array<string | number> = [input.engagement_id, readSeq, readSeq];
+            const addTextFilter = (field: string, value: string | undefined) => {
+                if (value !== undefined) { predicates.push(`${this.sql.jsonValue("rv.body", field)}=?`); values.push(value); }
+            };
+            if (scopedResourceRefs.length) { predicates.push(`${this.sql.jsonValue("rv.body", "resource_ref")} IN (${scopedResourceRefs.map(() => "?").join(",")})`); values.push(...scopedResourceRefs); }
+            addTextFilter("test_category", input.test_category);
+            addTextFilter("scope_revision_ref", scopeRevisionRef);
+            addTextFilter("policy_digest", policyDigest);
+            if (input.status?.length) { predicates.push(`${this.sql.jsonValue("rv.body", "status")} IN (${input.status.map(() => "?").join(",")})`); values.push(...input.status); }
+            const recallStatus = new Set(["stale", "retracted", "superseded", "archived", "expired", "inconclusive", "contradicted"]);
+            const isExpired = (record: CanonicalRecord) => typeof record.expires_at === "string" && Number.isFinite(Date.parse(String(record.expires_at))) && Date.parse(String(record.expires_at)) <= Date.parse(asOfTime);
+            const isReviewDue = (record: CanonicalRecord) => typeof record.review_after === "string" && Number.isFinite(Date.parse(String(record.review_after))) && Date.parse(String(record.review_after)) <= Date.parse(asOfTime);
+            const isRecallExcluded = (record: CanonicalRecord) => recallStatus.has(String(record.status ?? "")) || record.recall_excluded === true;
+            const status = this.sql.jsonValue("rv.body", "status");
+            const excluded = this.sql.jsonValue("rv.body", "recall_excluded", "boolean");
+            const expires = this.sql.jsonValue("rv.body", "expires_at");
+            const review = this.sql.jsonValue("rv.body", "review_after");
+            const recallPredicates = visibilityMode === "recall" ? [
+                `(${status} IS NULL OR ${status} NOT IN ('stale','retracted','superseded','archived','expired','inconclusive','contradicted'))`,
+                `COALESCE(${excluded},0)<>1`,
+                `(${expires} IS NULL OR ${this.sql.dateValue(expires)}>${this.sql.dateValue("?")})`,
+                `(${review} IS NULL OR ${this.sql.dateValue(review)}>${this.sql.dateValue("?")})`,
+            ] : [];
+            const baseValues = [...values];
+            const maxDomainScan = 10_000;
+            const asCoverageCell = (record: CanonicalRecord) => record as CoverageCell;
+            const manifestKey = (dimension: CoverageDimension) => coverageDimensions({
+                id: "", engagement_id: input.engagement_id, kind: "coverage", ...dimension,
+                conditions: [...(dimension.conditions ?? [])].sort(), scope_revision_ref: scopeRevisionRef, policy_digest: policyDigest,
+            } as CoverageCell);
+            const cursorMeta = cursor?.snapshot_metadata as Record<string, unknown> | undefined;
+            let selected: CanonicalRecord[];
+            let hasMore: boolean;
+            let scannedRows: number;
+            let truncated: boolean;
+            let snapshotId: string;
+            let snapshotDigest: string;
+            let expectedCellCount: number;
+            let expectedCellCountComplete: boolean;
+            let domainCellCount: number;
+            let expectedItemsSource: "canonical_manifest" | "observed_cells" | "host_supplied_scope_unverified";
+            let manifestBindingVerified: boolean;
+            let manifestBindingState: typeof scopeBindingState;
+            let missingItems: Array<CoverageDimension & { scope_revision_ref?: string; policy_digest?: string }>;
+            let missingItemsComplete: boolean;
+            let unexpectedDimensionCount: number;
+            let gapSummary: Record<string, number>;
+            let completeBase: boolean;
+            let visibilityDisclosure: {
+                mode: "complete" | "recall"; included_trust_levels: string[]; excluded_trust_count: number; l0_count: number; l1_count: number; l2_count: number;
+                recall_excluded_count: number; expired_count: number; review_due_count: number; inconclusive_count: number;
+            };
+            if (!cursor) {
+                const allRows = await this.sql.all<{ id: string; trust_level: string; commit_seq: number; body: string }>(
+                    `SELECT rv.id,rv.trust_level,rv.commit_seq,rv.body FROM record_versions rv WHERE ${predicates.join(" AND ")} ORDER BY rv.id LIMIT ?`,
+                    ...baseValues, maxDomainScan + 1,
+                );
+                truncated = allRows.length > maxDomainScan;
+                const boundedRows = allRows.slice(0, maxDomainScan);
+                const records = boundedRows.map((row) => ({ row, record: JSON.parse(row.body) as CanonicalRecord }));
+                const trustExcluded = records.filter(({ row }) => row.trust_level === "L0" || (!includeCandidates && row.trust_level === "L1"));
+                const candidateRecords = records.filter(({ row }) => row.trust_level !== "L0" && (includeCandidates || row.trust_level !== "L1"));
+                const visibleRecords = visibilityMode === "recall"
+                    ? candidateRecords.filter(({ record }) => !isRecallExcluded(record) && !isExpired(record) && !isReviewDue(record))
+                    : candidateRecords;
+                const expectedInQuery = manifestCells.filter((dimension) =>
+                    (!scopedResourceRefs.length || scopedResourceRefs.includes(dimension.resource_ref))
+                    && (input.test_category === undefined || dimension.test_category === input.test_category));
+                const actualKeys = new Set(visibleRecords.map(({ record }) => coverageDimensions(asCoverageCell(record))));
+                const expectedKeys = new Set(manifestCells.map(manifestKey));
+                missingItems = manifest ? expectedInQuery.filter((dimension) => !actualKeys.has(manifestKey(dimension))).map((dimension) => ({
+                    ...dimension, scope_revision_ref: String(manifest!.scope_revision_ref), policy_digest: String(manifest!.policy_digest),
+                })) : [];
+                unexpectedDimensionCount = manifest ? new Set(visibleRecords.map(({ record }) => coverageDimensions(asCoverageCell(record))).filter((key) => !expectedKeys.has(key))).size : 0;
+                const filterNarrowsManifest = Boolean(manifest && (expectedInQuery.length !== manifestCells.length || input.status?.length));
+                const unboundFilters = !manifest && (resourceRefs.length > 0 || input.test_category !== undefined || Boolean(input.status?.length) || Boolean(input.scope_revision_ref) || Boolean(input.policy_digest));
+                const statusCounts: Record<string, number> = {};
+                for (const { record } of candidateRecords) statusCounts[String(record.status ?? "unknown")] = (statusCounts[String(record.status ?? "unknown")] ?? 0) + 1;
+                const disclosedRecallCount = visibilityMode === "recall" ? candidateRecords.filter(({ record }) => isRecallExcluded(record) || isExpired(record) || isReviewDue(record)).length : 0;
+                expectedCellCount = manifest ? expectedInQuery.length : 0;
+                expectedCellCountComplete = Boolean(manifest) && !truncated && !filterNarrowsManifest;
+                domainCellCount = boundedRows.length;
+                expectedItemsSource = manifest ? "canonical_manifest" : unboundFilters ? "host_supplied_scope_unverified" : "observed_cells";
+                manifestBindingVerified = Boolean(manifest) && scopeBindingState === "approved";
+                manifestBindingState = scopeBindingState;
+                missingItemsComplete = Boolean(manifest) && !truncated;
+                gapSummary = statusCounts;
+                const domainHash = hash(json(stablePayload({ rows: records.map(({ row, record }) => ({ id: row.id, trust_level: row.trust_level, commit_seq: Number(row.commit_seq), record })), truncated })));
+                snapshotId = hash(json(stablePayload({ engagement_id: input.engagement_id, read_seq: readSeq, read_time: asOfTime, filter_digest: snapshotFilterDigest })));
+                snapshotDigest = hash(json(stablePayload({ snapshot_id: snapshotId, domain_digest: domainHash, manifest_digest: manifest?.manifest_digest ?? null })));
+                const expectedRefsMatch = !manifest || (!resourceRefs.length || (resourceRefs.length === manifestResourceRefs.length && resourceRefs.every((ref, index) => ref === manifestResourceRefs[index])));
+                // A complete gate needs a canonical expected matrix. Returning every
+                // currently stored cell is still an observed view, not proof of domain completeness.
+                completeBase = Boolean(manifest) && !truncated && trustExcluded.length === 0 && disclosedRecallCount === 0 && !filterNarrowsManifest && !unboundFilters && expectedRefsMatch && missingItems.length === 0 && unexpectedDimensionCount === 0 && manifestBindingVerified;
+                visibilityDisclosure = {
+                    mode: visibilityMode,
+                    included_trust_levels: includeCandidates ? ["L1", "L2"] : ["L2"],
+                    excluded_trust_count: trustExcluded.length,
+                    l0_count: records.filter(({ row }) => row.trust_level === "L0").length,
+                    l1_count: records.filter(({ row }) => row.trust_level === "L1").length,
+                    l2_count: records.filter(({ row }) => row.trust_level === "L2").length,
+                    recall_excluded_count: records.filter(({ record }) => isRecallExcluded(record)).length,
+                    expired_count: records.filter(({ record }) => isExpired(record)).length,
+                    review_due_count: records.filter(({ record }) => isReviewDue(record)).length,
+                    inconclusive_count: records.filter(({ record }) => record.status === "inconclusive").length,
+                };
+                const after = visibilityMode === "recall" ? visibleRecords : candidateRecords;
+                const pageRecords = truncated ? after.slice(0, limit) : after;
+                selected = pageRecords.slice(0, limit).map(({ record }) => record);
+                hasMore = !truncated && pageRecords.length > limit;
+                scannedRows = boundedRows.length;
+            } else {
+                if (!cursorMeta || typeof cursorMeta.snapshot_id !== "string" || typeof cursorMeta.snapshot_digest !== "string")
+                    throw new InvalidCursorError("Coverage snapshot cursor metadata is missing");
+                const afterId = typeof cursor.after_id === "string" ? cursor.after_id : "";
+                const pagePredicates = [...predicates, "rv.id>?"];
+                const pageValues: Array<string | number> = [...baseValues, afterId];
+                pagePredicates.push(includeCandidates ? "rv.trust_level IN ('L1','L2')" : "rv.trust_level='L2'");
+                if (recallPredicates.length) { pagePredicates.push(...recallPredicates); pageValues.push(asOfTime, asOfTime); }
+                const rows = await this.sql.all<{ id: string; body: string }>(`SELECT rv.id,rv.body FROM record_versions rv WHERE ${pagePredicates.join(" AND ")} ORDER BY rv.id LIMIT ?`, ...pageValues, limit + 1);
+                hasMore = rows.length > limit;
+                selected = rows.slice(0, limit).map((row) => JSON.parse(row.body) as CanonicalRecord);
+                scannedRows = rows.length;
+                truncated = cursorMeta.truncated === true;
+                snapshotId = String(cursorMeta.snapshot_id);
+                snapshotDigest = String(cursorMeta.snapshot_digest);
+                expectedCellCount = Number(cursorMeta.expected_cell_count);
+                expectedCellCountComplete = cursorMeta.expected_cell_count_complete === true;
+                domainCellCount = Number(cursorMeta.domain_cell_count);
+                expectedItemsSource = cursorMeta.expected_items_source === "canonical_manifest" ? "canonical_manifest" : cursorMeta.expected_items_source === "host_supplied_scope_unverified" ? "host_supplied_scope_unverified" : "observed_cells";
+                manifestBindingVerified = cursorMeta.manifest_binding_verified === true;
+                manifestBindingState = cursorMeta.manifest_binding_state as typeof scopeBindingState;
+                missingItemsComplete = cursorMeta.missing_items_complete === true;
+                missingItems = Array.isArray(cursorMeta.missing_items)
+                    ? cursorMeta.missing_items as Array<CoverageDimension & { scope_revision_ref?: string; policy_digest?: string }>
+                    : [];
+                if (cursorMeta.missing_items_inline === false) {
+                    const allRows = await this.sql.all<{ id: string; trust_level: string; body: string }>(
+                        `SELECT rv.id,rv.trust_level,rv.body FROM record_versions rv WHERE ${predicates.join(" AND ")} ORDER BY rv.id LIMIT ?`,
+                        ...baseValues, maxDomainScan + 1,
+                    );
+                    const records = allRows.slice(0, maxDomainScan).map((row) => ({ row, record: JSON.parse(row.body) as CanonicalRecord }));
+                    const candidateRecords = records.filter(({ row }) => row.trust_level !== "L0" && (includeCandidates || row.trust_level !== "L1"));
+                    const visibleRecords = visibilityMode === "recall"
+                        ? candidateRecords.filter(({ record }) => !isRecallExcluded(record) && !isExpired(record) && !isReviewDue(record))
+                        : candidateRecords;
+                    const expectedInQuery = manifestCells.filter((dimension) =>
+                        (!scopedResourceRefs.length || scopedResourceRefs.includes(dimension.resource_ref))
+                        && (input.test_category === undefined || dimension.test_category === input.test_category));
+                    const actualKeys = new Set(visibleRecords.map(({ record }) => coverageDimensions(asCoverageCell(record))));
+                    missingItems = manifest ? expectedInQuery.filter((dimension) => !actualKeys.has(manifestKey(dimension))).map((dimension) => ({
+                        ...dimension, scope_revision_ref: String(manifest.scope_revision_ref), policy_digest: String(manifest.policy_digest),
+                    })) : [];
+                    missingItemsComplete = Boolean(manifest) && allRows.length <= maxDomainScan;
+                }
+                unexpectedDimensionCount = Number(cursorMeta.unexpected_dimension_count ?? 0);
+                gapSummary = cursorMeta.gap_summary as Record<string, number>;
+                completeBase = cursorMeta.complete_base === true;
+                visibilityDisclosure = cursorMeta.visibility_disclosure as typeof visibilityDisclosure;
+            }
+            const currentMeta: Record<string, unknown> = {
+                snapshot_id: snapshotId, snapshot_digest: snapshotDigest, expected_cell_count: expectedCellCount,
+                expected_cell_count_complete: expectedCellCountComplete, domain_cell_count: domainCellCount,
+                expected_items_source: expectedItemsSource, manifest_binding_verified: manifestBindingVerified, manifest_binding_state: manifestBindingState,
+                missing_items: missingItems, missing_items_complete: missingItemsComplete, missing_items_inline: true,
+                unexpected_dimension_count: unexpectedDimensionCount, gap_summary: gapSummary, complete_base: completeBase,
+                visibility_disclosure: visibilityDisclosure, truncated,
+            };
+            const lastId = String(selected.at(-1)?.id ?? "");
+            const cursorExpiry = typeof cursor?.expires_at === "string" ? cursor.expires_at : new Date(now + 30 * 60 * 1000).toISOString();
+            const cursorState = {
+                v: 1, list: "coverage_snapshot", principal_id: input.principal_id ?? "local", engagement_id: input.engagement_id,
+                page_size: limit, read_seq: readSeq, read_time: asOfTime, expires_at: cursorExpiry,
+                filter_digest: filterDigest, visibility_mode: visibilityMode, include_candidates: includeCandidates,
+                after_id: lastId, snapshot_metadata: currentMeta,
+            };
+            let nextCursor = hasMore ? encodeListCursor(cursorState, this.listCursorKey(true, input.cursor_key_root)) : undefined;
+            if (nextCursor && nextCursor.length > 4096 && missingItems.length > 0) {
+                currentMeta.missing_items = undefined;
+                currentMeta.missing_items_inline = false;
+                nextCursor = encodeListCursor(cursorState, this.listCursorKey(true, input.cursor_key_root));
+            }
+            if (nextCursor && nextCursor.length > 4096)
+                throw new ContractValidationError("validation_error", "Coverage snapshot continuation metadata exceeds the cursor size limit");
+            return {
+                engagement_id: input.engagement_id,
+                ...(input.manifest_ref === undefined ? {} : { manifest_ref: input.manifest_ref }),
+                ...(manifest === undefined ? (input.manifest_digest === undefined ? {} : { manifest_digest: input.manifest_digest }) : { manifest_digest: String(manifest.manifest_digest) }),
+                ...(scopeRevisionRef === undefined ? {} : { scope_revision_ref: scopeRevisionRef }),
+                ...(policyDigest === undefined ? {} : { policy_digest: policyDigest }),
+                ...(scopedResourceRefs.length ? { resource_refs: scopedResourceRefs } : {}),
+                cells: selected,
+                has_more: hasMore,
+                ...(nextCursor === undefined ? {} : { next_cursor: nextCursor }),
+                read_seq: readSeq,
+                read_time: asOfTime,
+                snapshot_id: snapshotId,
+                snapshot_digest: snapshotDigest,
+                expected_cell_count: expectedCellCount,
+                expected_cell_count_complete: expectedCellCountComplete,
+                domain_cell_count: domainCellCount,
+                returned_cell_count: selected.length,
+                missing_items: missingItems,
+                missing_items_complete: missingItemsComplete,
+                unexpected_dimension_count: unexpectedDimensionCount,
+                expected_items_source: expectedItemsSource,
+                manifest_binding_verified: manifestBindingVerified,
+                manifest_binding_state: manifestBindingState,
+                gap_summary: gapSummary,
+                complete_domain: completeBase,
+                visibility_disclosure: visibilityDisclosure,
+                truncated,
+                scanned_rows: scannedRows,
+            };
+        }));
+    }
+    async commitReportSnapshot(input: {
+        engagement_id: string;
+        expected_authority_seq: number;
+        manifest_ref: string;
+        manifest_digest: string;
+        scope_revision_ref: string;
+        resource_revision_refs: string[];
+        coverage_read_seq: number;
+        coverage_snapshot_digest: string;
+        report_artifact_session_id: string;
+        report_artifact_ref: string;
+        idempotency_key: string;
+        principal?: string;
+    }): Promise<Awaited<CanonicalRecord>> {
+        const principal = input.principal ?? "core";
+        if (!Number.isSafeInteger(input.expected_authority_seq) || input.expected_authority_seq < 0 || !Number.isSafeInteger(input.coverage_read_seq) || input.coverage_read_seq < 0)
+            throw new ContractValidationError("validation_error", "report snapshot watermarks must be non-negative integers");
+        if (!/^sha256:[a-f0-9]{64}$/i.test(input.manifest_digest) || !/^sha256:[a-f0-9]{64}$/i.test(input.coverage_snapshot_digest))
+            throw new ContractValidationError("validation_error", "report snapshot digests must be SHA-256");
+        if (!Array.isArray(input.resource_revision_refs) || input.resource_revision_refs.some((ref) => !UUID_V7_PATTERN.test(ref)))
+            throw new ContractValidationError("validation_error", "report snapshot ResourceRevision references are invalid");
+        if (!input.idempotency_key?.trim()) throw new ContractValidationError("validation_error", "report snapshot commit requires an idempotency key");
+        const requestHash = hash(json(stablePayload({ ...input, principal: undefined })));
+        return this.transaction(async () => {
+            const prior = await this.sql.get<{ result: string; operation: string; principal: string; engagement_id: string; request_hash: string }>("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", input.idempotency_key);
+            if (prior) {
+                if (prior.operation !== "report.snapshot.commit" || prior.principal !== principal || prior.engagement_id !== input.engagement_id || prior.request_hash !== requestHash)
+                    throw new ContractValidationError("idempotency_conflict", "report snapshot idempotency key is bound to another request");
+                return JSON.parse(prior.result) as CanonicalRecord;
+            }
+            const current = Number((await this.sql.get<{ seq: number }>("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events"))!.seq);
+            if (current !== input.expected_authority_seq) throw new ContractValidationError("stale_version", "authority changed before ReportSnapshot commit");
+            if (input.coverage_read_seq !== input.expected_authority_seq) throw new ContractValidationError("stale_version", "ReportSnapshot coverage_read_seq must equal the expected authority watermark");
+            const engagement = await this.get(input.engagement_id);
+            if (!engagement || engagement.kind !== "engagement") throw new ContractValidationError("conflict", "Engagement is unavailable");
+            const manifest = await this.getAt(input.manifest_ref, input.expected_authority_seq);
+            if (!manifest || manifest.kind !== "coverage_manifest" || manifest.engagement_id !== input.engagement_id || manifest.manifest_digest !== input.manifest_digest)
+                throw new ContractValidationError("stale_version", "Coverage manifest is unavailable or has a different digest");
+            const revision = await this.getAt(input.scope_revision_ref, input.expected_authority_seq);
+            if (!revision || revision.kind !== "scope_revision" || revision.engagement_id !== input.engagement_id || revision.policy_digest !== manifest.policy_digest || revision.approval_status !== "approved")
+                throw new ContractValidationError("stale_version", "ReportSnapshot ScopeRevision binding is not current and approved");
+            const scope = typeof engagement.scope_ref === "string" ? await this.getAt(engagement.scope_ref, input.expected_authority_seq) : undefined;
+            if (!scope || scope.current_revision_ref !== input.scope_revision_ref || scope.revision_state !== "approved" || scope.policy_digest !== revision.policy_digest)
+                throw new ContractValidationError("stale_version", "ReportSnapshot Scope pointer is stale or invalidated");
+            if (!(await this.scopeRevisionIsEffective(input.engagement_id, input.scope_revision_ref, String(revision.policy_digest), await this.sql.now()))) throw new ContractValidationError("stale_version", "ReportSnapshot ScopeRevision is outside its approved effective window");
+            const coverageGate = await coverageGateSnapshot(this, input.engagement_id, { manifest_ref: input.manifest_ref, manifest_digest: input.manifest_digest, scope_revision_ref: input.scope_revision_ref, policy_digest: String(revision.policy_digest) });
+            const coverage = await this.coverageSnapshotPage({ engagement_id: input.engagement_id, manifest_ref: input.manifest_ref, manifest_digest: input.manifest_digest, scope_revision_ref: input.scope_revision_ref, policy_digest: String(revision.policy_digest), as_of: input.coverage_read_seq, include_candidates: true, visibility_mode: "complete", page_size: 200 });
+            if (coverage.read_seq !== input.coverage_read_seq || coverage.snapshot_digest !== input.coverage_snapshot_digest)
+                throw new ContractValidationError("stale_version", "Coverage snapshot digest or watermark does not match the requested ReportSnapshot");
+            if (coverageGate.read_seq !== coverage.read_seq || coverageGate.snapshot_digest !== coverage.snapshot_digest) throw new ContractValidationError("conflict", "Coverage gate and snapshot watermarks differ");
+            const gate = coverageGate;
+            if (!coverageGate.complete_domain || !gate.can_close) throw new ContractValidationError("conflict", "ReportSnapshot requires complete Coverage and a passing gate");
+            const artifact = await this.sql.get<{ body: string }>("SELECT body FROM artifact_catalog WHERE engagement_id=? AND session_id=? AND content_ref=?", input.engagement_id, input.report_artifact_session_id, input.report_artifact_ref);
+            const artifactBody = artifact?.body ? JSON.parse(artifact.body) as Record<string, unknown> : undefined;
+            if (!artifactBody || artifactBody.content_status !== "available" || artifactBody.integrity_status !== "verified" || typeof artifactBody.artifact_id !== "string" || typeof artifactBody.version !== "number" || typeof artifactBody.content_hash !== "string")
+                throw new ContractValidationError("conflict", "Report Artifact must be committed and integrity-verified");
+            const manifestCells = Array.isArray(manifest.expected_cells) ? manifest.expected_cells as CoverageDimension[] : [];
+            if (manifestCells.some((cell) => !cell.resource_revision_ref)) throw new ContractValidationError("conflict", "Coverage manifest must pin every ResourceRevision before ReportSnapshot commit");
+            const expectedRevisionRefs = [...new Set(manifestCells.map((cell) => cell.resource_revision_ref!))].sort();
+            const suppliedRevisionRefs = [...new Set(input.resource_revision_refs)].sort();
+            if (json(expectedRevisionRefs) !== json(suppliedRevisionRefs)) throw new ContractValidationError("stale_version", "ReportSnapshot must bind the complete ResourceRevision set from its manifest");
+            for (const ref of suppliedRevisionRefs) {
+                const resourceRevision = await this.getAt(ref, input.expected_authority_seq);
+                const resource = resourceRevision && typeof resourceRevision.resource_ref === "string" ? await this.getAt(resourceRevision.resource_ref, input.expected_authority_seq) : undefined;
+                if (!resourceRevision || resourceRevision.engagement_id !== input.engagement_id || resourceRevision.kind !== "resource_revision" || !resource || Number(resource.revision) !== Number(resourceRevision.revision)) throw new ContractValidationError("stale_version", "ReportSnapshot ResourceRevision is unavailable or no longer current");
+            }
+            const evidenceRows = await this.sql.all<{ body: string; trust_level: string }>(`SELECT rv.body,rv.trust_level FROM record_versions rv WHERE rv.engagement_id=? AND rv.commit_seq<=? AND ${this.sql.jsonValue("rv.body", "kind")}='evidence' AND rv.trust_level<>'L0' AND NOT EXISTS (SELECT 1 FROM record_versions newer WHERE newer.id=rv.id AND newer.commit_seq<=? AND newer.commit_seq>rv.commit_seq) ORDER BY rv.id`, input.engagement_id, input.expected_authority_seq, input.expected_authority_seq);
+            const evidenceRecords = evidenceRows.map((row) => JSON.parse(row.body) as CanonicalRecord);
+            const evidenceRefs = evidenceRecords.map((record) => record.id);
+            const evidenceSnapshotHash = hash(json(stablePayload(evidenceRecords.map((record) => ({ id: record.id, version: record.version, record })))));
+            const coverageGateDigest = hash(json(stablePayload({ can_close: gate.can_close, action_authorized: gate.action_authorized, gaps: gate.gaps })));
+            const snapshotDigest = hash(json(stablePayload({
+                engagement_id: input.engagement_id,
+                manifest_ref: input.manifest_ref,
+                manifest_digest: input.manifest_digest,
+                scope_revision_ref: input.scope_revision_ref,
+                policy_digest: revision.policy_digest,
+                resource_revision_refs: suppliedRevisionRefs,
+                coverage_read_seq: coverage.read_seq,
+                coverage_snapshot_digest: coverage.snapshot_digest,
+                coverage_gate_digest: coverageGateDigest,
+                coverage_can_close: gate.can_close,
+                coverage_complete_domain: coverageGate.complete_domain,
+                coverage_gap_kinds: gate.gaps.map((gap) => gap.kind).sort(),
+                evidence_read_seq: input.expected_authority_seq,
+                evidence_refs: evidenceRefs,
+                evidence_snapshot_hash: evidenceSnapshotHash,
+                report_artifact_session_id: input.report_artifact_session_id,
+                report_artifact_ref: input.report_artifact_ref,
+                report_artifact_id: artifactBody.artifact_id,
+                report_artifact_version: artifactBody.version,
+                report_artifact_digest: artifactBody.content_hash,
+                authority_read_seq: input.expected_authority_seq,
+            })));
+            const record = await this.commit({ id: uuidv7(), schema_version: SCHEMA_VERSION, engagement_id: input.engagement_id, kind: "report_snapshot", manifest_ref: input.manifest_ref, manifest_digest: input.manifest_digest, scope_revision_ref: input.scope_revision_ref, policy_digest: revision.policy_digest, resource_revision_refs: suppliedRevisionRefs, coverage_read_seq: coverage.read_seq, coverage_snapshot_digest: coverage.snapshot_digest, coverage_gate_digest: coverageGateDigest, coverage_can_close: gate.can_close, coverage_complete_domain: coverageGate.complete_domain, coverage_gap_kinds: gate.gaps.map((gap) => gap.kind).sort(), evidence_read_seq: input.expected_authority_seq, evidence_refs: evidenceRefs, evidence_snapshot_hash: evidenceSnapshotHash, report_artifact_session_id: input.report_artifact_session_id, report_artifact_ref: input.report_artifact_ref, report_artifact_id: artifactBody.artifact_id, report_artifact_version: artifactBody.version, report_artifact_digest: artifactBody.content_hash, authority_read_seq: input.expected_authority_seq, snapshot_digest: snapshotDigest, committed_at: await this.sql.now(), provenance: { host_id: principal, producer_id: principal, source_kind: "host" } }, "L2", undefined, { operation: "report.snapshot.commit", principal, engagement_id: input.engagement_id }, false, 0);
+            await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", input.idempotency_key, "report.snapshot.commit", principal, input.engagement_id, requestHash, json(record));
+            return record;
+        });
+    }
+    async closeEngagement(input: { engagement_id: string; expected_engagement_version: number; expected_authority_seq: number; report_snapshot_ref: string; reason: string; idempotency_key: string; principal?: string }): Promise<Awaited<CanonicalRecord>> {
+        const principal = input.principal ?? "core";
+        const requestHash = hash(json(stablePayload({ ...input, principal: undefined })));
+        return this.transaction(async () => {
+            const prior = await this.sql.get<{ result: string; operation: string; principal: string; engagement_id: string; request_hash: string }>("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", input.idempotency_key);
+            if (prior) {
+                if (prior.operation !== "engagement.close" || prior.principal !== principal || prior.engagement_id !== input.engagement_id || prior.request_hash !== requestHash) throw new ContractValidationError("idempotency_conflict", "close idempotency key is bound to another request");
+                return JSON.parse(prior.result) as CanonicalRecord;
+            }
+            const currentSeq = Number((await this.sql.get<{ seq: number }>("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events"))!.seq);
+            if (currentSeq !== input.expected_authority_seq) throw new ContractValidationError("stale_version", "authority changed before close decision");
+            const engagement = await this.get(input.engagement_id);
+            if (!engagement || engagement.kind !== "engagement" || Number(engagement.version) !== input.expected_engagement_version) throw new ContractValidationError("stale_version", "Engagement version changed before close decision");
+            if (engagement.status === "completed" || engagement.status === "archived") throw new ContractValidationError("conflict", "Engagement is already closed");
+            const snapshot = await this.get(input.report_snapshot_ref);
+            if (!snapshot || snapshot.kind !== "report_snapshot" || snapshot.engagement_id !== input.engagement_id || snapshot.coverage_can_close !== true || snapshot.coverage_complete_domain !== true) throw new ContractValidationError("conflict", "close requires a complete passing ReportSnapshot");
+            const snapshotVersion = await this.sql.get<{ commit_seq: number }>("SELECT commit_seq FROM record_versions WHERE id=? ORDER BY commit_seq DESC LIMIT 1", input.report_snapshot_ref);
+            if (!snapshotVersion || Number(snapshotVersion.commit_seq) !== currentSeq || Number(snapshot.authority_read_seq) !== currentSeq - 1 || Number(snapshot.coverage_read_seq) !== Number(snapshot.authority_read_seq))
+                throw new ContractValidationError("stale_version", "ReportSnapshot is stale relative to the expected authority watermark");
+            const scope = typeof engagement.scope_ref === "string" ? await this.get(engagement.scope_ref) : undefined;
+            if (!scope || scope.current_revision_ref !== snapshot.scope_revision_ref || scope.policy_digest !== snapshot.policy_digest || scope.revision_state !== "approved") throw new ContractValidationError("stale_version", "ReportSnapshot ScopeRevision is no longer current");
+            if (!(await this.scopeRevisionIsEffective(input.engagement_id, String(snapshot.scope_revision_ref), String(snapshot.policy_digest), await this.sql.now()))) throw new ContractValidationError("stale_version", "ReportSnapshot ScopeRevision is outside its approved effective window");
+            const running = Number((await this.sql.get<{ count: number }>("SELECT COUNT(*) AS count FROM work_runs WHERE engagement_id=? AND status NOT IN ('completed','failed','cancelled','lost')", input.engagement_id))!.count);
+            const pendingActions = Number((await this.sql.get<{ count: number }>("SELECT COUNT(*) AS count FROM action_intents WHERE run_id IN (SELECT run_id FROM work_runs WHERE engagement_id=?) AND status IN ('authorized','unknown')", input.engagement_id))!.count);
+            if (running || pendingActions) throw new ContractValidationError("conflict", "close requires no unfinished WorkRun or pending ActionIntent");
+            const decidedAt = await this.sql.now();
+            const decision = await this.commit({ id: uuidv7(), schema_version: SCHEMA_VERSION, engagement_id: input.engagement_id, kind: "close_decision", decision: "closed", report_snapshot_ref: snapshot.id, actor_id: principal, reason: input.reason, expected_authority_seq: input.expected_authority_seq, snapshot_read_seq: Number(snapshot.coverage_read_seq), scope_revision_ref: String(snapshot.scope_revision_ref), policy_digest: String(snapshot.policy_digest), coverage_snapshot_digest: String(snapshot.coverage_snapshot_digest), evidence_snapshot_hash: String(snapshot.evidence_snapshot_hash), resource_revision_refs: Array.isArray(snapshot.resource_revision_refs) ? snapshot.resource_revision_refs : [], decided_at: decidedAt, provenance: { host_id: principal, producer_id: principal, source_kind: "host" } }, "L2", undefined, { operation: "engagement.close", principal, engagement_id: input.engagement_id }, false, 0);
+            const updated = await this.commit({ ...engagement, status: "completed", schema_version: SCHEMA_VERSION, display_id: engagement.display_id }, (engagement.trust_level as TrustLevel) ?? "L2", undefined, { operation: "engagement.close", principal, engagement_id: input.engagement_id }, true, Number(engagement.version));
+            const result = { ...decision, engagement: updated };
+            await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", input.idempotency_key, "engagement.close", principal, input.engagement_id, requestHash, json(result));
+            return result;
+        });
+    }
+    async reopenEngagement(input: { engagement_id: string; expected_engagement_version: number; expected_authority_seq: number; close_decision_ref: string; reason: string; idempotency_key: string; principal?: string }): Promise<Awaited<CanonicalRecord>> {
+        const principal = input.principal ?? "core";
+        const requestHash = hash(json(stablePayload({ ...input, principal: undefined })));
+        return this.transaction(async () => {
+            const prior = await this.sql.get<{ result: string; operation: string; principal: string; engagement_id: string; request_hash: string }>("SELECT result,operation,principal,engagement_id,request_hash FROM idempotency WHERE key=?", input.idempotency_key);
+            if (prior) {
+                if (prior.operation !== "engagement.reopen" || prior.principal !== principal || prior.engagement_id !== input.engagement_id || prior.request_hash !== requestHash) throw new ContractValidationError("idempotency_conflict", "reopen idempotency key is bound to another request");
+                return JSON.parse(prior.result) as CanonicalRecord;
+            }
+            const currentSeq = Number((await this.sql.get<{ seq: number }>("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events"))!.seq);
+            if (currentSeq !== input.expected_authority_seq) throw new ContractValidationError("stale_version", "authority changed before reopen decision");
+            const engagement = await this.get(input.engagement_id);
+            const priorDecision = await this.get(input.close_decision_ref);
+            if (!engagement || engagement.kind !== "engagement" || Number(engagement.version) !== input.expected_engagement_version || engagement.status !== "completed") throw new ContractValidationError("stale_version", "Engagement is not at the expected closed version");
+            if (!priorDecision || priorDecision.kind !== "close_decision" || priorDecision.engagement_id !== input.engagement_id || priorDecision.decision !== "closed") throw new ContractValidationError("validation_error", "close_decision_ref is not a closed decision in this Engagement");
+            const latestDecision = await this.sql.get<{ id: string; body: string }>(`SELECT rv.id,rv.body FROM record_versions rv WHERE rv.engagement_id=? AND rv.commit_seq<=? AND ${this.sql.jsonValue("rv.body", "kind")}='close_decision' ORDER BY rv.commit_seq DESC LIMIT 1`, input.engagement_id, currentSeq);
+            if (!latestDecision || latestDecision.id !== priorDecision.id || (JSON.parse(latestDecision.body) as Record<string, unknown>).decision !== "closed")
+                throw new ContractValidationError("stale_version", "close_decision_ref is not the current closed decision");
+            const decidedAt = await this.sql.now();
+            const decision = await this.commit({ id: uuidv7(), schema_version: SCHEMA_VERSION, engagement_id: input.engagement_id, kind: "close_decision", decision: "reopened", report_snapshot_ref: String(priorDecision.report_snapshot_ref), actor_id: principal, reason: input.reason, expected_authority_seq: input.expected_authority_seq, snapshot_read_seq: Number(priorDecision.snapshot_read_seq), scope_revision_ref: String(priorDecision.scope_revision_ref), policy_digest: String(priorDecision.policy_digest), coverage_snapshot_digest: String(priorDecision.coverage_snapshot_digest), evidence_snapshot_hash: String(priorDecision.evidence_snapshot_hash), resource_revision_refs: Array.isArray(priorDecision.resource_revision_refs) ? priorDecision.resource_revision_refs : [], supersedes: priorDecision.id, decided_at: decidedAt, provenance: { host_id: principal, producer_id: principal, source_kind: "host" } }, "L2", undefined, { operation: "engagement.reopen", principal, engagement_id: input.engagement_id }, false, 0);
+            const updated = await this.commit({ ...engagement, status: "active", schema_version: SCHEMA_VERSION, display_id: engagement.display_id }, (engagement.trust_level as TrustLevel) ?? "L2", undefined, { operation: "engagement.reopen", principal, engagement_id: input.engagement_id }, true, Number(engagement.version));
+            const result = { ...decision, engagement: updated };
+            await this.sql.run("INSERT INTO idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", input.idempotency_key, "engagement.reopen", principal, input.engagement_id, requestHash, json(result));
+            return result;
+        });
+    }
+    /** Legacy Coverage query shape backed by the complete-domain snapshot reader. */
     async coverageCellsPage(input: {
         engagement_id: string;
         principal_id?: string;
@@ -3117,60 +4174,42 @@ export class AuthorityStore {
         scanned_rows: number;
         returned_rows: number;
     }>> {
-        const limit = input.page_size ?? 50;
-        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
-            throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
-        const scanBudget = 500;
-        const filterDigest = hash(JSON.stringify({ resource_ref: input.resource_ref ?? null, test_category: input.test_category ?? null, status: input.status ?? null, include_candidates: Boolean(input.include_candidates) }));
+        const page = await this.coverageSnapshotPage({
+            engagement_id: input.engagement_id,
+            principal_id: input.principal_id,
+            cursor_key_root: input.cursor_key_root,
+            cursor: input.cursor,
+            page_size: input.page_size,
+            resource_refs: input.resource_ref === undefined ? undefined : [input.resource_ref],
+            test_category: input.test_category,
+            status: input.status === undefined ? undefined : [input.status],
+            include_candidates: input.include_candidates,
+            visibility_mode: "complete",
+        });
         const projection = (cell: CanonicalRecord): Record<string, unknown> => ({
             id: cell.id, engagement_id: cell.engagement_id, version: cell.version, status: cell.status,
             resource_ref: cell.resource_ref, ...(cell.resource_revision_ref === undefined ? {} : { resource_revision_ref: cell.resource_revision_ref }),
+            ...(cell.scope_revision_ref === undefined ? {} : { scope_revision_ref: cell.scope_revision_ref }),
+            ...(cell.policy_digest === undefined ? {} : { policy_digest: cell.policy_digest }),
             test_category: cell.test_category,
             ...(cell.identity_ref === undefined ? {} : { identity_ref: cell.identity_ref }),
-            ...(cell.role === undefined ? {} : { role: cell.role }),
-            ...(cell.tenant_ref === undefined ? {} : { tenant_ref: cell.tenant_ref }),
-            ...(cell.operation === undefined ? {} : { operation: cell.operation }),
-            ...(cell.parameter === undefined ? {} : { parameter: cell.parameter }),
-            ...(cell.path === undefined ? {} : { path: cell.path }),
-            ...(cell.network_condition === undefined ? {} : { network_condition: cell.network_condition }),
-            ...(cell.method === undefined ? {} : { method: cell.method }),
-            conditions: cell.conditions, evidence_refs: cell.evidence_refs, limitations: cell.limitations,
+            ...(cell.role === undefined ? {} : { role: cell.role }), ...(cell.tenant_ref === undefined ? {} : { tenant_ref: cell.tenant_ref }),
+            ...(cell.operation === undefined ? {} : { operation: cell.operation }), ...(cell.parameter === undefined ? {} : { parameter: cell.parameter }),
+            ...(cell.path === undefined ? {} : { path: cell.path }), ...(cell.network_condition === undefined ? {} : { network_condition: cell.network_condition }),
+            ...(cell.method === undefined ? {} : { method: cell.method }), conditions: cell.conditions, evidence_refs: cell.evidence_refs, limitations: cell.limitations,
             ...(cell.counter_evidence_refs === undefined ? {} : { counter_evidence_refs: cell.counter_evidence_refs }),
             ...(cell.not_applicable_reason === undefined ? {} : { not_applicable_reason: cell.not_applicable_reason }),
             ...(cell.external_result_state === undefined ? {} : { external_result_state: cell.external_result_state }),
-            ...(cell.tested_at === undefined ? {} : { tested_at: cell.tested_at }),
-            updated_at: cell.updated_at,
+            ...(cell.tested_at === undefined ? {} : { tested_at: cell.tested_at }), updated_at: cell.updated_at,
         });
-        return (await this.readTransaction(async () => {
-            const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as { seq: number }).seq);
-            const cursor = input.cursor ? decodeListCursor(input.cursor, this.listCursorKey(false, input.cursor_key_root)) : undefined;
-            const readSeq = cursor ? Number(cursor.read_seq) : current;
-            if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current)
-                throw new InvalidCursorError("invalid coverage page read sequence");
-            if (cursor && (cursor.list !== "coverage_cells" || cursor.principal_id !== (input.principal_id ?? "local") || cursor.engagement_id !== input.engagement_id || cursor.page_size !== limit || cursor.filter_digest !== filterDigest))
-                throw new InvalidCursorError("coverage page cursor binding mismatch");
-            const afterId = typeof cursor?.after_id === "string" ? cursor.after_id : "";
-            const rows = (await this.sql.all(`SELECT id,body FROM records WHERE engagement_id=? AND kind='coverage' AND id>? ${input.include_candidates ? "" : "AND trust_level<>'L1'"} ORDER BY id LIMIT ?`, input.engagement_id, afterId, scanBudget + 1)) as Array<{ id: string; body: string }>;
-            const more = rows.length > scanBudget;
-            const scanned = rows.slice(0, scanBudget);
-            const matches = scanned
-                .map((row) => JSON.parse(row.body) as CanonicalRecord)
-                .filter((cell) => (input.resource_ref === undefined || cell.resource_ref === input.resource_ref)
-                    && (input.test_category === undefined || cell.test_category === input.test_category)
-                    && (input.status === undefined || String(cell.status) === input.status))
-                .map(projection);
-            const selected = matches.slice(0, limit);
-            const hasMore = more || matches.length > limit;
-            const anchorId = matches.length > limit ? selected.at(-1)?.id : more ? scanned.at(-1)?.id : undefined;
-            return {
-                cells: selected,
-                has_more: hasMore,
-                ...(hasMore && anchorId ? { next_cursor: encodeListCursor({ v: 1, list: "coverage_cells", principal_id: input.principal_id ?? "local", engagement_id: input.engagement_id, page_size: limit, read_seq: readSeq, filter_digest: filterDigest, after_id: anchorId }, this.listCursorKey(true, input.cursor_key_root)) } : {}),
-                read_seq: readSeq,
-                scanned_rows: scanned.length,
-                returned_rows: selected.length,
-            };
-        }));
+        return {
+            cells: page.cells.map((cell) => projection(cell as CanonicalRecord)),
+            has_more: page.has_more,
+            ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }),
+            read_seq: page.read_seq,
+            scanned_rows: page.scanned_rows,
+            returned_rows: page.returned_cell_count,
+        };
     }
     async sealExecutionSidecars(runId: string, generation: number, reason = "attempt_lost"): Promise<Awaited<number>> {
         return (await this.transaction(async () => {
@@ -3266,6 +4305,20 @@ export class AuthorityStore {
             if (!workTransitions[priorStatus]?.includes(status))
                 throw new ContractValidationError("conflict", `illegal work run transition: ${priorStatus} -> ${status}`);
             const body = JSON.parse(row.body) as Record<string, unknown>;
+            if (["running", "checkpointed", "completed"].includes(status)) {
+                const itemRow = (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='work_item'", row.work_item_id)) as { body?: string } | undefined;
+                const item = itemRow?.body ? JSON.parse(itemRow.body) as Record<string, unknown> : {};
+                const engagementRow = (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='engagement'", row.engagement_id)) as { body?: string } | undefined;
+                const engagement = engagementRow?.body ? JSON.parse(engagementRow.body) as Record<string, unknown> : {};
+                const currentScopeRef = typeof item.scope_ref === "string" ? item.scope_ref : typeof engagement.scope_ref === "string" ? engagement.scope_ref : undefined;
+                const currentScopeRow = currentScopeRef ? (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", currentScopeRef, row.engagement_id)) as { version?: number; body?: string } | undefined : undefined;
+                const currentScope = currentScopeRow?.body ? JSON.parse(currentScopeRow.body) as Record<string, unknown> : {};
+                const hasRevisionBinding = body.scope_revision_ref !== undefined || currentScope.current_revision_ref !== undefined;
+                if (hasRevisionBinding && (body.scope_ref !== currentScopeRef || Number(body.scope_version) !== Number(currentScopeRow?.version) || currentScope.revision_state !== "approved" || body.scope_revision_ref !== currentScope.current_revision_ref || body.policy_digest !== currentScope.policy_digest))
+                    throw new ContractValidationError("stale_version", "work run ScopeRevision binding is stale; stop and replan or reauthorize");
+                if (hasRevisionBinding && !(await this.scopeRevisionIsEffective(row.engagement_id, String(body.scope_revision_ref), String(body.policy_digest), now)))
+                    throw new ContractValidationError("stale_version", "work run ScopeRevision is outside its effective time window");
+            }
             body.status = status;
             const attemptId = String(body.attempt_ref ?? "");
             const attemptRow = attemptId ? (await this.sql.get("SELECT status,body FROM attempts WHERE attempt_id=? AND run_id=? AND generation=?", attemptId, runId, generation)) as {
@@ -3286,6 +4339,91 @@ export class AuthorityStore {
             return body;
         }));
     }
+    async actionAuditQuery(input: {
+        engagement_id: string;
+        principal_id?: string;
+        cursor_key_root?: string;
+        cursor?: string;
+        page_size?: number;
+        read_seq?: number;
+        action_id?: string;
+        work_run_id?: string;
+        attempt_id?: string;
+        generation?: number;
+        status?: string;
+    }): Promise<ActionAuditQueryResult> {
+        const limit = input.page_size ?? 50;
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
+            throw new ContractValidationError("validation_error", "page_size must be an integer between 1 and 200");
+        if (input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 1))
+            throw new ContractValidationError("validation_error", "generation must be a positive integer");
+        const filterDigest = hash(json({ action_id: input.action_id ?? null, work_run_id: input.work_run_id ?? null, attempt_id: input.attempt_id ?? null, generation: input.generation ?? null, status: input.status ?? null }));
+        return this.readTransaction(async () => {
+            const current = Number(((await this.sql.get("SELECT COALESCE(MAX(commit_seq),0) AS seq FROM events")) as { seq: number }).seq);
+            const cursor = input.cursor ? decodeListCursor(input.cursor, this.listCursorKey(false, input.cursor_key_root)) : undefined;
+            const readSeq = cursor ? Number(cursor.read_seq) : input.read_seq ?? current;
+            if (!Number.isSafeInteger(readSeq) || readSeq < 0 || readSeq > current || (input.read_seq !== undefined && cursor && input.read_seq !== readSeq))
+                throw new InvalidCursorError("invalid action audit read sequence");
+            if (cursor && (cursor.list !== "action_audit" || cursor.principal_id !== (input.principal_id ?? "local") || cursor.engagement_id !== input.engagement_id || cursor.page_size !== limit || cursor.filter_digest !== filterDigest))
+                throw new InvalidCursorError("action audit cursor binding mismatch");
+            const afterSeq = cursor ? Number(cursor.after_seq) : 0;
+            if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || afterSeq > readSeq)
+                throw new InvalidCursorError("invalid action audit cursor position");
+            const where = ["event_type LIKE 'action_intent.%'", "commit_seq<=?", "commit_seq>?"];
+            const values: unknown[] = [readSeq, afterSeq];
+            const engagement = this.sql.jsonValue("payload", "engagement_id");
+            where.push("(" + engagement + "=? OR EXISTS (SELECT 1 FROM object_refs refs WHERE refs.id=events.subject_id AND refs.engagement_id=?))");
+            values.push(input.engagement_id, input.engagement_id);
+            const addFilter = (field: string, value: unknown, type: "text" | "number" = "text") => {
+                if (value === undefined) return;
+                if (field === "action_id") {
+                    where.push("(" + this.sql.jsonValue("payload", field, type) + "=? OR events.subject_id=?)");
+                    values.push(value, value);
+                    return;
+                }
+                where.push(this.sql.jsonValue("payload", field, type) + "=?");
+                values.push(value);
+            };
+            addFilter("action_id", input.action_id);
+            addFilter("work_run_id", input.work_run_id);
+            addFilter("attempt_id", input.attempt_id);
+            addFilter("generation", input.generation, "number");
+            addFilter("status", input.status);
+            const rows = await this.sql.all<{ commit_seq: number; event_id: string; event_type: string; subject_id: string | null; payload: string; hash: string; created_at: string }>(
+                "SELECT commit_seq,event_id,event_type,subject_id,payload,hash,created_at FROM events WHERE " + where.join(" AND ") + " ORDER BY commit_seq LIMIT ?",
+                ...values, limit + 1,
+            );
+            const hasMore = rows.length > limit;
+            const selected = rows.slice(0, limit);
+            const events = selected.map((row): ActionAuditEntry => {
+                const payload = JSON.parse(row.payload) as Record<string, unknown>;
+                return {
+                    event_id: row.event_id,
+                    commit_seq: Number(row.commit_seq),
+                    event_type: row.event_type,
+                    action_id: String(payload.action_id ?? row.subject_id ?? ""),
+                    engagement_id: String(payload.engagement_id ?? input.engagement_id),
+                    work_run_id: String(payload.work_run_id ?? ""),
+                    attempt_id: String(payload.attempt_id ?? ""),
+                    generation: Number(payload.generation ?? 0),
+                    status: String(payload.status ?? ""),
+                    created_at: row.created_at,
+                    hash: row.hash,
+                    payload,
+                };
+            });
+            const timeRow = await this.sql.get<{ created_at?: string }>("SELECT created_at FROM events WHERE commit_seq<=? ORDER BY commit_seq DESC LIMIT 1", readSeq);
+            const last = selected.at(-1);
+            const readTime = timeRow?.created_at ?? (await this.sql.now());
+            return {
+                events,
+                has_more: hasMore,
+                ...(hasMore && last ? { next_cursor: encodeListCursor({ v: 1, list: "action_audit", principal_id: input.principal_id ?? "local", engagement_id: input.engagement_id, page_size: limit, read_seq: readSeq, filter_digest: filterDigest, after_seq: Number(last.commit_seq) }, this.listCursorKey(true, input.cursor_key_root)) } : {}),
+                read_seq: readSeq,
+                read_time: readTime,
+            };
+        });
+    }
     async recordActionIntent(input: {
         action_id?: string;
         run_id: string;
@@ -3301,6 +4439,9 @@ export class AuthorityStore {
         memory_refs?: string[];
         evidence_refs?: string[];
         host_decision_ref?: string;
+        scope_revision_ref?: string;
+        policy_digest?: string;
+        network_provenance?: ActionNetworkProvenance;
         status: "recommended" | "authorized" | "denied" | "executed" | "failed" | "unknown";
         result_ref?: string;
         host_id: string;
@@ -3308,13 +4449,14 @@ export class AuthorityStore {
     }, reconciliation = false): Promise<Awaited<Record<string, unknown>>> {
         const actionId = input.action_id ?? uuidv7();
         return (await this.transaction(async () => {
-            const run = (await this.sql.get("SELECT generation,status,owner_host,owner_agent,engagement_id,lease_expires_at FROM work_runs WHERE run_id=?", input.run_id)) as {
+            const run = (await this.sql.get("SELECT generation,status,owner_host,owner_agent,engagement_id,lease_expires_at,body FROM work_runs WHERE run_id=?", input.run_id)) as {
                 generation?: number;
                 status?: string;
                 owner_host?: string;
                 owner_agent?: string;
                 engagement_id?: string;
                 lease_expires_at?: string;
+                body?: string;
             } | undefined;
             if (!run || Number(run.generation) !== input.generation)
                 throw new ContractValidationError("stale_version", "stale action intent generation");
@@ -3332,12 +4474,61 @@ export class AuthorityStore {
                 body?: string;
             } | undefined;
             const priorBody = prior?.body ? JSON.parse(prior.body) as Record<string, unknown> : {};
-            const body = { ...priorBody, ...input, action_id: actionId, engagement_id: run.engagement_id, owner: { host_id: run.owner_host, agent_id: run.owner_agent }, recorded_at: priorBody.recorded_at ?? (await this.sql.now()) };
+            const attempt = (await this.sql.get("SELECT * FROM attempts WHERE run_id=? AND generation=?", input.run_id, input.generation)) as {
+                attempt_id?: string;
+                status?: string;
+                owner_host?: string;
+                owner_agent?: string;
+                lease_expires_at?: string;
+            } | undefined;
+            if (!attempt?.attempt_id || attempt.owner_host !== run.owner_host || attempt.owner_agent !== run.owner_agent || attempt.lease_expires_at !== run.lease_expires_at || ["completed", "failed", "cancelled", "lost"].includes(String(attempt.status)))
+                throw new ContractValidationError("conflict", "ActionIntent requires the active Attempt");
+            const runBody = run.body ? JSON.parse(run.body) as Record<string, unknown> : {};
+            if ((input.scope_revision_ref !== undefined && input.scope_revision_ref !== runBody.scope_revision_ref) || (input.policy_digest !== undefined && input.policy_digest !== runBody.policy_digest))
+                throw new ContractValidationError("stale_version", "Action binding differs from the active WorkRun ScopeRevision");
+            if (typeof runBody.scope_revision_ref === "string") {
+                const scopeRow = (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, run.engagement_id)) as { version?: number; body?: string } | undefined;
+                const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+                if (Number(scopeRow?.version) !== Number(runBody.scope_version) || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || scope.revision_state !== "approved" || !(await this.scopeRevisionIsEffective(String(run.engagement_id), String(runBody.scope_revision_ref), String(runBody.policy_digest), await this.sql.now())))
+                    throw new ContractValidationError("stale_version", "Action WorkRun ScopeRevision is stale, invalidated, or outside its effective time window");
+            } else {
+                const scopeRow = typeof runBody.scope_ref === "string" ? (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, run.engagement_id)) as { body?: string } | undefined : undefined;
+                const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+                if (scope.current_revision_ref !== undefined || scope.policy_digest !== undefined)
+                    throw new ContractValidationError("stale_version", "Action WorkRun has no binding to the current ScopeRevision");
+            }
+            const body: Record<string, unknown> = {
+                ...priorBody,
+                action_id: actionId,
+                engagement_id: run.engagement_id,
+                run_id: input.run_id,
+                attempt_ref: attempt.attempt_id,
+                generation: input.generation,
+                owner: { host_id: run.owner_host, agent_id: run.owner_agent },
+                host_id: input.host_id,
+                actor_role: input.actor_role ?? "host",
+                mode: input.mode,
+                status: input.status,
+                idempotency_key: actionId,
+                recorded_at: priorBody.recorded_at ?? (await this.sql.now()),
+                scope_revision_ref: runBody.scope_revision_ref,
+                policy_digest: runBody.policy_digest,
+            };
+            for (const field of ["target", "method", "rationale", "uncertainty", "scope", "constraints", "limitations", "memory_refs", "evidence_refs", "host_decision_ref", "result_ref", "network_provenance"] as const) {
+                if (input[field] !== undefined) body[field] = input[field];
+            }
             if (prior) {
                 if (prior.run_id !== input.run_id || Number(prior.generation) !== input.generation)
                     throw new ContractValidationError("conflict", "action intent belongs to another WorkRun or generation");
+                const selectingExecutionMode = prior.status === "recommended" && ["authorized", "denied"].includes(input.status) && priorBody.mode === "llm_recommend";
+                if (priorBody.mode !== undefined && priorBody.mode !== body.mode && !selectingExecutionMode)
+                    throw new ContractValidationError("idempotency_conflict", "ActionIntent mode is immutable after its authorization decision");
+                for (const field of ["target", "method", "rationale", "uncertainty", "scope", "scope_revision_ref", "policy_digest", "constraints", "limitations", "memory_refs", "evidence_refs"] as const) {
+                    if (priorBody[field] !== undefined && json(priorBody[field]) !== json(body[field]))
+                        throw new ContractValidationError("idempotency_conflict", "action intent retry changed its outcome payload (immutable field: " + field + ")");
+                }
                 if (prior.status === input.status) {
-                    const same = ["mode", "target", "method", "host_decision_ref", "result_ref"].every((field) => (priorBody as Record<string, unknown>)[field] === (body as Record<string, unknown>)[field]);
+                    const same = json(actionAuditSnapshot(priorBody)) === json(actionAuditSnapshot(body));
                     if (same)
                         return priorBody;
                     throw new ContractValidationError("idempotency_conflict", "action intent retry changed its outcome payload");
@@ -3356,15 +4547,10 @@ export class AuthorityStore {
                 throw new ContractValidationError("validation_error", "host decision reference is required for host decisions");
             if (["executed", "failed"].includes(input.status) && !input.result_ref)
                 throw new ContractValidationError("validation_error", "resolved action requires a host result reference");
-            const attempt = (await this.sql.get("SELECT * FROM attempts WHERE run_id=? AND generation=?", input.run_id, input.generation)) as {
-                attempt_id?: string;
-                status?: string;
-                owner_host?: string;
-                owner_agent?: string;
-                lease_expires_at?: string;
-            } | undefined;
-            if (!attempt?.attempt_id || attempt.owner_host !== run.owner_host || attempt.owner_agent !== run.owner_agent || attempt.lease_expires_at !== run.lease_expires_at || ["completed", "failed", "cancelled", "lost"].includes(String(attempt.status)))
-                throw new ContractValidationError("conflict", "ActionIntent requires the active Attempt");
+            assertCredentialFreeNetworkReference(String(body.target ?? ""), "action target");
+            if (typeof body.result_ref === "string") assertCredentialFreeNetworkReference(body.result_ref, "result_ref");
+            if (typeof body.host_decision_ref === "string") assertCredentialFreeNetworkReference(body.host_decision_ref, "host_decision_ref");
+            validateActionNetworkProvenance(body.network_provenance as ActionNetworkProvenance | undefined);
             const actionRecord = {
                 id: actionId,
                 schema_version: SCHEMA_VERSION,
@@ -3389,6 +4575,9 @@ export class AuthorityStore {
                 owner: { host_id: run.owner_host, agent_id: run.owner_agent },
                 host_decision_ref: input.host_decision_ref,
                 result_ref: input.result_ref,
+                scope_revision_ref: body.scope_revision_ref,
+                policy_digest: body.policy_digest,
+                network_provenance: body.network_provenance,
                 idempotency_key: actionId,
             };
             validateContract("actionIntent", actionRecord);
@@ -3398,9 +4587,33 @@ export class AuthorityStore {
             const runRow = (await this.sql.get("SELECT body FROM work_runs WHERE run_id=?", input.run_id)) as {
                 body?: string;
             } | undefined;
-            const runBody = runRow?.body ? JSON.parse(runRow.body) as Record<string, unknown> : {};
-            (await this.writeExecutionSidecar({ engagement_id: String(run.engagement_id), session_id: typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined, work_run_id: input.run_id, attempt_id: attempt.attempt_id, generation: input.generation, kind: input.status === "recommended" || input.status === "authorized" || input.status === "denied" ? "action" : "result", reference_id: actionId, metadata: { action_id: actionId, status: input.status, mode: input.mode, host_decision_ref: input.host_decision_ref, result_ref: input.result_ref, artifact_refs: [] } }));
-            (await this.nextEvent(`action_intent.${input.status}`, { mode: input.mode, status: input.status, host_id: input.host_id, agent_id: run.owner_agent, work_run_id: input.run_id, generation: input.generation, host_decision_ref: input.host_decision_ref, result_ref: input.result_ref }, actionId));
+            const sidecarRunBody = runRow?.body ? JSON.parse(runRow.body) as Record<string, unknown> : {};
+            (await this.writeExecutionSidecar({ engagement_id: String(run.engagement_id), session_id: typeof sidecarRunBody.task_session_ref === "string" ? sidecarRunBody.task_session_ref : undefined, work_run_id: input.run_id, attempt_id: attempt.attempt_id, generation: input.generation, kind: input.status === "recommended" || input.status === "authorized" || input.status === "denied" ? "action" : "result", reference_id: actionId, metadata: { action_id: actionId, status: input.status, mode: input.mode, host_decision_ref: input.host_decision_ref, result_ref: input.result_ref, artifact_refs: [] } }));
+            const snapshot = actionAuditSnapshot(body);
+            (await this.nextEvent(`action_intent.${input.status}`, {
+                action_id: actionId,
+                engagement_id: String(run.engagement_id),
+                actor_id: input.host_id,
+                actor_role: input.actor_role ?? "host",
+                host_id: run.owner_host,
+                agent_id: run.owner_agent,
+                owner: { host_id: run.owner_host, agent_id: run.owner_agent },
+                work_run_id: input.run_id,
+                attempt_id: attempt.attempt_id,
+                generation: input.generation,
+                mode: input.mode,
+                status: input.status,
+                from_status: prior?.status ?? null,
+                before_snapshot: prior ? actionAuditSnapshot(priorBody) : null,
+                after_snapshot: snapshot,
+                scope_revision_ref: body.scope_revision_ref,
+                policy_digest: body.policy_digest,
+                network_provenance: body.network_provenance,
+                host_decision_ref: body.host_decision_ref,
+                result_ref: body.result_ref,
+                idempotency_key: actionId + ":" + input.status,
+                input_hash: hash(json(snapshot)),
+            }, actionId));
             return body;
         }));
     }
@@ -3443,6 +4656,9 @@ export class AuthorityStore {
             version?: number;
             body?: string;
         } | undefined : undefined;
+        const currentScopeBody = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+        const currentScopeRevisionRef = typeof currentScopeBody.current_revision_ref === "string" ? currentScopeBody.current_revision_ref : undefined;
+        const currentPolicyDigest = typeof currentScopeBody.policy_digest === "string" ? currentScopeBody.policy_digest : undefined;
         const pendingActions = (await this.pendingActionIntents(runId));
         const artifactRows = (await this.sql.all("SELECT body FROM artifact_catalog WHERE engagement_id=? AND session_id=? ORDER BY stored_at,content_ref", row.engagement_id, String(run.task_session_ref ?? ""))) as Array<{
             body: string;
@@ -3458,10 +4674,14 @@ export class AuthorityStore {
         const actionRefsValid = !checkpoint || ((checkpoint.action_refs as unknown[]).every((ref) => typeof ref === "string" && currentActions.some((item) => item.action_id === ref)) && (checkpoint.tool_result_refs as unknown[]).every((ref) => typeof ref === "string" && verifiedResults.includes(ref)));
         const scopeValid = currentScopeRef === (checkpoint?.scope_ref as string | undefined)
             && (!currentScopeRef || Boolean(scopeRow?.body && scopeRow.engagement_id === row.engagement_id && !this.isRecalled(JSON.parse(scopeRow.body) as CanonicalRecord, now)));
+        const scopeRevisionValid = currentScopeRevisionRef
+            ? currentScopeBody.revision_state === "approved" && run.scope_revision_ref === currentScopeRevisionRef && run.policy_digest === currentPolicyDigest && checkpoint?.scope_revision_ref === currentScopeRevisionRef && checkpoint?.policy_digest === currentPolicyDigest && await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, String(currentPolicyDigest ?? ""), now)
+            : run.scope_revision_ref === undefined && run.policy_digest === undefined && checkpoint?.scope_revision_ref === undefined && checkpoint?.policy_digest === undefined;
         const premiseChecks = {
             engagement: run.engagement_id === row.engagement_id,
             work_item: Boolean(workItem && workItemRow && workItemRow.engagement_id === row.engagement_id && !this.isRecalled(workItem as CanonicalRecord, now) && run.work_item_id === row.work_item_id && (!checkpoint || (checkpoint.work_item_ref === row.work_item_id && Number(checkpoint.work_item_version) === Number(workItemRow.version) && Number(checkpoint.target_version) === Number(workItem.target_version ?? workItemRow.version)))),
             scope: scopeValid && Boolean(!currentScopeRef || Number(checkpoint?.scope_version) === Number(scopeRow?.version)),
+            scope_revision: scopeRevisionValid,
             checkpoint: Boolean(checkpoint),
             attempt: !checkpoint || (checkpoint.attempt_ref === run.attempt_ref && checkpoint.generation === row.generation),
             source_sequence: checkpointReadSeq === undefined || checkpointReadSeq <= currentReadSeq,
@@ -3487,24 +4707,88 @@ export class AuthorityStore {
         });
     }
     async recordLateResult(input: {
-        run_id: string;
+        engagement_id: string;
+        work_run_id: string;
         generation: number;
-        result_ref: string;
-        result: Record<string, unknown>;
+        action_id: string;
+        status: "executed" | "failed" | "unknown";
+        result_ref?: string;
+        host_id: string;
+        network_provenance?: ActionNetworkProvenance;
     }): Promise<Awaited<Record<string, unknown>>> {
-        const forbidden = /(?:token|secret|credential|password|cookie|authorization|bearer|body|packet|hidden_reasoning|chain_of_thought)/i;
-        const result = Object.fromEntries(Object.entries(input.result ?? {}).filter(([key]) => !forbidden.test(key)).map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 512) : value]));
-        const late = { late_result_id: uuidv7(), run_id: input.run_id, generation: input.generation, result_ref: input.result_ref, result, status: "late_result_quarantine", recorded_at: (await this.sql.now()) };
+        if (input.status !== "unknown" && !input.result_ref)
+            throw new ContractValidationError("validation_error", "resolved late Action result requires a host result reference");
+        if (input.result_ref) assertCredentialFreeNetworkReference(input.result_ref, "result_ref");
+        validateActionNetworkProvenance(input.network_provenance);
+        const runId = input.work_run_id;
         return (await this.transaction(async () => {
-            const run = (await this.sql.get("SELECT body,engagement_id FROM work_runs WHERE run_id=?", input.run_id)) as {
+            const run = (await this.sql.get("SELECT body,engagement_id,generation FROM work_runs WHERE run_id=?", runId)) as {
                 body?: string;
                 engagement_id?: string;
+                generation?: number;
             } | undefined;
-            const runBody = run?.body ? JSON.parse(run.body) as Record<string, unknown> : {};
-            (await this.writeExecutionSidecar({ engagement_id: String(run?.engagement_id ?? ""), session_id: typeof runBody.task_session_ref === "string" ? runBody.task_session_ref : undefined, work_run_id: input.run_id, attempt_id: typeof runBody.attempt_ref === "string" ? runBody.attempt_ref : undefined, generation: input.generation, kind: "result", reference_id: late.late_result_id, metadata: { status: late.status, result_ref: input.result_ref, quarantine: true, artifact_refs: [] } }));
-            (await this.sql.run("INSERT INTO action_intents(action_id,run_id,generation,status,body,updated_at) VALUES(?,?,?,?,?,?)", late.late_result_id, input.run_id, input.generation, late.status, json(late), (await this.sql.now())));
-            (await this.nextEvent("action_intent.late_result_quarantine", { generation: input.generation, result_ref: input.result_ref }, late.late_result_id));
-            return late;
+            if (!run || run.engagement_id !== input.engagement_id)
+                throw new ContractValidationError("authorization_error", "late Action result is not in this Engagement");
+            if (input.generation >= Number(run.generation))
+                throw new ContractValidationError("stale_version", "late Action result must belong to an older generation");
+            const attempt = (await this.sql.get("SELECT attempt_id,owner_host,owner_agent,generation FROM attempts WHERE run_id=? AND generation=?", runId, input.generation)) as {
+                attempt_id?: string;
+                owner_host?: string;
+                owner_agent?: string;
+                generation?: number;
+            } | undefined;
+            if (!attempt || attempt.owner_host !== input.host_id)
+                throw new ContractValidationError("authorization_error", "late Action result actor does not own the historic Attempt");
+            const action = (await this.sql.get("SELECT status,body FROM action_intents WHERE action_id=? AND run_id=? AND generation=?", input.action_id, runId, input.generation)) as {
+                status?: string;
+                body?: string;
+            } | undefined;
+            if (!action?.body)
+                throw new ContractValidationError("conflict", "late Action result has no matching historic ActionIntent");
+            const actionBody = JSON.parse(action.body) as Record<string, unknown>;
+            if (actionBody.attempt_ref !== attempt.attempt_id)
+                throw new ContractValidationError("conflict", "late Action result Attempt does not match the ActionIntent");
+            const quarantineKey = input.action_id + ":late:" + input.generation + ":" + hash(input.result_ref ?? input.status);
+            const requestHash = hash(json({ action_id: input.action_id, engagement_id: input.engagement_id, run_id: runId, attempt_id: attempt.attempt_id, generation: input.generation, status: input.status, result_ref: input.result_ref, network_provenance: input.network_provenance }));
+            const priorEvent = (await this.sql.get("SELECT event_id,payload,created_at FROM events WHERE event_type='action_intent.late_result_quarantine' AND subject_id=? AND " + this.sql.jsonValue("payload", "idempotency_key") + "=? LIMIT 1", input.action_id, quarantineKey)) as {
+                event_id?: string;
+                payload?: string;
+                created_at?: string;
+            } | undefined;
+            if (priorEvent?.payload) {
+                const priorPayload = JSON.parse(priorEvent.payload) as Record<string, unknown>;
+                if (priorPayload.input_hash !== requestHash)
+                    throw new ContractValidationError("idempotency_conflict", "late Action result retry changed its reported outcome");
+                return { late_result_id: priorEvent.event_id, action_id: input.action_id, engagement_id: input.engagement_id, work_run_id: runId, attempt_id: attempt.attempt_id, generation: input.generation, status: "late_result_quarantine", result_status: input.status, result_ref: input.result_ref, host_id: input.host_id, recorded_at: priorEvent.created_at };
+            }
+            const snapshot = actionAuditSnapshot(actionBody);
+            const event = await this.nextEvent("action_intent.late_result_quarantine", {
+                action_id: input.action_id,
+                engagement_id: input.engagement_id,
+                actor_id: input.host_id,
+                actor_role: "host",
+                host_id: input.host_id,
+                agent_id: attempt.owner_agent,
+                owner: actionBody.owner,
+                work_run_id: runId,
+                attempt_id: attempt.attempt_id,
+                generation: input.generation,
+                mode: actionBody.mode,
+                status: "late_result_quarantine",
+                result_status: input.status,
+                result_ref: input.result_ref,
+                quarantine_reason: "stale_generation",
+                current_generation: Number(run.generation),
+                from_status: action.status,
+                before_snapshot: snapshot,
+                after_snapshot: snapshot,
+                scope_revision_ref: actionBody.scope_revision_ref,
+                policy_digest: actionBody.policy_digest,
+                network_provenance: input.network_provenance,
+                idempotency_key: quarantineKey,
+                input_hash: requestHash,
+            }, input.action_id);
+            return { late_result_id: event.event_id, action_id: input.action_id, engagement_id: input.engagement_id, work_run_id: runId, attempt_id: attempt.attempt_id, generation: input.generation, status: "late_result_quarantine", result_status: input.status, result_ref: input.result_ref, host_id: input.host_id, recorded_at: event.created_at };
         }));
     }
     async submitReview(input: {
