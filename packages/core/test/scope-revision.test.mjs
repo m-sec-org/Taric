@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AuthorityStore, createCoreService, createPrincipal, normalizeScopePolicy, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const digest = (value) => `sha256:${value.repeat(64)}`;
 
@@ -186,6 +187,32 @@ test("invalidating a revision appends a fact and fences WorkRun lifecycle until 
     const history = await store.scopeQuery({ engagement_id: engagement.id, scope_id: scope.id, page_size: 20 });
     assert.ok(history.records.some((record) => record.id === revised.revision.id));
     assert.ok(history.records.some((record) => record.id === invalidated.invalidation.id));
+  } finally {
+    await store.close();
+  }
+});
+
+test("unapproved Scopes cannot claim WorkRuns and legacy unbound WorkRuns cannot record Actions", async () => {
+  const store = new AuthorityStore();
+  try {
+    const engagement = await store.initializeEngagement({ name: "pending scope", scope: { allowed_targets: ["example.test"], excluded_targets: [], rules_of_engagement_ref: "legacy-unverified" } });
+    const work = await store.commit({ id: uuidv7(), engagement_id: engagement.id, kind: "work_item", title: "blocked task", status: "queued" }, "L2");
+    await assert.rejects(
+      store.claimWorkRun({ engagement_id: engagement.id, work_item_id: work.id, host_id: "host", agent_id: "worker" }),
+      (error) => error.code === "conflict" && /current approved ScopeRevision/.test(error.message),
+    );
+
+    const governed = await ensureApprovedScope(store, engagement.id);
+    const run = await store.claimWorkRun({ engagement_id: engagement.id, work_item_id: work.id, host_id: "host", agent_id: "worker" });
+    assert.equal(run.scope_revision_ref, governed.revision.id);
+    const legacyBody = { ...run };
+    delete legacyBody.scope_revision_ref;
+    delete legacyBody.policy_digest;
+    await store.sql.run("UPDATE work_runs SET body=? WHERE run_id=?", JSON.stringify(legacyBody), run.run_id);
+    await assert.rejects(
+      store.recordActionIntent({ run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "recommended", host_id: "host" }),
+      (error) => error.code === "stale_version" && /no binding to the current ScopeRevision/.test(error.message),
+    );
   } finally {
     await store.close();
   }

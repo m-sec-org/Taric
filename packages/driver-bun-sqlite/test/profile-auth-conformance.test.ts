@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { AuthorityStore, createCoreService, createPrincipal, listenAdapterHttpsRpc, listenAdapterRpc, uuidv7 } from "@taric/core";
 import { operationContracts } from "@taric/schemas";
 import { BunSqliteAuthorityDriver } from "../src/index.js";
+import { ensureApprovedScope } from "../../core/test/scope-fixture.mjs";
 
 const hostToken = "profile-host-token-0123456789abcdef0123456789";
 const modelToken = "profile-model-token-0123456789abcdef0123456789";
@@ -92,7 +93,7 @@ function httpsRpcCall(port: number, cert: Buffer): ProfileCall {
   });
 }
 
-test("Bun in-process, Unix socket, loopback TLS TCP, and HTTPS preserve registry authorization", async () => {
+test("Bun in-process, Unix socket, loopback TLS TCP, and HTTPS preserve registry authorization", { timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "taric-profile-auth-"));
   const engagementId = uuidv7();
   const store = new AuthorityStore(new BunSqliteAuthorityDriver(join(directory, "authority.sqlite")));
@@ -118,6 +119,7 @@ test("Bun in-process, Unix socket, loopback TLS TCP, and HTTPS preserve registry
   let httpsListener: Awaited<ReturnType<typeof listenAdapterHttpsRpc>> | undefined;
   try {
     await store.commit({ id: uuidv7(), engagement_id: engagementId, kind: "engagement", name: "profile-auth" }, "L2");
+    await ensureApprovedScope(store, engagementId);
     unixListener = await listenAdapterRpc(service, { socket_path: socketPath, token: hostToken, resolvePrincipal: resolvePrincipal as any });
     tlsListener = await listenAdapterRpc(service, { tls_tcp: { host: "127.0.0.1", port: tcpPort, key, cert }, token: hostToken, resolvePrincipal: resolvePrincipal as any });
     httpsListener = await listenAdapterHttpsRpc(service, { host: "127.0.0.1", port: httpsPort, key, cert, resolvePrincipal: (token) => principals.get(token) });

@@ -7,6 +7,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AdapterDispatchFailure, AuthorityStore, createCoreService, createPrincipal, dispatchWithAdapterRecovery, listenAdapterHttpsRpc, listenAdapterRpc, listenArtifactBinaryRpc, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function request(socketPath, params) {
   return new Promise((resolve, reject) => {
@@ -78,6 +79,7 @@ test("adapter retries an idempotent post-dispatch response loss with the exact s
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
   await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "retry-idempotent" }, "L2");
+  await ensureApprovedScope(store, engagement_id);
   const work_item_id = uuidv7();
   await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "retry", status: "queued", acceptance_criteria: ["finish"] }, "L2");
   const service = await createCoreService(store);
@@ -154,6 +156,7 @@ test("ambiguous non-idempotent dispatch returns indeterminate without replay and
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
   await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "retry-ambiguous" }, "L2");
+  await ensureApprovedScope(store, engagement_id);
   const work_item_id = uuidv7();
   await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "claim", status: "queued", acceptance_criteria: ["worker"] }, "L2");
   const service = await createCoreService(store);

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AuthorityStore, createCoreService, createPrincipal, policyDigest, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const workItem = (engagement_id, overrides = {}) => ({
   id: uuidv7(), engagement_id, kind: "work_item", title: "verify target",
@@ -67,6 +68,7 @@ test("work.query filters by resource and status and joins active runs from one s
   const itemB = workItem(engagement_id, { resource_refs: [resourceB] });
   const itemNone = workItem(engagement_id);
   for (const item of [itemA, itemA2, itemB, itemNone]) (await store.commit(item, "L2"));
+  await ensureApprovedScope(store, engagement_id);
   const run = await store.claimWorkRun({ work_item_id: itemA2.id, engagement_id, host_id: "host-a", agent_id: "agent-1" });
   const host = createPrincipal("host", "host-a", engagement_id);
   try {

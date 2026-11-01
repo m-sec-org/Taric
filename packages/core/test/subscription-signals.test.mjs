@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { AuthorityStore, createCoreService, createPrincipal, listenAdapterRpc, resumeContextDelta, uuidv7 } from "../dist/index.js";
 import { writeRpcNotification } from "../dist/adapter-rpc.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const claim = (engagement_id, index) => ({
   id: uuidv7(), engagement_id, kind: "claim", proposition: `burst-${index}`, status: "proposed", evidence_refs: [], limitations: ["signal fixture"],
@@ -162,6 +163,7 @@ test("lease threshold wakes without a database commit", async () => {
   let subscription;
   let clock;
   try {
+    await ensureApprovedScope(store, engagement_id, "signals.invalid");
     await store.commit(item, "L2");
     const run = await store.claimWorkRun({ work_item_id: item.id, engagement_id, host_id: host.id, agent_id: "worker-a", ttl_ms: 31_000 });
     clock = fakeClock(Date.parse(run.lease_expires_at) - 31_000);

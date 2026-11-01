@@ -11,6 +11,7 @@ import {
   uuidv7,
 } from "../dist/index.js";
 import { AuthorityStore } from "../dist/store.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 /** 最小 Pi ExtensionAPI 契约测试替身：只要求 on(event, handler)。 */
 function fakePiExtensionApi() {
@@ -101,8 +102,9 @@ test("Pi 1.4 hooks use explicit host bindings for proposal, checkpoint, and acti
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
   const engagement_id = uuidv7();
+  const { scope } = await ensureApprovedScope(store, engagement_id);
   const work_item_id = uuidv7();
-  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", scope_ref: scope.id, title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
   const host = createPrincipal("host", "pi-host", engagement_id);
   const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" }));
   const action_id = uuidv7();
@@ -121,7 +123,10 @@ test("Pi 1.4 hooks use explicit host bindings for proposal, checkpoint, and acti
       generation: run.generation,
       target_version: run.target_version,
       work_item_version: run.work_item_version,
+      scope_ref: run.scope_ref,
       scope_version: run.scope_version,
+      scope_revision_ref: run.scope_revision_ref,
+      policy_digest: run.policy_digest,
       owner: run.owner,
       lease_expires_at: run.lease_expires_at,
       source_read_seq: run.read_seq,
@@ -194,8 +199,9 @@ test("opaque successful tool results do not become canonical observations or evi
 test("resume packet reports conservative premise checks and stale checkpoint attempt", async () => {
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
+  const { scope } = await ensureApprovedScope(store, engagement_id);
   const work_item_id = uuidv7();
-  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", scope_ref: scope.id, title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
   // 300ms 租约 + 350ms 强制过期：语义不变（checkpoint 在有效期内、reclaim 在过期后），
   // 但给负载下的调度抖动留余量（原 50ms 在并发套件中偶发过期）。
   const first = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi-a", agent_id: "agent-a", ttl_ms: 300 }));
@@ -206,7 +212,10 @@ test("resume packet reports conservative premise checks and stale checkpoint att
     generation: first.generation,
     target_version: first.target_version,
     work_item_version: first.work_item_version,
+    scope_ref: first.scope_ref,
     scope_version: first.scope_version,
+    scope_revision_ref: first.scope_revision_ref,
+    policy_digest: first.policy_digest,
     owner: first.owner,
     lease_expires_at: first.lease_expires_at,
     source_read_seq: first.read_seq,
@@ -276,8 +285,9 @@ test("same-major uncertified Pi version runs the read-only safe subset without a
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
   const engagement_id = uuidv7();
+  const { scope } = await ensureApprovedScope(store, engagement_id);
   const work_item_id = uuidv7();
-  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
+  (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", scope_ref: scope.id, title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
   const host = createPrincipal("host", "pi-host", engagement_id);
   const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" }));
   // 未认证的同 major 版本：register 允许，能力收敛到只读安全子集。

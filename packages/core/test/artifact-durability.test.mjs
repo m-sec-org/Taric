@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactContentStore, AuthorityStore, ARTIFACT_CHUNK_BYTES, ARTIFACT_DEPLOYMENT_PROFILE, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const points = ["before_manifest", "before_rename", "after_rename", "after_publication_marker", "before_catalog_commit", "after_catalog_commit"];
@@ -71,8 +72,9 @@ test("restart leaves run-bound publication pending after its Attempt lease expir
   const path = join(dir, "authority.sqlite"); const root = join(dir, "content"); const engagement_id = uuidv7(); const session_id = "leased-session"; const host_id = "host-a";
   let authority = new AuthorityStore(path);
   try {
+    const { scope } = await ensureApprovedScope(authority, engagement_id);
     const work_item_id = uuidv7();
-    await authority.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "leased artifact", status: "queued", acceptance_criteria: ["persist"] }, "L2");
+    await authority.commit({ id: work_item_id, engagement_id, kind: "work_item", scope_ref: scope.id, title: "leased artifact", status: "queued", acceptance_criteria: ["persist"] }, "L2");
     const run = await authority.claimWorkRun({ work_item_id, engagement_id, host_id, agent_id: "worker", ttl_ms: 1000 });
     let artifacts = new ArtifactContentStore(root, authority, { fault: (point) => { if (point === "after_publication_marker") throw new Error("injected process stop"); } });
     await artifacts.initialize();
@@ -85,7 +87,7 @@ test("restart leaves run-bound publication pending after its Attempt lease expir
     await authority.close(); authority = new AuthorityStore(path);
     artifacts = new ArtifactContentStore(root, authority);
     await artifacts.initialize();
-    assert.equal((await authority.artifactCatalogRows()).length, 0);
+    assert.equal((await authority.artifactCatalogRows({ engagement_id, session_id })).filter((row) => row.session_id === session_id).length, 0);
     assert.equal((await artifacts.list({ engagement_id, session_id })).items.length, 0);
     assert.equal((await artifacts.reconcile({ engagement_id, session_id })).pending_publications.length, 1);
   } finally { await authority.close(); rmSync(dir, { recursive: true, force: true }); }

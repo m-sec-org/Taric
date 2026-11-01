@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AuthorityStore, ContractValidationError, PATCH_TO_QUERY_P95_BUDGET_MS, buildContextPack, createCoverageCell, createNegativeObservation, createPrincipal, createCoreService, publishProjection, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 test("single-host patch-to-query visibility stays within the documented p95 budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "taric-latency-"));
@@ -170,6 +171,7 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
   const store = new AuthorityStore();
   const engagement_id = uuidv7();
   try {
+    const { scope } = await ensureApprovedScope(store, engagement_id);
     const record_id = uuidv7();
     const claim_id = uuidv7();
     const evidence_id = uuidv7();
@@ -206,9 +208,9 @@ test("minimum L2 gate, bounded coverage and active WorkRun state hold without au
     assert.equal(negative.bounded, true);
 
     const work_item_id = uuidv7();
-    (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", goal: "verify admin access", acceptance: ["evidence recorded"], risk_budget: { actions: 1 } }, "L2"));
+    (await store.commit({ id: work_item_id, engagement_id, kind: "work_item", scope_ref: scope.id, goal: "verify admin access", acceptance: ["evidence recorded"], risk_budget: { actions: 1 } }, "L2"));
     const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: "pi", agent_id: "worker-a", ttl_ms: 60_000 }));
-    const checkpoint = (await store.commitCheckpoint(run.run_id, run.generation, "pi", { work_item_ref: work_item_id, work_run_ref: run.run_id, attempt_ref: run.attempt_ref, generation: run.generation, target_version: run.target_version, work_item_version: run.work_item_version, scope_version: run.scope_version, owner: run.owner, lease_expires_at: run.lease_expires_at, source_read_seq: run.read_seq, completed_steps: ["inventory"], next_steps: ["verify"], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: { actions: 1 }, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.read_seq, builder_version: "test" } }));
+    const checkpoint = (await store.commitCheckpoint(run.run_id, run.generation, "pi", { work_item_ref: work_item_id, work_run_ref: run.run_id, attempt_ref: run.attempt_ref, generation: run.generation, target_version: run.target_version, work_item_version: run.work_item_version, scope_ref: run.scope_ref, scope_version: run.scope_version, scope_revision_ref: run.scope_revision_ref, policy_digest: run.policy_digest, owner: run.owner, lease_expires_at: run.lease_expires_at, source_read_seq: run.read_seq, completed_steps: ["inventory"], next_steps: ["verify"], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: { actions: 1 }, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.read_seq, builder_version: "test" } }));
     const pack = (await buildContextPack(store, engagement_id, 20_000, { workItemId: work_item_id, workerRole: "worker" }));
     assert.ok(pack.sources.includes(work_item_id));
     const current = (await store.getWorkRun(run.run_id));

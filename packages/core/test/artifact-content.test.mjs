@@ -6,6 +6,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, createCoreService, createPrincipal, publishProjection, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 const { ArtifactContentStore } = await import("../dist/artifact-content-store.js");
 
 const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -246,6 +247,7 @@ test("run-scoped Artifact writes are bound to the active session Attempt and gen
     const runHost = createPrincipal("host", ctx.host.id, ctx.engagement_id, [], undefined, session_id);
     const work_item_id = uuidv7();
     (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "inspect", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    await ensureApprovedScope(ctx.store, ctx.engagement_id);
     const claimed = (await ctx.service.dispatch("work.claim", runHost, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", ttl_ms: 1_000 }));
     assert.equal(claimed.ok, true);
     const bytes = Buffer.from("attempt body"); const digest = sha256(bytes);
@@ -266,6 +268,7 @@ test("run-bound sessions establish the run link atomically and inherit attributi
     const session_id = "bound-session";
     const work_item_id = uuidv7();
     (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "bound", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    await ensureApprovedScope(ctx.store, ctx.engagement_id);
     const claimed = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker", ttl_ms: 10_000 }));
     assert.equal(claimed.ok, true);
     const bound = (await ctx.service.dispatch("artifact.session.bind", ctx.host, {
@@ -317,6 +320,7 @@ test("session binding mode is mandatory and cannot be downgraded or created by a
     assert.equal(bound.ok, true);
     const work_item_id = uuidv7();
     (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "strict", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    await ensureApprovedScope(ctx.store, ctx.engagement_id);
     const claimed = (await ctx.service.dispatch("work.claim", ctx.host, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker" }));
     const changed = (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "run-bound", work_run_id: claimed.data.run_id, attempt_id: claimed.data.attempt_ref, generation: claimed.data.generation, owner_host: ctx.host.id }));
     assert.equal(changed.ok, false);
@@ -333,10 +337,11 @@ test("execution sidecars expose metadata and correlated Artifact references with
     const session_id = "execution-session"; const root = join(ctx.dir, "content", "execution-session");
     (await ctx.service.dispatch("artifact.session.bind", ctx.host, { engagement_id: ctx.engagement_id, session_id, root, mode: "host-session" }));
     const runHost = createPrincipal("host", ctx.host.id, ctx.engagement_id, [], undefined, session_id);
-    const work_item_id = uuidv7(); (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", title: "execute", status: "queued", acceptance_criteria: ["done"] }, "L2"));
+    const { scope } = await ensureApprovedScope(ctx.store, ctx.engagement_id);
+    const work_item_id = uuidv7(); (await ctx.store.commit({ id: work_item_id, engagement_id: ctx.engagement_id, kind: "work_item", scope_ref: scope.id, title: "execute", status: "queued", acceptance_criteria: ["done"] }, "L2"));
     const run = (await ctx.service.dispatch("work.claim", runHost, { engagement_id: ctx.engagement_id, work_item_id, agent_id: "worker" }));
     assert.equal(run.ok, true);
-    const checkpoint = { work_item_ref: work_item_id, work_run_ref: run.data.run_id, attempt_ref: run.data.attempt_ref, generation: run.data.generation, target_version: run.data.target_version, work_item_version: run.data.work_item_version, scope_version: run.data.scope_version, owner: run.data.owner, lease_expires_at: run.data.lease_expires_at, source_read_seq: run.data.read_seq, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.data.read_seq, builder_version: "test" } };
+    const checkpoint = { work_item_ref: work_item_id, work_run_ref: run.data.run_id, attempt_ref: run.data.attempt_ref, generation: run.data.generation, target_version: run.data.target_version, work_item_version: run.data.work_item_version, scope_ref: run.data.scope_ref, scope_version: run.data.scope_version, scope_revision_ref: run.data.scope_revision_ref, policy_digest: run.data.policy_digest, owner: run.data.owner, lease_expires_at: run.data.lease_expires_at, source_read_seq: run.data.read_seq, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: { context_snapshot_id: uuidv7(), read_seq: run.data.read_seq, builder_version: "test" } };
     const committed = (await ctx.service.dispatch("checkpoint.commit", runHost, { engagement_id: ctx.engagement_id, work_run_id: run.data.run_id, host_id: ctx.host.id, generation: run.data.generation, checkpoint }));
     assert.equal(committed.ok, true);
     const output = (await ctx.service.dispatch("artifact.session.output", runHost, { engagement_id: ctx.engagement_id, session_id, work_run_id: run.data.run_id, page_size: 10 }));

@@ -52,7 +52,8 @@ const proposalEnvelope = (engagement_id: string, content: Data, overrides: Data 
 });
 const checkpointFor = (run: Data, overrides: Data = {}): Data => ({
   work_item_ref: run.work_item_id, work_run_ref: run.run_id, attempt_ref: run.attempt_ref,
-  generation: run.generation, target_version: run.target_version, work_item_version: run.work_item_version,
+  generation: run.generation, scope_revision_ref: run.scope_revision_ref, policy_digest: run.policy_digest,
+  target_version: run.target_version, work_item_version: run.work_item_version,
   scope_ref: run.scope_ref, scope_version: run.scope_version, owner: run.owner, lease_expires_at: run.lease_expires_at,
   source_read_seq: run.read_seq, completed_steps: ["captured visible observation"], next_steps: ["verify evidence"],
   observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [],
@@ -81,6 +82,30 @@ export function createAuthorityRuntimeScenarios(
       allowed_targets: ["https://conformance.invalid"], excluded_targets: [], rules_of_engagement_ref: "roe:isolated-conformance",
     } }));
     const engagement_id = String(initialized.id);
+    const scope = await authority.get(String(initialized.scope_ref));
+    assert.ok(scope, "isolated Engagement initializes its Scope");
+    assert.ok(Number.isSafeInteger(scope.version), "isolated Scope has a Core-assigned version");
+    const roeBytes = Buffer.from("isolated runtime conformance rules of engagement");
+    const roeArtifactId = uuidv7();
+    const roeContentRef = `${roeArtifactId}@v1`;
+    const roeContentHash = sha256(roeBytes);
+    await authority.saveArtifactCatalogRow({
+      content_ref: roeContentRef, engagement_id, session_id: `roe-${name}`, artifact_id: roeArtifactId, version: 1,
+      payload_kind: "text", media_type: "text/plain", storage_mode: "taric_stored", byte_length: roeBytes.length,
+      chunk_count: 1, content_hash: roeContentHash, content_status: "available", integrity_status: "verified",
+      stored_at: new Date().toISOString(), relative_dir: "", manifest_path: "",
+    }, [{ ordinal: 0, offset: 0, bytes: roeBytes.length, hash: roeContentHash, path: `roe-${name}/chunk` }]);
+    const now = Date.now();
+    await authority.reviseScope({
+      engagement_id, scope_id: scope.id, expected_version: Number(scope.version),
+      policy: {
+        allowed_targets: ["conformance.invalid"], excluded_targets: [], protocols: ["https"], ports: [{ from: 443, to: 443 }], methods: ["GET"],
+        dns: { require_pinned_addresses: true, reject_private_addresses: true, max_addresses: 8 },
+        redirects: { max_hops: 1, same_scope_only: true },
+        valid_from: new Date(now - 60_000).toISOString(), valid_until: new Date(now + 3_600_000).toISOString(),
+      },
+      roe_artifact_ref: roeContentRef, roe_artifact_version: 1, idempotency_key: `runtime-conformance-scope:${name}`, principal: "fixture-operator",
+    });
     return { service, engagement_id,
       model: createPrincipal("model", "fixture-author", engagement_id),
       operator: createPrincipal("operator", "fixture-operator", engagement_id),

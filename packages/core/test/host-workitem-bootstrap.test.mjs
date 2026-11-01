@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AuthorityStore, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 function candidate(engagement_id, resource_refs, title = "verify approved resource") {
   return {
@@ -14,33 +15,11 @@ function candidate(engagement_id, resource_refs, title = "verify approved resour
   };
 }
 
-async function approveScope(store, engagement, target) {
-  const scope = await store.get(engagement.scope_ref);
-  const valid_from = new Date(Date.now() - 60_000).toISOString();
-  const valid_until = new Date(Date.now() + 3_600_000).toISOString();
-  const artifact_id = uuidv7();
-  const content_ref = `${artifact_id}@v1`;
-  const content_hash = `sha256:${"a".repeat(64)}`;
-  await store.saveArtifactCatalogRow({
-    content_ref, engagement_id: engagement.id, session_id: "roe", artifact_id, version: 1, payload_kind: "text", media_type: "text/plain",
-    storage_mode: "taric_stored", byte_length: 3, chunk_count: 1, content_hash, content_status: "available", integrity_status: "verified",
-    stored_at: new Date().toISOString(), relative_dir: "", manifest_path: "",
-  }, [{ ordinal: 0, offset: 0, bytes: 3, hash: content_hash, path: "roe/chunk" }]);
-  return store.reviseScope({
-    engagement_id: engagement.id, scope_id: scope.id, expected_version: scope.version,
-    policy: {
-      allowed_targets: [target], excluded_targets: [], protocols: ["https"], ports: [{ from: 443, to: 443 }], methods: ["GET"],
-      dns: { require_pinned_addresses: true, reject_private_addresses: true, max_addresses: 8 }, redirects: { max_hops: 1, same_scope_only: true }, valid_from, valid_until,
-    },
-    roe_artifact_ref: content_ref, roe_artifact_version: 1, idempotency_key: `approve:${engagement.id}`, principal: "operator",
-  });
-}
-
 test("host-neutral WorkItem bootstrap admits canonical Resource revisions before query and claim", async () => {
   const store = new AuthorityStore();
   const service = await createCoreService(store);
   const engagement = await store.initializeEngagement({ name: "bootstrap", scope: { allowed_targets: ["scope.invalid"], excluded_targets: [], rules_of_engagement_ref: "legacy-unverified" } });
-  await approveScope(store, engagement, "scope.invalid");
+  await ensureApprovedScope(store, engagement.id, "scope.invalid");
   const otherEngagement = await store.initializeEngagement({ name: "foreign bootstrap", scope: { allowed_targets: ["foreign.invalid"], excluded_targets: [], rules_of_engagement_ref: "legacy-unverified" } });
   const engagement_id = engagement.id;
   const other_engagement_id = otherEngagement.id;
@@ -139,6 +118,7 @@ test("one WorkItem can have at most one active claim owner", async () => {
   const service = await createCoreService(store);
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
+  await ensureApprovedScope(store, engagement_id);
   await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "single owner", status: "queued", acceptance_criteria: ["result"] }, "L2");
   const hostA = createPrincipal("host", "host-a", engagement_id);
   const hostB = createPrincipal("host", "host-b", engagement_id);

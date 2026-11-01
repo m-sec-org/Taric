@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 function checkpoint(run, work_item_ref) {
   return {
@@ -50,6 +51,7 @@ test("trusted session association fences host attachments before state mutation 
   const unboundHost = createPrincipal("host", "unbound-host", engagement_id);
 
   try {
+    await ensureApprovedScope(store, engagement_id);
     host.transport_session_id = "mutated-session";
     const binding = await service.dispatch("artifact.session.bind", host, {
       engagement_id,

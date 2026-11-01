@@ -6,6 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, PostgresAuthorityStore, AUTHORITY_RUNTIME_SCENARIOS, createAuthorityRuntimeScenarios, runAuthorityRuntimeConformance, createSharedAuthorityRuntime, createCoreService, createPrincipal } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function sqliteFixture(directory, label) {
   const filename = join(directory, `${label}.sqlite`);
@@ -143,6 +144,7 @@ test("live PostgreSQL passes the same twelve real Core runtime conformance domai
     });
     assert.equal(guarded.runtime_state, "enabled");
     const initialized = await restarted.initializeEngagement({ name: "isolated health loss", scope: { allowed_targets: ["https://health.invalid"], excluded_targets: [], rules_of_engagement_ref: "roe:health-fixture" } });
+    await ensureApprovedScope(restarted, initialized.id, "https://health.invalid");
     const item = await restarted.createRecord({ engagement_id: initialized.id, kind: "work_item", title: "health fence", status: "queued", acceptance_criteria: ["current owner only"] }, "L2");
     const run = await restarted.claimWorkRun({ engagement_id: initialized.id, work_item_id: item.id, host_id: "health-host", agent_id: "health-agent", ttl_ms: 300_000 });
     const before = await restarted.events();

@@ -6,7 +6,7 @@ Taric 是面向多智能体安全测试的长期记忆与治理组件。它为�
 
 | 合同 | 当前版本 |
 |---|---|
-| Taric workspace 与运行组件 | `1.0.3` |
+| Taric workspace 与运行组件 | `1.0.4` |
 | Core API | `1.4.0` |
 | Host adapter | `1.1` |
 | Record schema | `1.0.0` |
@@ -14,6 +14,8 @@ Taric 是面向多智能体安全测试的长期记忆与治理组件。它为�
 | SQL layout | `authority-sql/4` |
 
 API 使用精确版本配对。声明 `1.3.0` 或更早 API 的客户端不会与当前 `1.4.0` Core 配对。workspace 包标记为 private，当前不通过 npm registry 发布。完整操作、驱动与宿主版本清单见 [`compatibility-matrix.json`](compatibility-matrix.json)。
+
+当前版本要求每个可执行 WorkRun 先绑定已批准且在有效期内的 ScopeRevision；旧 Scope 或缺少 revision 绑定的运行不能 claim、续租、推进、写 checkpoint/Action 或发布 run-bound Artifact。
 
 ## 能力
 
@@ -31,7 +33,7 @@ API 使用精确版本配对。声明 `1.3.0` 或更早 API 的客户端不会�
 |---|---|---|
 | Node Core + SQLite | 默认支持 | 单主机持久 authority，使用 SQLite WAL 和 Core 共享治理逻辑。不要把 SQLite 文件放到多主机共享存储上。 |
 | Bun in-process | 支持 | 使用匹配版本的 `@taric/driver-bun-sqlite` 注入 Core；已覆盖共享 authority 场景和驱动专项测试。 |
-| PostgreSQL 多主机 | 有条件支持 | PostgreSQL 14–18 的实现复用同一 Core；默认关闭。启用需要当前构建匹配的 conformance evidence，以及部署端 schema、连接和 lease fencing 健康检查。 |
+| PostgreSQL 多主机 | 有条件支持 | PostgreSQL 14–18 的实现复用同一 Core；默认关闭。启用需要当前构建匹配的 conformance evidence，以及部署端 schema、连接和 lease fencing 健康检查。本轮 `1.0.4` 未运行 live PostgreSQL 场景。 |
 | CLI | 支持 | operator/host 本地 JSON 命令；当前白名单含 60 项，包括本地文件上传 helper。 |
 | MCP stdio | 模型受限支持 | MCP `2024-11-05`，仅提供六个工具：`context.query`、`resource.query`、`evidence.query`、`proposal.submit`、`checkpoint.propose`、`action.recommend`。不暴露 admission、operator、原始 Artifact 读取或宿主状态操作。 |
 | Unix socket proxy | 可选支持 | 单一固定 host principal 的本机 RPC。 |

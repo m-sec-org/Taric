@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { AuthorityStore, uuidv7 } from "../dist/index.js";
 import { SqliteAuthorityDriver, PostgresAuthorityDriver } from "../dist/sql-driver.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function withSqlite(operation) {
   const directory = await mkdtemp(join(tmpdir(), "taric-unit-of-work-"));
@@ -106,6 +107,7 @@ for (const [name, fixture] of backends) {
   test(`${name} host errors require the active run owner, Engagement, Attempt and unexpired generation`, { skip: live ? "TARIC_TEST_DATABASE_URL is required" : false }, async () => {
     await fixture(async ({ driver, store }) => {
       const engagement_id = uuidv7();
+      await ensureApprovedScope(store, engagement_id);
       const work = await store.createRecord({ engagement_id, kind: "work_item", title: "host error fence", status: "queued", acceptance_criteria: ["only active owner may report"] }, "L1");
       const run = await store.claimWorkRun({ work_item_id: work.id, engagement_id, host_id: "current-host", agent_id: "agent", ttl_ms: 60_000 });
       const input = { engagement_id, host_id: "current-host", work_run_id: run.run_id, generation: run.generation, error_ref: "error:current" };

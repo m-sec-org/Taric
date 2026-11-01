@@ -4,7 +4,7 @@
 > **状态**：历史设计稿，主要条目已在 [host-sync contract change](../openspec/changes/archive/2026-10-25-close-host-sync-contract-gaps/release-report.md) 中实现。下文各节“现状”与实施顺序均是设计时基线，不是当前差距/待办；归档报告也绑定 pre-1.0.0 源码，不代表当前发布验证。当前合同以 [API 边界](taric-api.md)、[接入指南](agent-integration.md) 和 [代码设计](taric-design.md) 为准。
 > **背景**：[Taric面向渗透测试智能体的集成方案](Taric面向渗透测试智能体的集成方案.md) §14 与 BreachWeave 宿主工作区输入文档《Taric外置记忆集成差距分析与建议方案.md》（v4，未随 Taric 仓库分发）的分析表明：BreachWeave 集成中最昂贵的宿主侧工程，其成本多数来自 Taric 的**通用性缺口**而非 BreachWeave 的特殊性。
 
-> **当前状态（2026-10-27）**：Taric `1.0.1` runtime components 的 build/typecheck/matrix 和 PostgreSQL 配置下的 workspace 测试通过（Core 356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun driver 11，无 PostgreSQL 跳过）。PostgreSQL 当前源码 12 个 runtime scenario、独立备份恢复、两个独立 Node host 容器 lease/reclaim 和容器 spool 检查通过。Pi 1.4.0 真实 RPC host 成功加载 Taric extension，但未调用模型或工具；完整第三方宿主流程、跨物理机网络恢复仍未验证。可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试；生产网络部署和跨机故障恢复未认证。MCP resources/Tasks、npm registry 发布仍未支持。旧候选 release report 和下方设计时行号不得替代当前证据。
+> **当前状态（2026-11-01）**：本文是历史设计稿，下方“现状”与实施顺序是设计时基线。当前组件版本为 `1.0.4`；API `1.4.0`、adapter `1.1`、schema `1.0.0`、authority storage `4`、SQL `4`。ScopeRevision/ROE revision、完整 Coverage snapshot、Action audit query、ReportSnapshot/CloseDecision 契约及 WorkRun/Action revision binding fail-closed 修复已在 Taric 源码侧实现。当前全量工作区测试通过：CLI 38/38、Core 392 通过且 9 个可选 PostgreSQL 用例跳过、Bun 12/12、Hermes 5/5、MCP 12/12、Schemas 11/11。BreachWeave 本地 acceptance 未重跑，不能声称宿主或生产验收通过。`1.0.1` 测试及旧候选报告仅供历史参考，当前代码验证见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。MCP resources/Tasks、npm registry 发布仍未支持。
 > **本方案的约束（不可违反）**：Taric 保持**独立且通用的外置记忆插件**定位——
 > 1. 每项改动必须能以"任意宿主接入都需要"的语言立项，BreachWeave 只是首个消费者与验证宿主；
 > 2. 宿主域概念（WSTG 字典、渗透工具、CTF/项目语义等）**禁止进入 core**；`test_category` 等保持为不透明字符串字段；
@@ -85,7 +85,7 @@
 
 **(a) 导出驱动契约**：`index.ts` 增补导出 `AuthoritySqlDriver`、`SqliteAuthorityDriver`、`PostgresAuthorityDriver`、`SqlRunResult`、`SqlMetrics`、`SqlMetricsSnapshot`、`SqlTransactionMode`（`PostgresQueryable` 已由 index.ts:25 导出，无需重复）。
 
-**(b) 包发布面**：设计时建议为 Core 增加 `exports` map 并确定分发渠道。该设计稿当时记录 `@taric/schemas@0.1.0`；当前 runtime components 为 `1.0.1`。Core/Schemas/Bun driver 的 exports 已实现，包清单仍为 private，因此 registry 发布尚未发生；本地构建和测试验证不等于 registry 可安装。
+**(b) 包发布面**：设计时建议为 Core 增加 `exports` map 并确定分发渠道。该设计稿当时记录 `@taric/schemas@0.1.0`；当前 runtime components 为 `1.0.4`。Core/Schemas/Bun driver 的 exports 已实现，包清单仍为 private，因此 registry 发布尚未发生；本地构建和测试验证不等于 registry 可安装。
 
 **(c) Bun 参考驱动**：新包 `packages/driver-bun-sqlite/`（命名 `@taric/driver-bun-sqlite`；**目录必须平铺在 `packages/` 下**——根 workspaces 是 `["packages/*"]` 单层 glob，`packages/drivers/bun-sqlite` 两层路径不会被识别），实现 `BunSqliteAuthorityDriver implements AuthoritySqlDriver`：
 

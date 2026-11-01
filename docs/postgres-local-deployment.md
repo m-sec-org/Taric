@@ -1,8 +1,8 @@
 # Local PostgreSQL with OrbStack
 
-The saved [runtime verification](benchmarks/postgres-runtime-v2.json), generated 2026-10-17, remains pre-1.0.0 candidate evidence and must not be used to activate 1.0.1. On 2026-10-27, OrbStack PostgreSQL 17.11 passed all twelve current-source runtime scenarios and an independent `pg_dump`/`pg_restore` check; readiness was `enabled`/`ready`. The current `1.0.1` report is `/tmp/taric-postgres-runtime-current-20261027-1.0.1.json` on the test machine. Core's PostgreSQL-gated tests also passed in the live workspace run. Regenerate and review a report for the exact build and deployment before activation; a saved report does not establish that a container is currently healthy.
+Taric `1.0.4` workspace build and test validation is recorded in the [current control-plane verification report](taric-103-breachweave-control-plane-verification.md). Live PostgreSQL runtime, backup/restore, multi-host coordination, and deployment checks have not been rerun for `1.0.4`. The saved [runtime verification](benchmarks/postgres-runtime-v2.json) is pre-1.0.0 candidate evidence. Historical only: OrbStack PostgreSQL 17.11 passed twelve runtime scenarios and an independent `pg_dump`/`pg_restore` check for Taric `1.0.1` on 2026-10-27; that run's report was a machine-local `/tmp` file and is not current activation evidence. Generate and review a report for the exact build and deployment before activation; a saved report does not establish that a container is currently healthy.
 
-> Last reviewed: 2026-10-27
+> Last reviewed: 2026-11-01
 
 `compose.postgres.yaml` starts one Taric-only PostgreSQL service on the active Docker context. It publishes **only** `127.0.0.1:55432`, uses the `taric-authority` Compose project, and persists data in the named volume `taric-authority-postgres-data`. It does not depend on or manage other development containers.
 
@@ -89,7 +89,7 @@ export TARIC_CONTENT_ROOT="$PWD/.taric/content"
 node packages/cli/dist/bin.js capability.status
 ```
 
-The path above must contain a newly generated report for the current build; the saved `postgres-runtime-v2.json` is stale for 1.0.1. Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Before accepting writes, confirm that the diagnostics report `runtime_state=enabled`, `backend=postgresql`, and server-side fencing. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates activation evidence; rebuild and rerun verification. Keep the report and its permissions operator-controlled; runtime startup consumes it but never regenerates it.
+The path above must contain a newly generated report for the current build; the saved `postgres-runtime-v2.json` predates the current release and is not activation evidence. Set `TARIC_ENGAGEMENT_ID` when using the model MCP interface, and start `node packages/mcp/dist/bin.js`. Before accepting writes, confirm that the diagnostics report `runtime_state=enabled`, `backend=postgresql`, and server-side fencing. Neither an absent/mismatched report nor a database health failure creates a SQLite fallback. Changing the Core implementation or schema/policy digest invalidates activation evidence; rebuild and rerun verification. Keep the report and its permissions operator-controlled; runtime startup consumes it but never regenerates it.
 
 ## Operate without losing data
 

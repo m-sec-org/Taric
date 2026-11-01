@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AuthorityStore, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function setup() {
   const store = new AuthorityStore();
   const service = await createCoreService(store);
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
+  await ensureApprovedScope(store, engagement_id);
   await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "transition", status: "queued", acceptance_criteria: ["complete"] }, "L2");
   const host = createPrincipal("host", "transition-host", engagement_id);
   const run = await service.dispatch("work.claim", host, { engagement_id, work_item_id, agent_id: "worker" });

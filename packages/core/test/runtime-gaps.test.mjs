@@ -5,32 +5,12 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, ContractValidationError, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function workItem(store, engagement_id = uuidv7()) {
   const id = uuidv7();
   (await store.commit({ id, engagement_id, kind: "work_item", title: "verify", status: "queued", acceptance_criteria: ["evidence"] }, "L2"));
   return { id, engagement_id };
-}
-
-async function approveScope(store, engagement, target) {
-  const scope = await store.get(engagement.scope_ref);
-  const artifact_id = uuidv7();
-  const content_ref = `${artifact_id}@v1`;
-  const content_hash = `sha256:${"a".repeat(64)}`;
-  await store.saveArtifactCatalogRow({
-    content_ref, engagement_id: engagement.id, session_id: "roe", artifact_id, version: 1, payload_kind: "text", media_type: "text/plain",
-    storage_mode: "taric_stored", byte_length: 3, chunk_count: 1, content_hash, content_status: "available", integrity_status: "verified",
-    stored_at: new Date().toISOString(), relative_dir: "", manifest_path: "",
-  }, [{ ordinal: 0, offset: 0, bytes: 3, hash: content_hash, path: "roe/chunk" }]);
-  return store.reviseScope({
-    engagement_id: engagement.id, scope_id: scope.id, expected_version: scope.version,
-    policy: {
-      allowed_targets: [target], excluded_targets: [], protocols: ["https"], ports: [{ from: 443, to: 443 }], methods: ["GET"],
-      dns: { require_pinned_addresses: true, reject_private_addresses: true, max_addresses: 8 },
-      redirects: { max_hops: 1, same_scope_only: true }, valid_from: new Date(Date.now() - 60_000).toISOString(), valid_until: new Date(Date.now() + 3_600_000).toISOString(),
-    },
-    roe_artifact_ref: content_ref, roe_artifact_version: 1, idempotency_key: `approve:${engagement.id}`, principal: "operator",
-  });
 }
 
 function checkpoint(run, work_item_ref, extra = {}) {
@@ -42,6 +22,9 @@ function checkpoint(run, work_item_ref, extra = {}) {
     target_version: run.target_version,
     work_item_version: run.work_item_version,
     scope_version: run.scope_version,
+    scope_ref: run.scope_ref,
+    scope_revision_ref: run.scope_revision_ref,
+    policy_digest: run.policy_digest,
     owner: run.owner,
     lease_expires_at: run.lease_expires_at,
     source_read_seq: run.read_seq ?? 0,
@@ -66,6 +49,7 @@ function checkpoint(run, work_item_ref, extra = {}) {
 test("work claims create an explicit attempt and reclaim fences the old generation", async () => {
   const store = new AuthorityStore();
   const item = (await workItem(store));
+  await ensureApprovedScope(store, item.engagement_id);
   const first = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi-a", agent_id: "worker-a", ttl_ms: 1_000 }));
   assert.equal(first.status, "claimed");
   assert.ok(first.attempt_ref ?? first.attempt_id, "claim returns an explicit attempt reference");
@@ -113,6 +97,7 @@ test("historical proposal material keeps source references and limits while tran
 test("checkpoint commit requires the complete executable boundary and rejects hidden reasoning or foreign refs", async () => {
   const store = new AuthorityStore();
   const item = (await workItem(store));
+  await ensureApprovedScope(store, item.engagement_id);
   const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker" }));
   (await assert.rejects(async () => (await store.commitCheckpoint(run.run_id, run.generation, "pi", { completed_steps: [] })), /reference|invalid|missing|required/i));
   (await assert.rejects(async () => (await store.commitCheckpoint(run.run_id, run.generation, "pi", checkpoint(run, item.id, { hidden_reasoning: "secret" }))), /hidden reasoning/i));
@@ -128,6 +113,7 @@ test("checkpoint commit requires the complete executable boundary and rejects hi
 test("action intents cannot skip recommendation or authorization and stale results stay quarantined", async () => {
   const store = new AuthorityStore();
   const item = (await workItem(store));
+  await ensureApprovedScope(store, item.engagement_id);
   const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker" }));
   const action_id = uuidv7();
   (await assert.rejects(async () => (await store.recordActionIntent({ action_id, run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "executed", result_ref: "host:result:early", host_id: "pi" })), /transition|recommended|authorized/i));
@@ -151,6 +137,7 @@ test("action intents cannot skip recommendation or authorization and stale resul
 test("work run and active Attempt use the same legal transition fence", async () => {
   const store = new AuthorityStore();
   const item = (await workItem(store));
+  await ensureApprovedScope(store, item.engagement_id);
   const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker" }));
   const checkpointed = (await store.transitionWorkRun(run.run_id, run.generation, "pi", "checkpointed"));
   assert.equal(checkpointed.status, "checkpointed");
@@ -163,6 +150,7 @@ test("checkpoint proposals stay L0 and stale Attempt proposals are quarantined",
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
   const item = (await workItem(store));
+  await ensureApprovedScope(store, item.engagement_id);
   const model = createPrincipal("model", "worker-a", item.engagement_id);
   const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi-a", agent_id: model.id }));
   const checkpointCandidate = {
@@ -200,10 +188,14 @@ test("run-scoped proposals verify the active Attempt, owner, lease, and task ses
   const root = mkdtempSync(join(tmpdir(), "taric-proposal-fence-"));
   try {
     const item = (await workItem(store));
+    await ensureApprovedScope(store, item.engagement_id);
     const session_id = "proposal-session";
     await store.saveArtifactSession({ engagement_id: item.engagement_id, session_id, root: join(root, session_id), binding_id: uuidv7(), created_at: new Date().toISOString(), mode: "host-session" });
     const run = (await store.claimWorkRun({ work_item_id: item.id, engagement_id: item.engagement_id, host_id: "pi", agent_id: "worker", task_session_ref: session_id, ttl_ms: 60_000 }));
-    const content = (runValue = run, workItemRef = item.id, overrides = {}) => ({ schema_version: "1.0.0", engagement_id: item.engagement_id, kind: "checkpoint", ...checkpoint(runValue, workItemRef), ...overrides });
+    const content = (runValue = run, workItemRef = item.id, overrides = {}) => {
+      const { policy_digest: _policyDigest, ...candidate } = checkpoint(runValue, workItemRef);
+      return { schema_version: "1.0.0", engagement_id: item.engagement_id, kind: "checkpoint", ...candidate, ...overrides };
+    };
     const submit = (candidate, options = {}) => store.submitProposal({ proposal_id: uuidv7(), engagement_id: item.engagement_id, subject_type: "checkpoint", expected_version: 0, content: candidate }, { principal: options.principal ?? "worker", principalRole: options.principalRole ?? "model", engagement_id: item.engagement_id, workRunId: options.workRunId ?? run.run_id, generation: options.generation ?? run.generation });
 
     const valid = await submit(content());
@@ -233,7 +225,7 @@ test("Core action dispatch audits host decisions and outcomes against the curren
   const service = await createCoreService(store);
   const root = realpathSync(mkdtempSync(join(tmpdir(), "taric-action-dispatch-")));
   const engagement = await store.initializeEngagement({ name: "action dispatch", scope: { allowed_targets: ["example.test"], excluded_targets: [], rules_of_engagement_ref: "legacy-unverified" } });
-  await approveScope(store, engagement, "example.test");
+  await ensureApprovedScope(store, engagement.id, "example.test");
   const item = await workItem(store, engagement.id);
   const session_id = "action-audit-session";
   const owner = createPrincipal("host", "action-owner", item.engagement_id, [], undefined, session_id);

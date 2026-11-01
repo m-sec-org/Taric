@@ -12,20 +12,21 @@
 
 ---
 
-## 能力提升后的状态校正（2026-10-27）
+## 当前状态校正（2026-11-01）
 
-本文保留 2026-10-16 的推演、代码基线、行号与建议。原正文中的“当前”“未实现”“不支持”均限定为当时状态，不作为当前待办或当前实现判断；§1–8 是历史分析和建议，不是实施路线。当前状态以[接入指南](agent-integration.md)、[API 合同](taric-api.md)、源码与测试为准。2026-10-27 的 `1.0.1` build/typecheck/matrix、PG 配置 workspace tests（Core 356、Schemas 10、CLI 37、MCP 12、Hermes 5、Bun 11）及当前 runtime/backup/restore、同机双容器 lease/reclaim、容器 spool bind-mount 检查均通过。Pi 1.4.0 真实 RPC host 已加载 Taric 扩展。没有认证完整第三方宿主工作流、跨物理机网络恢复或 BreachWeave 集成；可选 TLS TCP/HTTPS gateway 已实现并通过本机 loopback 端到端测试，但生产网络部署与跨机故障恢复尚未验证。文中外部项目与 MCP 工作组快照未重新核验。
+本文保留 2026-10-16 的推演、代码基线、行号与建议。原正文中的“当前”“未实现”“不支持”均限定为当时状态，不作为当前待办或当前实现判断；§1–8 是历史分析和建议，不是实施路线。当前组件版本为 `1.0.4`；API `1.4.0`、adapter `1.1`、schema `1.0.0`、authority storage `4`、SQL `4`。ScopeRevision/ROE revision、完整 Coverage snapshot、Action audit query、ReportSnapshot/CloseDecision 契约已实现，WorkRun/Action revision binding 绕过已在 Taric 源码侧 fail-closed 修复。当前全量工作区测试通过：CLI 38/38、Core 392 通过且 9 个可选 PostgreSQL 用例跳过、Bun 12/12、Hermes 5/5、MCP 12/12、Schemas 11/11。BreachWeave 本地 acceptance 未重跑，因此不能声称宿主验收或生产部署已通过。`1.0.1` 测试与 PostgreSQL/容器记录均为历史证据。当前代码验证见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)，当前使用合同见[接入指南](agent-integration.md)和[API 合同](taric-api.md)。外部项目与 MCP 工作组状态未重新核验。
 
 | 原差距 | 当前结果与边界 |
 |---|---|
-| 运行时不可移植 | 本机 Node proxy/真实 Bun client 已完成重启验证；`@taric/driver-bun-sqlite@1.0.1` 进程内驱动已通过当前构建和驱动测试。Pi 1.4.0 RPC host 已实际加载 Taric extension；尚未认证完整 Pi 工作流、BreachWeave 或其他宿主。包仍标记 private，registry 发布和完整第三方宿主认证不在此验证范围。 |
+| 运行时不可移植 | 本机 Node proxy/真实 Bun client 与 Bun SQLite driver 已有 Taric 侧实现；Taric 本地验证不等于已认证完整 Pi 工作流、BreachWeave 或其他宿主。包仍标记 private，registry 发布和完整第三方宿主认证不在此验证范围。 |
+| 控制面固定快照与关闭映射 | ScopeRevision/ROE revision、完整 Coverage snapshot、Action audit query、ReportSnapshot/CloseDecision 契约及 WorkRun/Action revision binding fail-closed 修复已在 Taric 源码侧完成；全量 workspace 测试通过。BreachWeave 本地 acceptance 尚未重跑，不能据此宣布宿主验收通过。 |
 | 宿主 ID 封闭 | 自定义 adapter ID 已开放，认证仍按 package/distribution/version/commit 与实际实例绑定判断。 |
 | 无最小接入路径 | A～E 依赖闭环与独立 Node 治理示例已交付。 |
 | 无状态通知 | Core in-process 与 authenticated adapter RPC 已实现 bounded best-effort host subscription，并使用 query/read_seq 恢复；MCP resources subscription 与 Tasks 仍未支持。本机轮询 fixture 满足 1000ms 预算，不要求所有部署启用通知。 |
 | 存量导入 | 公开 snapshot.import 明确 unsupported；旧材料走正常 proposal/evidence，不提供通用历史迁移。 |
-| 共享 authority 与 transport | 当前源码 PostgreSQL live report、同机双 host 容器 lease/reclaim 已通过；Unix socket 与 TLS TCP/HTTPS gateway 有本机测试。跨物理机部署、生产网络故障恢复未验证；多主机正确性由 PostgreSQL 提供，gateway 不参与协调。 |
+| 共享 authority 与 transport | PostgreSQL live runtime、恢复和同机双 host 容器 lease/reclaim 是 `1.0.1` 历史证据；`1.0.4` 未运行 live PostgreSQL 或部署复验。Unix socket 与 TLS TCP/HTTPS gateway 有本机测试；跨物理机部署、生产网络故障恢复未验证。多主机正确性由 PostgreSQL 提供，gateway 不参与协调。 |
 
-历史综合[技术验收](benchmarks/capability-verification-v2.json)和候选 release report 绑定旧源码基线，均不作为本轮 `1.0.1` PostgreSQL runtime 证据。当前本地验证计数见本节开头；质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文原始代码行号、Bun/推送/宿主差距保留为历史推演，不等于当前未完成项。
+历史综合[技术验收](benchmarks/capability-verification-v2.json)、`1.0.1` 运行结果和候选 release report 均绑定旧源码基线，不作为 `1.0.4` 当前验证或 PostgreSQL runtime 证据。当前 workspace 全量测试已通过；BreachWeave 本地 acceptance 未重跑。质量统计能力因人工标注样本和人类基线缺失仍为 unsupported/pending。本文原始代码行号、Bun/推送/宿主差距保留为历史推演，不等于当前未完成项。
 
 ## 目录
 

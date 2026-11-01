@@ -2,7 +2,7 @@
 
 Taric 的权威存储以驱动契约为边界：**Core 拥有全部状态迁移、排序与策略；驱动只拥有连接、时钟与方言**。任何满足契约的驱动都可以让宿主在自己的运行时内进程内嵌入权威，而不必经过 RPC 桥。
 
-当前仓库的参考实现是 Core 内的 Node `node:sqlite` 驱动和 `@taric/driver-bun-sqlite@1.0.3`。Bun 驱动依赖 `@taric/core@1.0.3`；API 契约、adapter 契约和记录 Schema 分别为 `1.4.0`、`1.1`、`1.0.0`，不随 SQL 存储格式变化。包当前标记为 private，因此这些版本号不代表已发布到 npm registry。
+当前仓库的参考实现是 Core 内的 Node `node:sqlite` 驱动和 `@taric/driver-bun-sqlite@1.0.4`。Bun 驱动依赖 `@taric/core@1.0.4`；API 契约、adapter 契约和记录 Schema 分别为 `1.4.0`、`1.1`、`1.0.0`，不随 SQL 存储格式变化。包当前标记为 private，因此这些版本号不代表已发布到 npm registry。
 
 ## 契约
 
@@ -41,4 +41,4 @@ const service = await createCoreService(store, "/path/to/content-root");
 
 ## 当前 Bun 验证
 
-Bun 1.3.13 下，`npm test --workspace @taric/driver-bun-sqlite` 当前通过 11 个测试：12 个 authority runtime conformance 场景、8 个驱动专项测试和 2 个进程内嵌入 smoke 测试。保存的 [bun-driver-conformance-v1 报告](benchmarks/bun-driver-conformance-v1.json)记录 12 个 conformance 场景，不包含另外 10 个测试结果；专项及 smoke 测试由上述命令执行。该证据验证仓库中的 Bun 驱动契约，不等于第三方 Bun 宿主认证，也不是对所有 `node:sqlite` 行为的穷举差分证明。Artifact 文件的保证仍限于进程崩溃恢复，不包含断电耐久性承诺。
+最新 Bun workspace 运行结果为 12 pass、0 fail。保存的 [bun-driver-conformance-v1 报告](benchmarks/bun-driver-conformance-v1.json)描述 12 个 authority runtime conformance 场景，是单独的场景报告；它不代表当前 workspace 命令的测试总数。该证据验证仓库中的 Bun 驱动契约，不等于第三方 Bun 宿主认证，也不是对所有 `node:sqlite` 行为的穷举差分证明。Artifact 文件的保证仍限于进程崩溃恢复，不包含断电耐久性承诺。

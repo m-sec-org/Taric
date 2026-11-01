@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 test("active WorkRuns are discovered at a pinned sequence and resumed after local-authority restart", async () => {
   const directory = await mkdtemp(join(tmpdir(), "taric-host-work-recovery-"));
@@ -20,6 +21,7 @@ test("active WorkRuns are discovered at a pinned sequence and resumed after loca
   try {
     store = new AuthorityStore(filename);
     service = await createCoreService(store, contentRoot);
+    await ensureApprovedScope(store, engagement_id);
     for (const item of workItems) await store.commit(item, "L2");
     const claims = [];
     for (const item of workItems) {

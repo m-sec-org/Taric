@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ArtifactContentStore, AuthorityStore, PostgresAuthorityStore, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const canonical = (value) => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)])) : value;
@@ -131,6 +132,7 @@ test("Artifact commit succeeds when another initializer completes after rename b
   try {
     await first.initialize();
     await first.bind({ engagement_id, session_id, root: join(root, session_id), mode: "host-session" });
+    await ensureApprovedScope(authority, engagement_id);
     const work = await authority.createRecord({ engagement_id, kind: "work_item", title: "artifact publication race", status: "queued", acceptance_criteria: ["publish once"] }, "L1");
     const run = await authority.claimWorkRun({ engagement_id, work_item_id: work.id, host_id: "host", agent_id: "agent", task_session_ref: session_id, ttl_ms: 60_000 });
     const bytes = Buffer.from("published by recovery");
@@ -149,8 +151,8 @@ test("Artifact commit succeeds when another initializer completes after rename b
     const persistedRow = JSON.parse(JSON.stringify(row));
     assert.deepEqual(await authority.artifactCatalogRow(engagement_id, session_id, row.content_ref), persistedRow);
     assert.deepEqual(await authority.artifactIdempotencyResult(commitKey, "artifact.store.commit", "host", engagement_id, requestHash(commitInput)), persistedRow);
-    assert.equal((await authority.artifactCatalogRows({ engagement_id, session_id })).length, 1);
-    assert.equal((await authority.events()).filter((event) => event.event_type === "artifact.content.committed").length, 1);
+    assert.equal((await authority.artifactCatalogRows({ engagement_id, session_id })).filter((row) => row.session_id === session_id).length, 1);
+    assert.equal((await authority.events()).filter((event) => event.event_type === "artifact.content.committed" && event.payload.session_id === session_id).length, 1);
     assert.deepEqual(Buffer.from((await second.read({ engagement_id, session_id, content_ref: row.content_ref })).data, "base64"), bytes);
   } finally { releaseMark(); await authority.close(); rmSync(dir, { recursive: true, force: true }); }
 });

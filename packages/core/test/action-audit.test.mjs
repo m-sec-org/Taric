@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const networkProvenance = {
   approved_addresses: ["127.0.0.1"],
@@ -29,6 +30,7 @@ test("Action audit is immutable, idempotent, fixed at read_seq, and quarantines 
   const engagement_id = uuidv7();
   const work_item_id = uuidv7();
   try {
+    await ensureApprovedScope(store, engagement_id);
     await store.commit({ id: work_item_id, engagement_id, kind: "work_item", title: "audit action", status: "queued", acceptance_criteria: ["preserve action history"] }, "L2");
     const run = await store.claimWorkRun({ work_item_id, engagement_id, host_id: "host-a", agent_id: "worker-a" });
     const action = await store.recordActionIntent({ run_id: run.run_id, generation: run.generation, mode: "host_hitl", status: "recommended", target: "http://127.0.0.1:8080/check", method: "GET", rationale: "verify a bounded target", host_id: "host-a" });

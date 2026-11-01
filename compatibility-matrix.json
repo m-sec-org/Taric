@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0.0",
-  "core_version": "1.0.3",
+  "core_version": "1.0.4",
   "api_contract_version": "1.4.0",
   "adapter_contract_version": "1.1",
   "storage_contract_version": "authority-storage/4",
   "runtime_dependency_closure": {
     "@taric/schemas": {
-      "version": "1.0.3",
+      "version": "1.0.4",
       "exports": [
         ".",
         "./schemas/v1/core.schema.json"
@@ -14,13 +14,13 @@
       "runtime_dependencies": {}
     },
     "@taric/core": {
-      "version": "1.0.3",
+      "version": "1.0.4",
       "exports": [
         ".",
         "./storage-contract"
       ],
       "runtime_dependencies": {
-        "@taric/schemas": "1.0.3",
+        "@taric/schemas": "1.0.4",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "pg": "^8.23.1"
@@ -30,13 +30,13 @@
   "drivers": [
     {
       "name": "@taric/driver-bun-sqlite",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "runtime": "bun",
       "exports": [
         "."
       ],
       "peer_dependencies": {
-        "@taric/core": "1.0.3"
+        "@taric/core": "1.0.4"
       },
       "runtime_dependencies": {}
     }

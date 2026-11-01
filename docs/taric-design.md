@@ -25,7 +25,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 
 主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
 
-当前 root workspace 和 runtime components 声明版本 `1.0.3`，API 为 `1.4.0`、adapter 为 `1.1`；record schema `1.0.0`、authority storage `authority-storage/4` 和 SQL 格式 `authority-sql/4` 保持不变。API 1.4 增加 immutable ScopeRevision、固定完整域 Coverage snapshot、ActionEvent 审计读取、ReportSnapshot 与 CloseDecision。新增记录复用既有通用 record version/event 布局，不改变 Taric 作为记忆与治理组件、由宿主执行和授权目标动作的定位。仓库中的[候选发布记录](../openspec/changes/harden-taric-authority-runtime/release-report.md)绑定的是较早的 dirty worktree，不是当前源码验证证据；当前实现状态应对照源码、测试和下文注明的实际验证结果。
+当前 root workspace 和 runtime components 声明版本 `1.0.4`，API 为 `1.4.0`、adapter 为 `1.1`；record schema `1.0.0`、authority storage `authority-storage/4` 和 SQL 格式 `authority-sql/4` 保持不变。API 1.4 提供 immutable ScopeRevision、固定完整域 Coverage snapshot、Action 审计读取、ReportSnapshot 与 CloseDecision。WorkRun 必须绑定当前有效的已批准 ScopeRevision；旧式未绑定运行不能继续续租、推进、提交 checkpoint/Action 或 run-bound Artifact。新增记录复用既有通用 record version/event 布局，不改变 Taric 作为记忆与治理组件、由宿主执行和授权目标动作的定位。较早候选报告绑定旧 worktree，不代表当前源码验证；当前实现状态见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。
 
 ## 2. 技术栈
 
@@ -39,7 +39,7 @@ Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔
 | Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
 | 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
 
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.3` 进程内驱动；本机 Bun driver 12 项验证通过，不代表 npm registry 发布或第三方宿主认证。
+`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.4` 进程内驱动；本地驱动测试不代表 npm registry 发布或第三方宿主认证。
 
 ## 3. 仓库与代码结构
 
@@ -280,9 +280,9 @@ node scripts/check-doc-links.mjs
 node --test scripts/test/profile-verification.test.mjs
 ```
 
-重点回归包含 API 权限、L1/L2/CAS、transport session fencing、host.state、Core/RPC bounded subscription、bounded Context/持久 cursor、Artifact durability/scale/RPC、runtime startup/readiness/conformance 与 adapter 实例状态。2026-10-27 的 `1.0.1` workspace 测试在配置 live PostgreSQL 后通过：Schemas 10/10、Core 356/356（无跳过）、CLI 37/37、MCP 12/12、Hermes 5/5、Bun driver 11/11。build、typecheck、matrix 也通过。当前 PG 12 场景、独立备份恢复、双 host 容器 bridge 网络 lease/reclaim 和容器 bind-mounted spool 检查通过。它们不代表跨物理机/网络恢复或真实第三方宿主验收。此前候选报告绑定较早工作树，仍只作为历史证据。
+当前 `1.0.4` build、typecheck、workspace 测试、矩阵、clean-consumer 与文档链接检查结果见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。本轮没有配置 live PostgreSQL；2026-10-27 `1.0.1` 的 PostgreSQL runtime、备份恢复、同机双容器 lease/reclaim 和 bind-mounted spool 结果仅作历史证据。它们不代表跨物理机/网络恢复或真实第三方宿主验收。较早候选报告绑定旧工作树，不代替当前验证。
 
-[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)绑定 source/build/schema/policy/profile digest；专项报告为 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json)。这些报告对应早期候选工作树，不代表本次 1.0.1 发布验证。质量发布因 30 条 synthetic samples、0 条人工标注样本而 blocked。历史 benchmark 仅代表对应环境与 fixture，不代表当前构建或部署自动启用。
+[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)和专项报告 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json) 均对应早期候选工作树，不代表 `1.0.4` 验证。质量统计仍因缺少人工标注与人类基线而 unsupported/disabled。历史 benchmark 仅代表对应环境与 fixture，不代表当前部署容量。
 
 ## 13. 已知差距与假设
 

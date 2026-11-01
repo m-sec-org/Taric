@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { uuidv7, PostgresAuthorityStore } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 const pgModule = await import("pg").catch(() => null);
 const databaseUrl = process.env.TARIC_TEST_DATABASE_URL;
@@ -56,6 +57,7 @@ test("PostgreSQL live shared-authority conformance", async (t) => {
     assert.deepEqual(idempotentResults[1], idempotentResults[0]);
 
     const leaseEngagement = uuidv7();
+    await ensureApprovedScope(source, leaseEngagement);
     const workItem = await source.createRecord({ engagement_id: leaseEngagement, kind: "work_item", title: "live lease fixture", status: "queued", acceptance_criteria: ["one owner"] }, "L2");
     const lease = await source.claimWorkRun({ work_item_id: workItem.id, engagement_id: leaseEngagement, host_id: "host-a", agent_id: "agent-a", ttl_ms: 80 });
     await wait(140);

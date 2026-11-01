@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { AuthorityStore, buildContextPack, uuidv7 } from "../packages/core/dist/index.js";
 
+const coreVersion = JSON.parse(readFileSync(new URL("../packages/core/package.json", import.meta.url), "utf8")).version;
+
 const argument = (name, fallback) => process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
 const percentile = (values, p) => values.toSorted((a, b) => a - b)[Math.max(0, Math.ceil(values.length * p) - 1)] ?? 0;
 const peakRss = () => process.resourceUsage().maxRSS * 1024;
@@ -65,7 +67,7 @@ if (phase) {
         { id: scope_id, schema_version: "1.0.0", engagement_id, created_at, provenance, kind: "scope", allowed_targets: ["https://benchmark.fixture.invalid"], excluded_targets: [], rules_of_engagement_ref: "fixture:authorized", trust_level: "L2", version: 1 },
         ...Array.from({ length: size }, (_, index) => ({ id: uuidv7(), schema_version: "1.0.0", engagement_id, created_at, provenance, kind: "claim", proposition: `authority-scale-v1 claim ${index}`, status: "proposed", evidence_refs: [], limitations: [], trust_level: "L1", version: 1 }))
       ].map((record, index) => ({ ...record, display_id: `TAR-${String(index + 1).padStart(6, "0")}` }));
-      const payload = { schema_version: "1.0.0", core_version: "1.0.3", engagement_id, read_seq: records.length, committed_seq: records.length, projected_seq: 0, format: "taric-native-json", records };
+      const payload = { schema_version: "1.0.0", core_version: coreVersion, engagement_id, read_seq: records.length, committed_seq: records.length, projected_seq: 0, format: "taric-native-json", records };
       const fixture_import = await measurePhase(store, filename, () => store.importSnapshot({ ...payload, hash: `sha256:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}` }));
       const fixture_import_summary = { read_seq: fixture_import.data.recovered_sequence, record_count: fixture_import.data.imported_records, method: "validated_snapshot_import" };
       const historyRevisions = 25;

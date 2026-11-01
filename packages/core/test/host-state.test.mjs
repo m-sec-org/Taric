@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AuthorityStore, createCoreService, createPrincipal, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 async function fixture() {
   const store = new AuthorityStore();
@@ -9,7 +10,8 @@ async function fixture() {
   const other_engagement_id = uuidv7();
   const host = createPrincipal("host", "state-host", engagement_id);
   const model = createPrincipal("model", "state-model", engagement_id);
-  await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "state" }, "L2");
+  await store.commit({ id: engagement_id, engagement_id, kind: "engagement", name: "state", status: "active" }, "L2");
+  await ensureApprovedScope(store, engagement_id);
   await store.commit({ id: other_engagement_id, engagement_id: other_engagement_id, kind: "engagement", name: "other" }, "L2");
   return { store, service, engagement_id, other_engagement_id, host, model };
 }

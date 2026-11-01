@@ -6,6 +6,8 @@ export interface SchemaMetadata {
   created_at: string;
 }
 
+export const CORE_VERSION = "1.0.4";
+
 /** RFC 9562 UUIDv7 with millisecond timestamp ordering. */
 export function uuidv7(now = Date.now()): string {
   const bytes = randomBytes(16);
@@ -30,6 +32,6 @@ export class DisplayIdAllocator {
   get nextSequence(): number { return this.#next; }
 }
 
-export function schemaMetadata(coreVersion = "1.0.3"): SchemaMetadata {
+export function schemaMetadata(coreVersion = CORE_VERSION): SchemaMetadata {
   return { schema_version: "1.0.0", core_version: coreVersion, created_at: new Date().toISOString() };
 }

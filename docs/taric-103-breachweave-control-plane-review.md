@@ -1,5 +1,7 @@
 # Taric 1.0.3 面向 BreachWeave 的控制面合同评估与改进建议
 
+> **后续状态（2026-11-01）**：本文结论描述锁定源码基线 `2314880`，其缺口不能作为当前状态。当前 Taric `1.0.4` 已提供 ScopeRevision/ROE、完整 Coverage snapshot、Action audit query、ReportSnapshot/CloseDecision；本轮还修复了缺少已批准 ScopeRevision 时创建 WorkRun，以及无 revision 旧 WorkRun 续租/推进/写 Action 或 run-bound Artifact 的绕行路径。Taric workspace 全量测试通过，原评审列出的四项 P0 合同阻塞已在 Taric 侧处理。BreachWeave 本地 acceptance 必须针对新源码重新运行，生产部署验收仍未完成。当前结果见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。
+
 > 基于锁定的 Taric 源码与 BreachWeave 本地集成验证，聚焦授权渗透工作流的可恢复控制面。
 
 - 评估日期：2026-11-01

@@ -6,7 +6,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { InvalidCursorError, loadAuthorityCursorKey } from "./cursor-key.js";
-import { uuidv7 } from "./identity.js";
+import { CORE_VERSION, uuidv7 } from "./identity.js";
 import { coverageDimensions, coverageGateSnapshot, evaluateCoverageGate, validateCoverageManifestInput, type CoverageCell, type CoverageDimension } from "./coverage.js";
 import { DEFAULT_ADMISSION_POLICY, evaluateAdmission, policyDigest, riskClassOf, type AdmissionDecision, type AdmissionPolicy, type AdmissionReview, type PinnedEvidence, type RiskClass } from "./policy.js";
 import { contractNames, SCHEMA_VERSION, type ContractName, type ScopePolicy } from "@taric/schemas";
@@ -829,6 +829,8 @@ export class AuthorityStore {
             const attemptBody = attemptRow?.body ? JSON.parse(attemptRow.body) as Record<string, unknown> : {};
             if (!runRow || runRow.engagement_id !== input.engagement_id || runBody.task_session_ref !== input.session_id || Number(runRow.generation) !== input.generation || runBody.attempt_ref !== input.attempt_id || !runRow.lease_expires_at || runRow.lease_expires_at <= (await this.sql.now()) || !["claimed", "running", "checkpointed", "blocked"].includes(String(runRow.status)) || !attemptRow || Number(attemptRow.generation) !== input.generation || !["claimed", "running", "checkpointed", "blocked"].includes(String(attemptRow.status)) || attemptBody.task_session_ref !== input.session_id)
                 throw new ContractValidationError("stale_version", "execution sidecar is fenced by an inactive or stale Attempt");
+            if (typeof runBody.scope_revision_ref !== "string" || typeof runBody.policy_digest !== "string")
+                throw new ContractValidationError("stale_version", "execution sidecar WorkRun has no ScopeRevision binding");
         }
         const executionId = uuidv7();
         const storedAt = (await this.sql.now());
@@ -871,6 +873,10 @@ export class AuthorityStore {
             const attemptBody = attempt ? JSON.parse(attempt.body) as Record<string, unknown> : {};
             const now = await this.sql.now();
             if (!run || !attempt || run.engagement_id !== binding.engagement_id || attempt.engagement_id !== binding.engagement_id || Number(run.generation) !== binding.generation || Number(attempt.generation) !== binding.generation || run.owner_host !== binding.owner_host || attempt.owner_host !== binding.owner_host || run.lease_expires_at !== attempt.lease_expires_at || run.lease_expires_at <= now || !["claimed", "running", "checkpointed", "blocked"].includes(run.status) || !["claimed", "running", "checkpointed", "blocked"].includes(attempt.status) || runBody.attempt_ref !== binding.attempt_id || attemptBody.task_session_ref !== undefined && attemptBody.task_session_ref !== binding.session_id || runBody.task_session_ref !== undefined && runBody.task_session_ref !== binding.session_id) throw new ContractValidationError("stale_version", "run-bound session requires the current active WorkRun and Attempt");
+            if (typeof runBody.scope_revision_ref !== "string" || typeof runBody.policy_digest !== "string") throw new ContractValidationError("stale_version", "run-bound session requires a ScopeRevision-bound WorkRun");
+            const scopeRow = await this.sql.get<{ version: number; body: string }>("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, binding.engagement_id);
+            const scope = scopeRow ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+            if (!scopeRow || Number(scopeRow.version) !== Number(runBody.scope_version) || scope.revision_state !== "approved" || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || !(await this.scopeRevisionIsEffective(binding.engagement_id, runBody.scope_revision_ref, runBody.policy_digest, now))) throw new ContractValidationError("stale_version", "run-bound session ScopeRevision is stale or ineffective");
             runBody.task_session_ref = binding.session_id;
             attemptBody.task_session_ref = binding.session_id;
             await this.sql.run("UPDATE work_runs SET body=?,updated_at=? WHERE run_id=? AND engagement_id=? AND generation=? AND owner_host=? AND lease_expires_at>?", json(runBody), now, binding.work_run_id, binding.engagement_id, binding.generation, binding.owner_host, now);
@@ -2197,7 +2203,7 @@ export class AuthorityStore {
                 body: string;
             }>;
             const records = rows.map((row) => sanitizeSnapshotRecord(JSON.parse(row.body), sensitive) as CanonicalRecord);
-                const payload = { schema_version: SCHEMA_VERSION, core_version: "1.0.3", engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
+                const payload = { schema_version: SCHEMA_VERSION, core_version: CORE_VERSION, engagement_id: engagementId, read_seq: sequence, committed_seq: current, projected_seq: projected, format: "taric-native-json", records };
             return { ...payload, hash: hash(json(payload)) };
         }));
     }
@@ -2234,7 +2240,7 @@ export class AuthorityStore {
                     throw new ContractValidationError("validation_error", "snapshot JSONL contains an invalid record row");
                 return row.record;
             });
-            normalized = { schema_version: manifest.schema_version, core_version: "1.0.3", engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
+            normalized = { schema_version: manifest.schema_version, core_version: CORE_VERSION, engagement_id: manifest.engagement_id, read_seq: manifest.read_seq, committed_seq: manifest.committed_seq, projected_seq: manifest.projected_seq, format: "taric-native-json", records, hash: manifest.integrity_hash };
         }
         else
             normalized = snapshot;
@@ -2949,6 +2955,8 @@ export class AuthorityStore {
             const expiry = new Date(now.getTime() + (input.ttl_ms ?? 60000)).toISOString();
             const engagementRow = await this.sql.get<{ body: string }>("SELECT body FROM records WHERE id=? AND kind='engagement'", input.engagement_id);
             const engagement = engagementRow?.body ? JSON.parse(engagementRow.body) as Record<string, unknown> : undefined;
+            if (!engagement)
+                throw new ContractValidationError("validation_error", "WorkRun requires an initialized Engagement");
             if (engagement && ["completed", "archived"].includes(String(engagement.status)))
                 throw new ContractValidationError("conflict", "closed Engagements cannot claim WorkRuns");
             const prior = (await this.sql.get("SELECT generation,status,lease_expires_at,engagement_id,work_item_id,body FROM work_runs WHERE run_id=?", runId)) as any;
@@ -3013,6 +3021,8 @@ export class AuthorityStore {
             const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
             const scopeRevisionRef = typeof scope.current_revision_ref === "string" ? scope.current_revision_ref : undefined;
             const scopePolicyDigest = typeof scope.policy_digest === "string" ? scope.policy_digest : undefined;
+            if (!scopeRef || !scopeRow || !scopeRevisionRef || !scopePolicyDigest)
+                throw new ContractValidationError("conflict", "WorkRun requires a current approved ScopeRevision before claim");
             if (scopeRevisionRef) {
                 const revisionRow = (await this.sql.get("SELECT engagement_id,body FROM records WHERE id=? AND kind='scope_revision'", scopeRevisionRef)) as { engagement_id?: string; body?: string } | undefined;
                 const revision = revisionRow?.body ? JSON.parse(revisionRow.body) as Record<string, unknown> : undefined;
@@ -3056,12 +3066,12 @@ export class AuthorityStore {
             if (!row || row.owner_host !== hostId || Number(row.generation) !== generation || !row.lease_expires_at || row.lease_expires_at <= now.toISOString() || ["completed", "failed", "cancelled", "lost"].includes(String(row.status)))
                 throw new ContractValidationError("stale_version", "work run lease is expired or fenced");
             const runBody = JSON.parse(row.body) as Record<string, unknown>;
-            if (typeof runBody.scope_revision_ref === "string") {
-                const scopeRow = (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, row.engagement_id)) as { version?: number; body?: string } | undefined;
-                const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
-                if (Number(scopeRow?.version) !== Number(runBody.scope_version) || scope.revision_state !== "approved" || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || !(await this.scopeRevisionIsEffective(row.engagement_id, String(runBody.scope_revision_ref), String(runBody.policy_digest), now.toISOString())))
-                    throw new ContractValidationError("stale_version", "work run ScopeRevision is stale or outside its effective time window");
-            }
+            if (typeof runBody.scope_revision_ref !== "string" || typeof runBody.policy_digest !== "string")
+                throw new ContractValidationError("stale_version", "work run has no ScopeRevision binding");
+            const scopeRow = (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, row.engagement_id)) as { version?: number; body?: string } | undefined;
+            const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+            if (Number(scopeRow?.version) !== Number(runBody.scope_version) || scope.revision_state !== "approved" || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || !(await this.scopeRevisionIsEffective(row.engagement_id, runBody.scope_revision_ref, runBody.policy_digest, now.toISOString())))
+                throw new ContractValidationError("stale_version", "work run ScopeRevision is stale or outside its effective time window");
             const expiry = new Date(now.getTime() + ttlMs).toISOString();
             const updated = (await this.sql.run("UPDATE work_runs SET lease_expires_at=?,heartbeat_at=?,updated_at=? WHERE run_id=? AND generation=? AND owner_host=? AND lease_expires_at>? AND status NOT IN ('completed','failed','cancelled','lost')", expiry, now.toISOString(), now.toISOString(), runId, generation, hostId, now.toISOString()));
             if (Number(updated.changes) !== 1)
@@ -3159,14 +3169,10 @@ export class AuthorityStore {
             const currentScope = currentScopeRow?.body ? JSON.parse(currentScopeRow.body) as Record<string, unknown> : {};
             const currentScopeRevisionRef = typeof currentScope.current_revision_ref === "string" ? currentScope.current_revision_ref : undefined;
             const currentPolicyDigest = typeof currentScope.policy_digest === "string" ? currentScope.policy_digest : undefined;
-            if (currentScopeRevisionRef) {
-                if (currentScope.revision_state !== "approved" || !currentPolicyDigest || runBody.scope_revision_ref !== currentScopeRevisionRef || runBody.policy_digest !== currentPolicyDigest || checkpoint.scope_revision_ref !== currentScopeRevisionRef || checkpoint.policy_digest !== currentPolicyDigest)
-                    throw new ContractValidationError("stale_version", "checkpoint ScopeRevision binding is stale");
-                if (!(await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, currentPolicyDigest!, await this.sql.now())))
-                    throw new ContractValidationError("stale_version", "checkpoint ScopeRevision is outside its effective time window");
-            } else if (runBody.scope_revision_ref !== undefined || runBody.policy_digest !== undefined || checkpoint.scope_revision_ref !== undefined || checkpoint.policy_digest !== undefined) {
-                throw new ContractValidationError("stale_version", "checkpoint ScopeRevision binding is unavailable");
-            }
+            if (!currentScopeRevisionRef || !currentPolicyDigest || runBody.scope_revision_ref !== currentScopeRevisionRef || runBody.policy_digest !== currentPolicyDigest || checkpoint.scope_revision_ref !== currentScopeRevisionRef || checkpoint.policy_digest !== currentPolicyDigest || currentScope.revision_state !== "approved")
+                throw new ContractValidationError("stale_version", "checkpoint ScopeRevision binding is stale or unavailable");
+            if (!(await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, currentPolicyDigest, await this.sql.now())))
+                throw new ContractValidationError("stale_version", "checkpoint ScopeRevision is outside its effective time window");
             if (owner?.host_id !== row.owner_host || owner?.agent_id !== row.owner_agent || checkpoint.lease_expires_at !== row.lease_expires_at)
                 throw new ContractValidationError("authorization_error", "checkpoint owner and lease must match the active host attestation");
             if (Number(checkpoint.source_read_seq) > currentSeq || Number(contextManifest.read_seq) !== Number(checkpoint.source_read_seq) || typeof contextManifest.context_snapshot_id !== "string" || typeof contextManifest.builder_version !== "string")
@@ -4258,6 +4264,12 @@ export class AuthorityStore {
         }
         if (body.task_session_ref !== input.session_id)
             throw new ContractValidationError("authorization_error", "Artifact does not match the registered WorkRun session");
+        if (typeof body.scope_revision_ref !== "string" || typeof body.policy_digest !== "string")
+            throw new ContractValidationError("stale_version", "Artifact WorkRun has no ScopeRevision binding");
+        const scopeRow = await this.sql.get<{ version: number; body: string }>("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", body.scope_ref, input.engagement_id);
+        const scope = scopeRow ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
+        if (!scopeRow || Number(scopeRow.version) !== Number(body.scope_version) || scope.revision_state !== "approved" || scope.current_revision_ref !== body.scope_revision_ref || scope.policy_digest !== body.policy_digest || !(await this.scopeRevisionIsEffective(input.engagement_id, body.scope_revision_ref, body.policy_digest, await this.sql.now())))
+            throw new ContractValidationError("stale_version", "Artifact WorkRun ScopeRevision is stale or ineffective");
         if (row.owner_host !== input.principal || Number(row.generation) !== input.generation || !row.lease_expires_at || row.lease_expires_at <= (await this.sql.now()) || !["claimed", "running", "checkpointed", "blocked"].includes(String(row.status)))
             throw new ContractValidationError("stale_version", "Artifact write is fenced by an expired or stale WorkRun");
         if (body.attempt_ref !== input.attempt_id)
@@ -4313,10 +4325,11 @@ export class AuthorityStore {
                 const currentScopeRef = typeof item.scope_ref === "string" ? item.scope_ref : typeof engagement.scope_ref === "string" ? engagement.scope_ref : undefined;
                 const currentScopeRow = currentScopeRef ? (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", currentScopeRef, row.engagement_id)) as { version?: number; body?: string } | undefined : undefined;
                 const currentScope = currentScopeRow?.body ? JSON.parse(currentScopeRow.body) as Record<string, unknown> : {};
-                const hasRevisionBinding = body.scope_revision_ref !== undefined || currentScope.current_revision_ref !== undefined;
-                if (hasRevisionBinding && (body.scope_ref !== currentScopeRef || Number(body.scope_version) !== Number(currentScopeRow?.version) || currentScope.revision_state !== "approved" || body.scope_revision_ref !== currentScope.current_revision_ref || body.policy_digest !== currentScope.policy_digest))
+                const currentRevisionRef = typeof currentScope.current_revision_ref === "string" ? currentScope.current_revision_ref : undefined;
+                const currentPolicyDigest = typeof currentScope.policy_digest === "string" ? currentScope.policy_digest : undefined;
+                if (!currentRevisionRef || !currentPolicyDigest || body.scope_ref !== currentScopeRef || Number(body.scope_version) !== Number(currentScopeRow?.version) || currentScope.revision_state !== "approved" || body.scope_revision_ref !== currentRevisionRef || body.policy_digest !== currentPolicyDigest)
                     throw new ContractValidationError("stale_version", "work run ScopeRevision binding is stale; stop and replan or reauthorize");
-                if (hasRevisionBinding && !(await this.scopeRevisionIsEffective(row.engagement_id, String(body.scope_revision_ref), String(body.policy_digest), now)))
+                if (!(await this.scopeRevisionIsEffective(row.engagement_id, currentRevisionRef, currentPolicyDigest, now)))
                     throw new ContractValidationError("stale_version", "work run ScopeRevision is outside its effective time window");
             }
             body.status = status;
@@ -4486,16 +4499,13 @@ export class AuthorityStore {
             const runBody = run.body ? JSON.parse(run.body) as Record<string, unknown> : {};
             if ((input.scope_revision_ref !== undefined && input.scope_revision_ref !== runBody.scope_revision_ref) || (input.policy_digest !== undefined && input.policy_digest !== runBody.policy_digest))
                 throw new ContractValidationError("stale_version", "Action binding differs from the active WorkRun ScopeRevision");
-            if (typeof runBody.scope_revision_ref === "string") {
+            if (typeof runBody.scope_revision_ref === "string" && typeof runBody.policy_digest === "string") {
                 const scopeRow = (await this.sql.get("SELECT version,body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, run.engagement_id)) as { version?: number; body?: string } | undefined;
                 const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
                 if (Number(scopeRow?.version) !== Number(runBody.scope_version) || scope.current_revision_ref !== runBody.scope_revision_ref || scope.policy_digest !== runBody.policy_digest || scope.revision_state !== "approved" || !(await this.scopeRevisionIsEffective(String(run.engagement_id), String(runBody.scope_revision_ref), String(runBody.policy_digest), await this.sql.now())))
                     throw new ContractValidationError("stale_version", "Action WorkRun ScopeRevision is stale, invalidated, or outside its effective time window");
             } else {
-                const scopeRow = typeof runBody.scope_ref === "string" ? (await this.sql.get("SELECT body FROM records WHERE id=? AND kind='scope' AND engagement_id=?", runBody.scope_ref, run.engagement_id)) as { body?: string } | undefined : undefined;
-                const scope = scopeRow?.body ? JSON.parse(scopeRow.body) as Record<string, unknown> : {};
-                if (scope.current_revision_ref !== undefined || scope.policy_digest !== undefined)
-                    throw new ContractValidationError("stale_version", "Action WorkRun has no binding to the current ScopeRevision");
+                throw new ContractValidationError("stale_version", "Action WorkRun has no binding to the current ScopeRevision");
             }
             const body: Record<string, unknown> = {
                 ...priorBody,
@@ -4674,9 +4684,7 @@ export class AuthorityStore {
         const actionRefsValid = !checkpoint || ((checkpoint.action_refs as unknown[]).every((ref) => typeof ref === "string" && currentActions.some((item) => item.action_id === ref)) && (checkpoint.tool_result_refs as unknown[]).every((ref) => typeof ref === "string" && verifiedResults.includes(ref)));
         const scopeValid = currentScopeRef === (checkpoint?.scope_ref as string | undefined)
             && (!currentScopeRef || Boolean(scopeRow?.body && scopeRow.engagement_id === row.engagement_id && !this.isRecalled(JSON.parse(scopeRow.body) as CanonicalRecord, now)));
-        const scopeRevisionValid = currentScopeRevisionRef
-            ? currentScopeBody.revision_state === "approved" && run.scope_revision_ref === currentScopeRevisionRef && run.policy_digest === currentPolicyDigest && checkpoint?.scope_revision_ref === currentScopeRevisionRef && checkpoint?.policy_digest === currentPolicyDigest && await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, String(currentPolicyDigest ?? ""), now)
-            : run.scope_revision_ref === undefined && run.policy_digest === undefined && checkpoint?.scope_revision_ref === undefined && checkpoint?.policy_digest === undefined;
+        const scopeRevisionValid = Boolean(currentScopeRevisionRef && currentPolicyDigest && currentScopeBody.revision_state === "approved" && run.scope_revision_ref === currentScopeRevisionRef && run.policy_digest === currentPolicyDigest && checkpoint?.scope_revision_ref === currentScopeRevisionRef && checkpoint?.policy_digest === currentPolicyDigest && await this.scopeRevisionIsEffective(row.engagement_id, currentScopeRevisionRef, currentPolicyDigest, now));
         const premiseChecks = {
             engagement: run.engagement_id === row.engagement_id,
             work_item: Boolean(workItem && workItemRow && workItemRow.engagement_id === row.engagement_id && !this.isRecalled(workItem as CanonicalRecord, now) && run.work_item_id === row.work_item_id && (!checkpoint || (checkpoint.work_item_ref === row.work_item_id && Number(checkpoint.work_item_version) === Number(workItemRow.version) && Number(checkpoint.target_version) === Number(workItem.target_version ?? workItemRow.version)))),

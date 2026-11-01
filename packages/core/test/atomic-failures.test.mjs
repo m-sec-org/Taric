@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthorityStore, uuidv7 } from "../dist/index.js";
+import { ensureApprovedScope } from "./scope-fixture.mjs";
 
 test("SQLite event-boundary aborts roll back records, governance, checkpoints and actions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "taric-atomic-failure-"));
@@ -50,13 +51,15 @@ test("SQLite event-boundary aborts roll back records, governance, checkpoints an
     assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM idempotency WHERE key='atomic-admission'").get().n), 0);
     clear();
 
-    const workItem = { id: uuidv7(), engagement_id, kind: "work_item", title: "verify", status: "queued" };
+    const { scope } = await ensureApprovedScope(store, engagement_id);
+    const workItem = { id: uuidv7(), engagement_id, kind: "work_item", scope_ref: scope.id, title: "verify", status: "queued" };
     (await store.commit(workItem, "L2"));
     const run = (await store.claimWorkRun({ work_item_id: workItem.id, engagement_id, host_id: "pi", agent_id: "worker" }));
     trigger("work_run.checkpoint");
     const checkpoint = {
       work_item_ref: workItem.id, work_run_ref: run.run_id, attempt_ref: run.attempt_ref, generation: run.generation,
-      target_version: run.target_version, work_item_version: run.work_item_version, scope_version: run.scope_version,
+      target_version: run.target_version, work_item_version: run.work_item_version, scope_ref: run.scope_ref, scope_version: run.scope_version,
+      scope_revision_ref: run.scope_revision_ref, policy_digest: run.policy_digest,
       owner: run.owner, lease_expires_at: run.lease_expires_at, source_read_seq: run.read_seq,
       completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [],
       unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [],

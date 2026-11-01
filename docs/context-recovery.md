@@ -1,8 +1,8 @@
 # Context cursor recovery
 
-> Last reviewed: 2026-10-27
+> Last reviewed: 2026-11-01
 
-The context cursor recovery tests passed in the `1.0.1` workspace validation on 2026-10-27. The scale numbers at the end of this page are from the pre-1.0.0 candidate experiment; they remain fixture-specific historical observations and are not 1.0.1 release measurements or an SLA.
+Context cursor tests are included in the Taric `1.0.4` workspace validation recorded in the [current control-plane verification report](taric-103-breachweave-control-plane-verification.md). Live PostgreSQL and deployment checks have not been rerun for `1.0.4`. The scale numbers at the end of this page are from the pre-1.0.0 candidate experiment; they remain fixture-specific historical observations and are not current release measurements or an SLA.
 
 `context.build` and `context.query` produce ordered, budgeted context from a fixed `read_seq`. Use the same principal, Engagement, policy version, worker role, WorkItem, filters, ordering, candidate setting, and character budget when continuing. Preserve those request fields together with the cursor. A continuation cannot change the source sequence or cross an Engagement boundary. MCP exposes the same cursor, filter, ordering, budget, and sequence inputs.
 
@@ -50,4 +50,4 @@ The Core `buildContextPack` helper accepts `scanBudget` (2–1000 authority rows
 
 The cursor tests cover restart, two instances, key modes/loss/rotation/authority binding, tampering, principal/Engagement/filter/ordering/budget/sequence bindings, stale dependencies, checkpoint ordering, fixed versions, and no duplicate or omitted IDs. Mandatory context that cannot fit the character budget returns `minimum_budget_required` with a minimum described in the message, while remaining ranges are explicitly unexamined.
 
-The historical [legacy run](benchmarks/authority-scale-v2-baseline.json) measured a 0.90-second first page at 10k and 5.36 seconds at 50k, with 9.2 kB cursors that grew on continuation (17.6→34.3 kB over three pages). The final bounded run in that pre-1.0.0 candidate experiment, [authority-scale-v3.json](benchmarks/authority-scale-v3.json), measured 0.53/3.08 seconds for the same fixtures, held the first-page and every continuation cursor at 1,039 bytes, and reported a 256-row scan ceiling (255 returned) on first and continuation pages. The 50k first page is 42.5% lower than the legacy sample, so the 50% reduction target was not reached on that host; these are host-and-fixture observations, not general SLA or 1.0.0 release evidence.
+The historical [legacy run](benchmarks/authority-scale-v2-baseline.json) measured a 0.90-second first page at 10k and 5.36 seconds at 50k, with 9.2 kB cursors that grew on continuation (17.6→34.3 kB over three pages). The final bounded run in that pre-1.0.0 candidate experiment, [authority-scale-v3.json](benchmarks/authority-scale-v3.json), measured 0.53/3.08 seconds for the same fixtures, held the first-page and every continuation cursor at 1,039 bytes, and reported a 256-row scan ceiling (255 returned) on first and continuation pages. The 50k first page is 42.5% lower than the legacy sample, so the 50% reduction target was not reached on that host; these are host-and-fixture observations, not general SLA or current release evidence.
