@@ -1,314 +1,107 @@
-# Taric 代码设计文档
+# Taric 架构与模块说明
 
-## 目录
+## Taric 解决什么问题
 
-1. [概述](#1-概述)
-2. [技术栈](#2-技术栈)
-3. [仓库与代码结构](#3-仓库与代码结构)
-4. [核心设计决策](#4-核心设计决策)
-5. [Artifact 原文存储（任务会话 spool）](#5-artifact-原文存储任务会话-spool)
-6. [数据模型](#6-数据模型)
-7. [API 表面](#7-api-表面)
-8. [配置与环境变量](#8-配置与环境变量)
-9. [外部依赖](#9-外部依赖)
-10. [业务规则与约束](#10-业务规则与约束代码强制的不变量)
-11. [非功能特性](#11-非功能特性)
-12. [测试策略与发布门槛](#12-测试策略与发布门槛)
-13. [已知差距与假设](#13-已知差距与假设)
-14. [附录](#14-附录)
+攻防任务会产生大量观察、扫描结果、假设、证据和待办。普通对话历史难以保证内容有出处、不同智能体看到同一状态，也无法安全恢复中断的执行。Taric 为这些信息提供一个按 Engagement 隔离、可审计、带版本和权限控制的长期记忆与协作 authority。
 
-## 1. 概述
+Taric 保存并管理的是“宿主提交了什么、如何治理、当前允许什么状态迁移”。它不直接证明目标系统事实，不运行模型，不启动 agent，不执行目标请求，也不替宿主授权动作。模型产生的内容默认是候选；要变成更高信任状态，必须经过证据、Admission 和独立 Review 等治理环节。
 
-Taric 是渗透测试智能体的长期记忆与协作组件。Engagement 是隔离单位；Core 管理版本化记录、Proposal/Review/Admission、覆盖、WorkRun/Attempt、checkpoint、动作状态、审计、Context 和可选 Artifact spool。宿主负责模型调用、worker 调度、真实工具执行、人工身份、动作授权及目标凭据的 ACL、加密、生命周期和内容保留策略。授权的目标系统认证材料可以作为 opaque Artifact 原文存取；连接 Taric 所需的 gateway、authority 和 TLS 配置凭据由宿主独立保管。
-
-当前实现同时支持持久单机 SQLite 与显式启用的 PostgreSQL 共享 authority，两者复用同一套异步 Core 治理代码。CLI、MCP、原生 adapter 和本机 Node proxy 都调用 Core；PostgreSQL 不复制业务治理，Markdown/Git 不充当 authority。模型不能调用 writer/host/operator 路径，也不能自行声明已验证事实。
-
-主要能力包括 L0/L1/L2 信任隔离、独立 Finding 晋升、不可变资源修订、关系与三方 patch、有界影响传播、运行租约与恢复、固定版本 Context、有界宿主状态轮询、分块原文存储及可重建投影。公开快照导入与通用迁移不受支持。
-
-当前 root workspace 和 runtime components 声明版本 `1.0.4`，API 为 `1.4.0`、adapter 为 `1.1`；record schema `1.0.0`、authority storage `authority-storage/4` 和 SQL 格式 `authority-sql/4` 保持不变。API 1.4 提供 immutable ScopeRevision、固定完整域 Coverage snapshot、Action 审计读取、ReportSnapshot 与 CloseDecision。WorkRun 必须绑定当前有效的已批准 ScopeRevision；旧式未绑定运行不能继续续租、推进、提交 checkpoint/Action 或 run-bound Artifact。新增记录复用既有通用 record version/event 布局，不改变 Taric 作为记忆与治理组件、由宿主执行和授权目标动作的定位。较早候选报告绑定旧 worktree，不代表当前源码验证；当前实现状态见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。
-
-## 2. 技术栈
-
-| 层 | 实际实现 |
-|---|---|
-| TypeScript | ESM、strict、target ES2022，`tsc` 分包构建 |
-| Node.js | Node SQLite driver 在调用时才动态加载 `node:sqlite`；已验证 Node 22.21.1。使用 Bun 注入 Bun SQLite driver 时不加载 Node driver |
-| SQLite | `DatabaseSync`、WAL；对外为异步方法，同进程按数据库文件排队 |
-| PostgreSQL | `pg` 驱动，支持声明为 14～18；事务、服务端时钟与 schema 范围锁；布局 `authority-sql/4` |
-| Schema | JSON Schema 2020-12、Ajv 与 ajv-formats；72 个 `$defs`，包含基础类型、领域及请求/响应定义，不等于 72 种领域记录 |
-| Transport | CLI JSON、MCP stdio、本机 Unix socket JSON-RPC、独立 Artifact binary socket |
-| 验证 | `node:test`、`assert/strict`；Hermes 插件使用 Python unittest |
-
-`pg` 是已安装 workspace 依赖，但 SQLite 默认启动不加载 PG 驱动或连接数据库。Bun 可通过独立 Node proxy 接入，也可以选择 `@taric/driver-bun-sqlite@1.0.4` 进程内驱动；本地驱动测试不代表 npm registry 发布或第三方宿主认证。
-
-## 3. 仓库与代码结构
-
-| 模块 | 职责与实现入口 |
-|---|---|
-| `packages/schemas` | [JSON Schema](../packages/schemas/schemas/v1/core.schema.json)、[操作注册表](../packages/schemas/src/registry.ts)、[TS 类型](../packages/schemas/src/types.ts) |
-| `core/service.ts` | [公开 dispatch、身份与能力授权、请求校验及返回映射](../packages/core/src/service.ts) |
-| `core/store.ts` | [共享治理与持久化](../packages/core/src/store.ts)：版本、CAS、admission、运行、审计、目录与有界读取 |
-| `core/sql-driver.ts` / `sql-schema.ts` | [连接、队列、事务、SQL 方言与测量](../packages/core/src/sql-driver.ts)；[表和索引](../packages/core/src/sql-schema.ts) |
-| `core/runtime-startup.ts` / `runtime-service.ts` | [配置发现与解析](../packages/core/src/runtime-startup.ts)；[SQLite/PG 服务构造和启用门](../packages/core/src/runtime-service.ts) |
-| `core/postgres.ts` / `shared-runtime.ts` | PG readiness、共享后端合同、构造前及调用前健康校验 |
-| `core/policy.ts` / `coverage.ts` | 非 LLM 晋升硬门、防护控制与访问决策观察 |
-| `core/context.ts` / `cursor-key.ts` | [固定读取点与有界 Context](../packages/core/src/context.ts)；[authority/root 绑定的持久密钥](../packages/core/src/cursor-key.ts) |
-| `core/artifact-content-store.ts` | [会话 spool、上传、发布、恢复、原文与目录读取](../packages/core/src/artifact-content-store.ts) |
-| `core/projection.ts` | 白名单投影、generation 发布、本地 Git checkpoint、受控 remote callbacks |
-| `core/adapter.ts` / `pi-adapter.ts` / `deepseek-adapter.ts` | 通用薄客户端、实例状态、锁定宿主合同及 hook 绑定 |
-| `core/adapter-rpc.ts` | [固定 host principal 的本机 JSON/binary socket](../packages/core/src/adapter-rpc.ts) |
-| `core/quality.ts` / `release-report.ts` | 确定性分层质量计算、来源校验及带 digest 的 release report |
-| `core/quality-release-activation.ts` | 独立报告 pin、implementation/schema/policy digest 校验及质量 capability fail-closed activation |
-| `core/implementation-digest.ts` | 当前 Core 实现摘要，用于 runtime quality evidence 绑定 |
-| `packages/cli` | JSON 命令、文件流式 append、配置管理；[proxy.ts](../packages/cli/src/proxy.ts) 打开 Core 并监听本机 RPC |
-| `packages/mcp` | [stdio server](../packages/mcp/src/server.ts)，固定六工具 |
-| `packages/driver-bun-sqlite` | Bun `bun:sqlite` reference authority driver |
-| `packages/hermes-plugin` | Python general plugin，经认证 Unix socket 调用 Core，不替换 MemoryProvider |
-
-## 4. 核心设计决策
-
-### 4.1 权威层：单写者事务、钉住快照与部署防护
-
-`AuthorityStore` 统一执行 SQLite/PG 治理。driver 提供异步 SQL、连接队列、嵌套事务、时钟与方言；同一治理事务提交 canonical/历史版本、审计、幂等结果、outbox 和 operation marker。SQLite 使用写事务串行提交；PG 写事务保持同一 checked-out client，租约使用服务端时间。
-
-canonical ID 由 Core 分配 UUIDv7，display ID 使用安装级递增别名；更新保持逻辑身份。Proposal 的 `expected_version` 是创建/更新基线，CAS 竞争不能覆盖另一提交。幂等键同时核对 operation、principal、Engagement 与规范化请求哈希；不同载荷同键明确冲突。
-
-`recordsPage`/`proposalsPage` 固定历史序列并用 keyset 分页；`snapshot`/export 是全量物化路径，不能因 Context 已有界就宣称全部读取有界。outbox 是派生层恢复设施，宿主轮询不消费 outbox。
-
-`openRuntimeService` 默认打开 `~/.taric/authority.sqlite`。CLI、MCP 和 proxy 可以分别打开同一台机器上的本地文件，由 SQLite 锁协调提交；同进程队列不是跨进程队列。共享 SQLite 文件、NFS 锁、共享 Git clone 或独立副本不能提供多主机 authority。
-
-多主机显式选择 `multi_host_authority`，读取匹配当前编译 Core/schema/policy 摘要的 activation report，检查已部署 schema/lease，再构造服务并在调用前复验健康。缺失/不匹配证据或数据库故障失败关闭，没有 SQLite fallback。runtime 启动不自动运行 conformance fixture，也不迁移 PG schema。
-
-### 4.2 分级信任与提案治理
+## 系统边界
 
 ```mermaid
 flowchart LR
-    P[Proposal: L0 / pending] --> A[admission.evaluate: 结构准入]
-    A --> C[canonical: L1 / machine_approved]
-    C --> R[独立 reviewer: review.submit]
-    R --> G[writer/operator: admission.promote_l2]
-    G --> V[Finding: L2 / independently_verified]
+  A[模型 / 智能体] -->|上下文、候选、建议| T[CLI / MCP / Gateway / Adapter]
+  H[可信宿主与操作人员] -->|授权身份、工具观察、审批与结果| T
+  T --> C[Core：校验、权限、治理与恢复]
+  C --> S[SQLite 单机 / PostgreSQL 多主机]
+  C --> F[Artifact 内容根与派生索引]
+  H --> X[目标系统与安全工具]
+  X -->|真实执行结果由宿主回传| H
 ```
 
-`capture.observation` 仍委托提案入口，不直接创建 L2。`admission.evaluate`（以及 `admission.commit` 别名）检查结构、引用、来源、版本，返回业务决策；它不运行完整证据/freshness/independence 硬门。调用方既要检查外层 `ok`，也要检查 admission 的 `data.ok`，拒绝决策可以在没有 canonical 更新的情况下追加审核事件。
+`Core` 是唯一业务权威。CLI、MCP、gateway、adapter 是不同使用者的接入层，共享同一组操作合同和 Core 授权规则。SQLite 保存单机 authority；PostgreSQL 用于明确配置并通过证据门控的共享 authority。Artifact 正文可以放在 Taric content root，也可以由宿主保存在外部，只向 Taric 提交引用。
 
-Finding 晋升固定 proposal/evidence hash、target version、policy 和 review refs，由策略引擎重算 schema/scope/evidence/freshness/independence 五门。informational/low/medium 至少一名独立 reviewer，high/critical 至少两名且要求异构性；证据年龄上限分别为不限/180/90/30/14 天。reviewer 身份与模型/提示/规则栈 attestation 来自可信 transport，请求不能自报。
+## 五个主要模块
 
-普通记录查询默认只返回可召回 L2；host/operator 可以显式查看 L1。Context 有自己的 `include_candidates` 与安全/必含项规则，不能把“普通查询默认 L2”推广为所有 Context 项均为 L2。模型提交内容不能指定 canonical ID、版本、display ID、trust、审核或策略结果。
+| 模块 | 解决的问题 | 典型使用者与接入方式 |
+| --- | --- | --- |
+| **CLI：`packages/cli`** | 给人、脚本和本机宿主稳定的 JSON 命令接口；提供配置发现、退出码、错误诊断、文件流式上传、本机 proxy 和远程 gateway 启动入口。 | 运维人员用它初始化任务、诊断状态、检查审计和修复派生状态；自动化脚本用 JSON 调用 operation；异构本机宿主使用 `taric proxy`。 |
+| **Gateway：CLI 内的 `gateway` 子系统** | 将远程连接映射到固定身份，避免远程客户端直接持有 authority 数据库连接。它不是独立 package，也不是治理层。 | 多宿主集中部署通过 TLS TCP 或 HTTPS 访问；每个 token 固定映射 principal/role/Engagement。HTTPS 用于请求响应；TLS TCP 可用连接级会话和通知。 |
+| **Core：`packages/core`** | 执行身份与 capability 检查、领域状态迁移、审计和持久化。管理记忆版本、证据、ScopeRevision、Coverage、运行 lease/generation、checkpoint、Action 结果及 Artifact 发布。 | Node 宿主进程内嵌 Core；CLI、MCP、adapter 和 gateway 经 CoreService 调用。Core 不执行目标系统动作。 |
+| **MCP：`packages/mcp`** | 将 Core 允许的操作转成 MCP stdio named tools。工具名、输入 schema 和目录均由启动 principal 的权限动态生成。 | MCP 客户端或模型通过 `tools/list` 获取当前目录，再以 `tools/call` 使用上下文、提案和受控历史检索。一个进程只代表一个固定安全身份。 |
+| **Schemas：`packages/schemas`** | 定义领域记录和每个 operation 的请求 Schema、版本、角色、能力与写入属性，是不同接入层共享的 API 合同。 | 宿主校验请求、生成类型、展示工具 schema 和运行合同测试。Schema 不代替 Core 授权，不能直接写数据库。 |
 
-### 4.3 身份与授权模型
+### 模块协作方式
 
-公开接入统一使用 `service.dispatch(operation, principal, request)`。`createPrincipal`/`registerTransportPrincipal` 将对象登记到进程内 WeakSet；仅在 body 中写 `transport_verified:true` 无效。reviewer attestation 和 host transport session 在 WeakMap 中保存注册时快照。
+1. 宿主从可信配置选择运行方式和 principal，并将请求送到 CLI、MCP、gateway、adapter 或进程内 Core。
+2. 接入层按 `@taric/schemas` registry 验证公开请求格式；MCP 还据此生成工具目录。
+3. Core 验证 principal、角色、capability、Engagement、版本、幂等键和业务前置条件，再在 authority 事务中提交状态及审计。
+4. 查询返回受权限过滤、有界且可分页的数据。Artifact 原文走独立内容边界；索引或 Context 的水位用于判断结果是否完整。
+5. 宿主根据返回状态自行决定是否调度、授权和执行外部动作，再把观察和结果写回 Core。
 
-授权是 operation 注册表角色 × 所需 capability × Engagement；operator 也不能绕过 host-only 或 reviewer-only 的角色限制。默认能力如下：
+## 主要领域对象
 
-| role | `createPrincipal` 默认 capability |
-|---|---|
-| model | read、propose |
-| host | read、propose、work、checkpoint、action、content |
-| reviewer | read、review |
-| writer | read、propose、admit、writer |
-| operator | read、propose、admit、writer、audit、operator、content |
+- **Engagement**：任务和数据的隔离单元。一个 principal 只能在其绑定或获授权的 Engagement 内操作。
+- **ScopeRevision**：不可变的目标范围和授权依据。可执行 WorkRun 必须绑定当前有效且已批准的 revision。
+- **Resource / ResourceRevision**：目标资产及其不可变版本。引用和影响分析使用 canonical ID 与 revision。
+- **Observation / Evidence / Claim / Finding**：从原始观察到论断和正式发现的证据链。Proposal 是候选提交；受信状态变化由 Core 策略控制。
+- **Coverage**：预期测试维度及当前状态。Coverage gate 面向完整测试域，不能由搜索或上下文命中替代。
+- **WorkItem / WorkRun / Attempt / Checkpoint**：由宿主创建、领取和恢复的工作状态。lease 与 generation 防止过期 worker 回写当前结果。
+- **ActionIntent / ActionAudit**：模型建议、宿主授权决定和执行结果的分离记录。Taric 不发送目标请求或自动重放动作。
+- **Artifact**：任务会话附件或文本。可以是外部引用，也可以是 content root 中的分块内容；原文默认不进入模型上下文。
+- **ReportSnapshot / CloseDecision**：将报告与 Scope、Coverage、Evidence 和 Artifact 水位绑定，关闭状态通过版本控制并保留历史决策。
 
-host 调用 admission 需可信 transport 额外授予 `admit`；host/operator 原文读取均须另授 `content_read`。CLI `TARIC_CONTENT_READ_ENABLED=true` 可启用该额外能力；普通 proxy 不提供任意 capability grant。请求不能提升角色或 capability。注册表角色不允许的操作也不能靠加 grant 放开。
+## 原文检索如何工作
 
-`createCoreService` 暴露的 `init()`、`status()` 等低层库方法并非每个都带 principal；宿主不能把 service 对象或这些方法原样暴露给不可信调用者。公开 dispatch 才是统一 operation 边界。
+宿主可把已提交的执行日志或文本输出作为 Artifact，并在开始存储时明确标记 `history_content_class: "execution_history"`。通过完整性检查后，Core 为该文本维护可重建索引。MCP model 必须另行获得 `history_read`，随后可查询事件、搜索片段并按偏移读取有限原文。
 
-### 4.4 Context Pack：最小投影、cursor 与草稿封存
+此能力的价值是让 agent 能基于之前的运行细节恢复推理，而不用把整份日志塞进 prompt。索引水位、完整性标志和固定 cursor 让宿主知道搜索范围；外部引用、二进制、未分类内容及 `task_credential` 不可通过此通道读取。宿主仍负责日志采集、脱敏、保留和 ACL。
 
-Context 首屏与续页固定 `read_seq/read_time`，SQL 下推 Engagement/sequence/筛选，按 scope/ROE、目标 WorkItem、checkpoint、delta/冲突/过期/覆盖缺口、直接材料与背景分组 keyset 读取，再做字段白名单投影。后续提交或到期不改变该分页的原读取点。
+## 场景一：攻防人员协作
 
-字符预算默认 4000，单位为序列化字符，非模型 token。强制项放不下返回 `minimum_budget_required`；分页返回 `items`、`mandatory_constraints`、`manifest`、`used`、`cursor`、`read_stats` 和 omitted 完整性标志，未检视范围不能当作完整遗漏计数。
+1. operator 建立 Engagement、ScopeRevision、资源清单和测试计划。
+2. agent 通过 MCP 或原生 adapter 获取 Context Pack，按预算读取必要背景。
+3. agent 提交 Proposal；host 把真实扫描/工具输出整理成 Observation 和 Evidence，并更新 Coverage。
+4. Admission 与独立 Review 根据规则处理候选，Core 记录决定和所引用的证据。
+5. host claim WorkRun，执行自己批准的测试动作，保存 checkpoint，并回传结果；Scope 或 lease 无效时，Core 拒绝继续写入。
+6. 报告和 Coverage 快照绑定到当前版本，operator 关闭 Engagement；中断时 host 查询工作状态并按 Taric 的恢复检查重新调度。
 
-Core helper `buildContextPack` 的 `scanBudget` 为 2～1000（默认 256，含 lookahead），`cursorTtlMs` 默认一小时；这些 camelCase 参数没有暴露到 `service.buildContext`、CLI 或 MCP 请求。公开请求使用 `budget/work_item_id/worker_role/policy_version/read_seq/cursor/filters/ordering/include_candidates`；Core service 另支持 checkpoint/resume 输入，MCP 不暴露全部参数。
+这样能让调查过程可追溯、多 agent 共享同一受治理的记忆，并减少恢复时重复执行或误把旧结果当成新结果的风险。Taric 不代替渗透测试人员判断证据是否足够，也不扩大 ROE。
 
-Context cursor 是 v2 AES-256-GCM，加密保存固定序列/时间、排序元组、有界 delta IDs 与绑定，不含完整 records 或增长的 delivered-ID 列表。普通 authority 列表 cursor 是 v1 HMAC，Artifact catalog cursor 是 base64url keyset 状态；三者合同不同。密钥文件 `.taric-context-cursor-key.v1` 为 0600，绑定 real content root 和 authority ID；丢失/轮换导致旧 Context/authority list cursor 失败，不影响已提交记录。详见[恢复手册](context-recovery.md)。
+## 场景二：智能体研发
 
-`resumeContextDelta` 按固定前后序列读取变更 subject 与事件，超过预算返回 `minimum_budget_required`；这是状态差分，不是事件重放或可靠投递证明。草稿及迟到提案保留原 Attempt/generation，重用须显式 rebase。
+已有模型运行时只需调用 MCP stdio，可先从默认 model profile 开始。宿主应在可信配置里创建身份、绑定 Engagement，然后让客户端根据 `tools/list` 动态适配工具；不要假设工具目录永久固定。需要让模型搜索先前的文本输出时，再为 model 单独开启 `history_read`。如需完整领域集成，可在 Node 进程内嵌 Core，或由 Pi/DeepSeek/Hermes adapter 将宿主回调映射为 Taric 操作。
 
-### 4.5 协作状态：WorkRun / Attempt / Checkpoint / ActionIntent
+模型负责理解和提出候选，宿主负责采集事实、调度 worker、审批和工具执行，Core 负责按合同检查并记录状态。这个分工让开发者能替换模型和宿主，而不需要让每个 agent 自己维护一份互不一致的权威记忆。
 
-host 认领 WorkItem 后创建 WorkRun/Attempt、owner、generation 和租约；默认 TTL 60000ms，显式 TTL 必须为正安全整数。`work.claim` 的 host_id 以 principal 覆盖，task-session 只能来自可信 transport。renew 延长租约；过期 reclaim 推进 generation，并保留旧 Attempt 及迟到归属。
+## 运行部署选择
 
-`checkpoint.propose` 只生成候选，不续租或更新有效 checkpoint；`checkpoint.commit` 必须由当前 host 验证运行/Attempt、版本、scope、Context manifest、引用与真实结果。空列表也必须显式。proposal/commit 的隐藏推理字段递归检测并拒绝，不是静默剥离后保存。
+- **单机**：SQLite WAL 是默认方案。多个本机进程可以访问同一 authority 文件；不能把文件放在共享盘作为多主机数据库。
+- **多主机**：显式使用 PostgreSQL profile。所有宿主连接同一 authority，并通过当前构建 conformance evidence、schema/lease 健康检查和 server-side fencing。任何门槛不满足时保持禁用，不回退到 SQLite。
+- **内容与密钥**：每个部署规划可靠的 content root 和 cursor key 备份。多主机下 Artifact spool 按宿主隔离，PostgreSQL 不自动复制正文文件。
+- **网络入口**：MCP stdio 适合模型宿主本地连接；gateway 适合需网络访问的宿主。TLS、token ACL、数据库秘密和目标凭据都由宿主运维体系管理。
 
-`work.resume` 返回 run、checkpoint、pending_actions、会话 Artifact 元数据，以及 Engagement/WorkItem/scope/checkpoint/Attempt/lease/manifest/宿主决定/动作结果 premise checks；前提失败返回 `blocked/replan_required`，不会执行动作。当前 `resumePacket` 会物化该 session 的全部 Artifact 元数据，与有界 Context delta 是不同读取路径。
-
-无 WorkRun 的 `action.recommend` 生成提案；有 WorkRun 时写 advisory ActionIntent 并要求当前 generation。host 记录 `authorized/denied` 决定及 `executed/failed/unknown` 结果，选择 `llm_recommend/authorized_autonomous/host_hitl` 模式。unknown 只经 host reconcile 解决，Taric 不自动重放目标操作。
-
-### 4.6 记忆演化与宿主状态
-
-`resource.revise` 创建不可变 ResourceRevision；`resource.relation` 维护同 Engagement 类型化边；`resource.patch` 按 base generation/version 三方合并，非重叠修改合并、敏感重叠形成审计冲突；`resource.impact` 沿显式依赖有界传播，返回 continuation/pending watermark 与重验 WorkItem，不调度 worker。
-
-Coverage 按资源版本、测试类别、身份、操作与条件成格；ControlObservation 与 AccessDecisionObservation 分离。未知层不能归因具体控制/源站，边缘拦截且源站未达不能关闭 origin coverage；历史观察通过新修订/applicability event 演进。
-
-`host.state` 在只读事务内返回固定时间、范围 hash watermark、有界聚合及逐类完整性：L1（排除 conflict/impact）、Conflict、Impact、unknown action、过期 lease、到期 freshness。limit 默认 100、范围 1～1000；freshness 只检查前 limit 个记录头，不完整时不是全局到期总数。该操作没有 continuation/事件清单，状态未提交也可因时间到期改变；host 应持续轮询，不能仅依赖 watermark 判断每个底层事件。
-
-### 4.7 派生投影与恢复
-
-`projection.ts` 从固定快照生成白名单 Markdown generation、manifest 哈希与 current 指针；本地 Git checkpoint 默认启用，失败记录 pending/可重试，不回滚 authority。remote push 通过宿主提供的真实扫描与 push callbacks，要求私有仓库、访问控制、保留策略和 Engagement 授权；它不是公开 `remote.push` operation。
-
-operator `snapshot.export` 返回 sanitized Taric-native JSON，包含所选序列的最新记录版本，也保留普通召回隐藏的 L0/recalled 记录；不是模型 Context，更不是数据库全历史备份。`exportSnapshotJsonl` 是库方法，公开 dispatch 未提供格式选项。公开 `snapshot.import` 拒绝，内部后端恢复只供隔离恢复/conformance。
-
-## 5. Artifact 原文存储（任务会话 spool）
-
-### 5.1 模式与会话绑定
-
-宿主可仅保留外部 `host_ref`，或授权存储 opaque text/binary/manifest 字节，包括用户提供或任务中获得的目标系统用户名密码、token、cookie、密钥和 SSO 材料。持有 `content_read` 的可信 host/operator 可按需经 `artifact.content.read` 读取原始字节。Taric 不抓取外部引用、不解析/执行/脱敏或扫密，也不签发、验证、刷新、轮换、撤销或管理凭据生命周期；原文的 ACL、加密卷、保留、删除与备份由宿主负责。普通模型查询仅获允许的引用/类型化元数据。
-
-`artifact.session.bind` 必须指定模式：
-
-| mode | 必须字段与约束 | 后续保证 |
-|---|---|---|
-| host-session | Engagement、session_id、root；禁止 work_run_id/attempt_id/generation/owner_host | 会话隔离、内容完整性，不承诺运行 lease |
-| run-bound | 上述字段加完整 WorkRun/Attempt/generation/owner_host，owner 必须等于 principal.id；持久化时验证当前租约 | begin/append/commit 与 publication 恢复按持久绑定复验，省略请求字段不能降级 |
-
-root 必须位于 configured content root，resolve/realpath 复核，禁止会话根重叠及现有绑定的 root/mode/run 改写。host 的 transport session 存在时，所有 Artifact 请求必须匹配；run-bound operator 绑定也必须满足 owner 等于 principal。
-
-### 5.2 上传、传输与文件布局
-
-begin 创建 upload 与服务器分配 Artifact ID/version；append 按 ordinal 顺序核验块长度/哈希，同块重试必须一致；commit 验证总长度、块数与全量 SHA-256。成功返回 `artifact_id@vN`，不拼装整个多块 Artifact。`base_content_ref` 为版本链，`derived_from/parent_ref/child_refs` 表达派生或复合关系，不拼接子内容。
-
-| 入口 | 实现限制 |
-|---|---|
-| Core base64 append | decoded ≤64 MiB；base64 ≤89,478,488 字符；metadata ≤16 KiB，有编码/解码副本 |
-| CLI append-file | 1 byte～64 MiB；先流式计算哈希，再读取文件流写 staging；不是公开 operation |
-| 普通 adapter RPC | 请求/响应每行 1 MiB；超长请求关闭连接，超长响应返回有界错误 |
-| 独立 binary RPC | header ≤16 KiB；4-byte BE header 长度 + JSON + 精确 raw body；≤2 活跃上传，64 KiB 接收块、每上传队列 2 块，有背压 |
-| 普通 RPC raw read | decoded ≤512 KiB；Artifact list/output 总是最多 16 项，带内容另限 128 KiB |
-
-`taric proxy` 只启动普通 Unix JSON socket。可选 `taric gateway` 可同时启动 Unix socket、TLS TCP JSON-RPC 和 HTTPS `/rpc` listener，并将请求送入同一个 CoreService；HTTPS 不支持连接式通知，客户端通过 authority reads 恢复。网络 `artifact.session.bind` 将 session 映射到 gateway contentRoot 下的服务端目录并忽略调用方 root，远程 `artifact.ingest_file` 被拒绝。Core 的 binary Artifact listener 仍只支持 Unix socket，不会被 gateway 暴露成网络上传端点。
+## 模块目录与验证
 
 ```text
-<session-root>/
-  manifest.json
-  manifest/segments/YYYY/MM/DD/ab/<artifact-id>-vNNNNNN.ndjson
-  artifacts/YYYY/MM/DD/ab/<artifact-id>/vNNNNNN/
-    payload-000001.part
-    content.manifest.json
-    metadata.md
-  execution/…                 # 按运行/Attempt 分片的执行 sidecar
-  .staging/<upload-id>/
+packages/
+  cli/                 JSON CLI、proxy、gateway、review harness
+  core/                Core service、策略、authority、Artifact、adapter client
+  driver-bun-sqlite/   Bun bun:sqlite Authority 驱动
+  hermes-plugin/       Hermes 通用插件
+  mcp/                 MCP stdio server
+  schemas/             JSON Schema 与操作注册表
 ```
 
-日期由 UTC stored_at 派生，captured_at 不控制路径；每 Artifact 版本单独 NDJSON 条目，不提供固定条目数聚合滚动段。数据库保存目录/块/上传/发布元数据，payload 是原生文件。
-
-### 5.3 发布与崩溃恢复
-
-发布先登记起始状态，临时目录写操作标记/块/manifest/Markdown/NDJSON，持久化待发布 row/chunks，然后 rename、更新 published marker，最后在 authority 事务复验 fence 并提交 catalog、幂等结果和审计，再清理 staging。
-
-`local_process_crash` 使用完整性核验与 publication markers；没有显式 fsync，不声明断电耐久。故障测试覆盖 before_manifest、before_rename、after_rename、after_publication_marker、before_catalog_commit、after_catalog_commit。重启只恢复内容完整且绑定仍有效的 publication，过期/被 reclaim 的运行不能发布为 available。
-
-### 5.4 读取与维护
-
-`artifact.metadata` 返回元数据；`artifact.content.read` 是显式原文操作，即使没有 `include_content` 也会读字节，必须 `content_read`。list/output 默认元数据，`include_content=true` 另检查原文权限；单次 Core read 上限 64 MiB，transport 可收紧。chunk cursor 为 ordinal:offset，catalog cursor 为 scoped base64url keyset，不是固定 read_seq 的 Context cursor。output 有独立 `execution_next_cursor`。
-
-读取按 manifest 与目标 chunk 核验；缺失或篡改返回结构化错误，不将未核验内容视为 available，不自动重建丢失 payload。PG 只共享元数据，不同步各主机 spool；数据库恢复须协调所有相关内容根，跨机原文访问由宿主路由。
-
-## 6. 数据模型
-
-共同布局包含 25 张表，JSON 正文在 SQLite/PG 均以 text 保存：
-
-| 分组 | 表 |
-|---|---|
-| canonical/历史 | metadata、records、record_versions、object_refs |
-| 治理 | proposals、proposal_versions、admission_review_packs、reviews |
-| 审计/恢复 | events、idempotency、outbox、operation_markers、reader_pins |
-| 运行 | work_runs、attempts、checkpoints、action_intents |
-| Artifact | artifact_sessions、artifact_catalog、artifact_chunks、artifact_catalog_watermarks、artifact_uploads、artifact_idempotency、artifact_publications、execution_catalog |
-
-索引覆盖 Engagement/版本、历史 sequence、proposal 历史、Context 访问、host.state 聚合、Artifact 会话/类别/媒体/运行 keyset 及执行目录。参考 [sql-schema.ts](../packages/core/src/sql-schema.ts)，不以文档中的旧行号作为合同。
-
-领域记录包括 Engagement/Scope、Resource/Revision/Relation、Observation/Evidence/Claim/Finding、假设/攻击路径、Coverage/Control/Access、Conflict/Impact/PatchSet 与 WorkItem/Run/Attempt/Checkpoint/ActionIntent。记录 ID、版本、信任和审计归属由 Core 管理；原文字节不进入 canonical JSON。
-
-## 7. API 表面
-
-当前 schema registry 有 66 个 operations、5 个 unsupported declarations、8 个 permanent non-goals；`service.ts` 还单独识别 `storage.backup`/`storage.restore` 两个 deferred 名称。CLI `cliCommands` 有 60 项（含本地 `artifact.store.append-file` helper），MCP 固定六工具，三种清单不等价。完整逐操作角色与 capability 见 [API](taric-api.md#operation-inventory)。
-
-Core service 方法与公开 dispatch 的请求形状不总等于领域 schema：Artifact 请求在 dispatch 编译 schema 校验，其余很多注册项使用 `apiSuccess` 占位并由方法手工检查。不能声称每个输入都会自动套用完整领域 schema 或统一拒绝所有额外字段。错误 envelope 为 `ok:false/error`，11 个稳定 Core 错误码；startup 与 JSON-RPC 另有错误层。
-
-MCP 支持 `initialize/tools/list/tools/call`，返回协议 `2024-11-05` 与 `{tools:{}}`，不实现 resources/subscriptions、Tasks 或 HTTP。Pi 静态 descriptor 是认证上限，实例注册结果与 `status()` 才反映 hooks/tools/run binding；DeepSeek 仅 session lifecycle，Hermes 仅 context/session/tool observer，详细映射见[接入指南](agent-integration.md#native-adapter-setup)。
-
-## 8. 配置与环境变量
-
-兼容配置发现依次检查 `TARIC_CONFIG`、工作区 `.taric/config.json`、用户 `~/.taric/config.json`，选择第一个存在的文件，不合并；`--runtime-config` 显式路径不存在或无效时直接失败，不继续候选。`config.authority` 整体优先于环境 profile，其他字段逐项解析，不能笼统说所有环境变量最高优先级。
-
-| 项目 | 实际解析 |
-|---|---|
-| authority | config.authority 优先；否则由 TARIC_AUTHORITY_PROFILE/DATABASE_URL/HOST_ID/LEASE_MODE 组合 |
-| db_path | TARIC_DB → config.db_path → authority.sqlite.path → ~/.taric/authority.sqlite |
-| content_root | TARIC_CONTENT_ROOT → config.content_root → DB 旁 content；显式 :memory: 使用临时根 |
-| runtime_conformance_path | TARIC_RUNTIME_CONFORMANCE → config.runtime_conformance_path |
-| quality release evidence | `TARIC_QUALITY_RELEASE_REPORT` + 独立配置的 `TARIC_QUALITY_RELEASE_REPORT_SHA256`；Core 校验报告原始字节 pin 与当前实现/schema/policy digest，失败或缺失时保持 disabled |
-| principal | CLI 默认 operator/operator-local；MCP stdio 强制 model，但 ID 来自 resolver，缺省可为 operator-local；proxy 固定 host |
-| content_read | 环境值为 true 或 config.content_read_enabled=true；环境 false 不覆盖配置 true；MCP server 不保留额外 grants |
-| transport session | TARIC_SESSION_ID 仅由 proxy 消费，普通 CLI/MCP 不读取 |
-| adapter config | TARIC_ADAPTER_CONFIG 或 ~/.taric/adapters.json，只管理三个内置 adapter 的配置 |
-| socket/token/network gateway | proxy 使用 TARIC_CORE_SOCKET、TARIC_ADAPTER_TOKEN（≥32 字符）与 Engagement；可选 gateway 使用固定 token-to-principal 表，TLS TCP/HTTPS 需 PEM key/certificate，细节见宿主接入指南；Hermes client 仍使用 Unix socket |
-
-PG 的 dbPath 仍参与默认 contentRoot 推导，但不打开 SQLite；部署应显式指定每 host 独立持久内容根。详细可运行配置见[接入指南](agent-integration.md#runtime-configuration)。
-
-## 9. 外部依赖
-
-Node、SQLite 与本地文件系统是单机运行前提；PG profile 另外依赖数据库连接与有效证据。宿主提供工具、身份、批准、目标凭据执行策略及可选扫描/push callbacks；目标凭据需要在任务中持久化时，可通过 Artifact 内容接口交给 Taric。连接 Taric 所需的数据库、gateway 和 TLS 凭据仍由宿主单独提供。`reference/` 的冻结输入只用于设计，不是运行时依赖。系统不调用模型 API。
-
-## 10. 业务规则与约束（代码强制的不变量）
-
-1. canonical 写入、版本、审计和幂等由共享 Core 管理；输入不能自行授予 trust/writer。
-2. 角色与 capability 同时检查；host/operator/reviewer/writer 不是可互换的身份。
-3. Engagement、引用、评审 hash、运行 owner/generation 和持久会话各自检查；旧绑定不因字段省略降级。
-4. 迟到隔离保留来源，unknown 动作必须对账；Taric 不执行目标动作。
-5. Context/query/projection/export 各有不同可见性，不能混用导出与模型召回。
-6. Artifact 原文可显式保存，但不默认进入模型/派生视图；内容权限不等于原文读取权限。
-7. 修复是显式 operator 操作，不能静默改写 canonical 历史或凭空恢复文件。
-
-## 11. 非功能特性
-
-SQLite API 虽包装成 Promise，底层 SQL/部分文件阶段仍同步；排队与长操作可阻塞 event loop，没有后台维护 worker。`SqlMetrics` 记录 statements、rows_returned/affected、queue_wait_ms、sql_elapsed_ms；`read_stats` 的行界限不等于磁盘访问数、所有 SQL 扫描成本或常数延迟保证。
-
-50k Context 首屏历史测量为 3.08s，对比 5.36s 基线降低 42.5%，未达到 50% 候选目标。2s patch→query 是指定 mutation 路径目标，不是通用读取 SLA。[规模](benchmarks/authority-scale-v3.json)、[Artifact transport](benchmarks/artifact-transport-v2.json)、[维护](benchmarks/maintenance-concurrency-v2.json)、[轮询](benchmarks/host-state-poll-v1.json)均是特定机器/fixture 的保存结果。
-
-`audit.verify/doctor` 与 `audit.reconcile {action:"preview"}` 是观察路径；默认 reconcile 会消费 outbox 并检查/修复 Artifact，replay/rebuild/reconcile 是显式修复模式，不能把省略 action 当只读。导出/全审计和 resume Artifact 元数据仍可能随历史/会话规模增长。
-
-## 12. 测试策略与发布门槛
+当前 workspace 为 `1.1.0`，Core API `1.5.0`，adapter `1.1`，record schema `1.0.0`，authority storage `5`，SQL layout `5`。可在仓库根目录运行：
 
 ```sh
-npm run typecheck
+npm ci
 npm run build
+npm run typecheck
 npm test
+npm run verify:matrix
 node scripts/check-doc-links.mjs
-node --test scripts/test/profile-verification.test.mjs
 ```
 
-当前 `1.0.4` build、typecheck、workspace 测试、矩阵、clean-consumer 与文档链接检查结果见[控制面验证记录](taric-103-breachweave-control-plane-verification.md)。本轮没有配置 live PostgreSQL；2026-10-27 `1.0.1` 的 PostgreSQL runtime、备份恢复、同机双容器 lease/reclaim 和 bind-mounted spool 结果仅作历史证据。它们不代表跨物理机/网络恢复或真实第三方宿主验收。较早候选报告绑定旧工作树，不代替当前验证。
-
-[此前候选报告](../openspec/changes/harden-taric-authority-runtime/release-report.json)和专项报告 [clean consumer](../openspec/changes/harden-taric-authority-runtime/clean-consumer-report.json)、[proxy restart/replay](../openspec/changes/harden-taric-authority-runtime/proxy-restart-report.json) 与 [PostgreSQL runtime](../openspec/changes/harden-taric-authority-runtime/postgres-runtime-report.json) 均对应早期候选工作树，不代表 `1.0.4` 验证。质量统计仍因缺少人工标注与人类基线而 unsupported/disabled。历史 benchmark 仅代表对应环境与 fixture，不代表当前部署容量。
-
-## 13. 已知差距与假设
-
-- native adapter 认证限固定合同，不是第三方宿主生产端到端认证；实例 `service_connected` 只表示曾调用过 service，不是持续健康探针。
-- 自定义 adapter ID 与通用协议已开放，但 adapter install/config 只管理内置三类，未知版本/fork 不自动获得 native certification。
-- `host.state` 聚合/时间轮询及 Core in-process、adapter RPC bounded subscription 已实现，使用 query/read_seq 作为恢复保证；MCP resources subscription、MCP Tasks 和通用远程 host RPC 未交付。Bun SQLite driver 已提供，远程和容器 profile 仍需独立环境验收。
-- Context 有界不代表 snapshot/export/audit/work.resume 全部有界；字符预算不是 token 预算。
-- 默认 Artifact 仅声明 local_process_crash，不声明 fsync/断电耐久；PG 不同步 spool。
-- 公开 `snapshot.import`、`storage.backup` 和 `storage.restore` 会在 dispatch 返回 deferred/unsupported；`migration`、`backup.restore` 与 `remote.push` 不是公开 operation。质量统计算法已实现，但 `quality.full_statistical_evaluation` 默认 disabled，只有当前构建匹配的人工标注 release evidence 校验通过后才会动态启用；底层恢复/callback/统计函数不自动变成公开 operation。
-- Taric 不证明工具观察真实、发现完整、凭据安全或动作恰好执行一次；目标部署容量与人工质量需独立证据。
-
-## 14. 附录
-
-[API 请求与权限](taric-api.md)、[宿主集成](agent-integration.md)、[Context 恢复](context-recovery.md)、[单机维护](authority-storage-runbook.md)、[多主机运行](multi-host-authority-runbook.md)、[PG readiness](postgres-runtime-readiness.md)分别承担接口、接入与操作细节。历史差距分析与改进提案记录设计来源，不覆盖本文的当前实现合同。
-
-### 接口、函数与测试索引
-
-| 功能 | 公开入口/函数 | 主要回归测试 |
-|---|---|---|
-| WorkRun 状态迁移 | `CoreService.dispatch("work.transition", ...)`；经 `AuthorityStore.transitionWorkRun()` 提交 | [work-transition-dispatch](../packages/core/test/work-transition-dispatch.test.mjs)、[schema](../packages/schemas/test/schema.test.mjs) |
-| Coverage 写入、查询与 gate | `coverage.record/query/gate`；`createCoverageCell`、`coverageGateSnapshot`、`coverageCloseGate` | [coverage record](../packages/core/test/coverage-record-dispatch.test.mjs)、[coverage dispatch](../packages/core/test/coverage-dispatch.test.mjs)、[coverage lifecycle](../packages/core/test/coverage-lifecycle.test.mjs) |
-| 主机状态提示 | `CoreService.subscribe()`；RPC `taric.subscribe`/`taric.unsubscribe` | [subscription signals](../packages/core/test/subscription-signals.test.mjs)、[adapter RPC](../packages/core/test/adapter-rpc.test.mjs) |
-| Artifact 文件摄取 | `CoreService.dispatch("artifact.ingest_file", ...)` | [artifact ingest](../packages/core/test/artifact-ingest.test.mjs)、[Bun embedding smoke](../packages/driver-bun-sqlite/test/embedding-smoke.test.ts) |
-| 质量评估与报告 | `evaluateMemoryQuality()`、`buildReleaseReport()`、`verifyReleaseReport()` | [quality](../packages/core/test/quality.test.mjs)、[release report](../packages/core/test/release-report.test.mjs) |
-| 质量 capability 启用 | `verifyPinnedQualityReleaseReport()`、`loadPinnedQualityReleaseActivation()`、`runtimeImplementationDigest()`、`buildRuntimeActivationEvidence()` | [release support](../packages/core/test/release-support.test.mjs)、[runtime startup](../packages/core/test/runtime-startup.test.mjs) |
-| Schema 和兼容矩阵 | `operationContracts`、`core.schema.json`、`compatibility-matrix.json` | [schema contracts](../packages/schemas/test/schema.test.mjs)、[profile verification](../scripts/test/profile-verification.test.mjs) |
-| Bun SQLite driver | `BunSqliteAuthorityDriver` 与 Core `AuthorityStore` driver injection | [driver conformance](../packages/driver-bun-sqlite/test/conformance.test.ts)、[driver-specific tests](../packages/driver-bun-sqlite/test/driver-specific.test.ts) |
-
-公开 dispatch 的角色、capability、请求字段与传输差异见 [API 边界](taric-api.md)。
+版本和能力以 `compatibility-matrix.json` 及运行时 `capability.status` 为准。完整请求字段和授权表见 [API 与 MCP 合同](taric-api.md)，部署与恢复步骤见[运维手册](operations.md)。

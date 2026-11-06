@@ -33,6 +33,7 @@ test("support documentation and capability diagnostics match the runtime manifes
       new URL(`../../../openspec/changes/${capability.follow_up}/`, import.meta.url),
       new URL(`../../../openspec/changes/archive/2026-10-12-${capability.follow_up}/`, import.meta.url),
       new URL(`../../../openspec/changes/archive/2026-10-17-${capability.follow_up}/`, import.meta.url),
+      new URL(`../../../openspec/changes/archive/2026-11-05-${capability.follow_up}/`, import.meta.url),
     ];
     for (const artifact of ["proposal.md", "design.md", "tasks.md"]) {
       let found = false;
@@ -72,7 +73,7 @@ test("adapter status and support documentation preserve the static/runtime bound
   assert.match(guide, /`adapter\.status`/);
   assert.match(guide, /instance_registration_state/);
   assert.match(guide, /snapshot\.import/);
-  assert.match(readme, /Pi 1\.4\.0.*proposal\/checkpoint\/action\/result\/error hooks.*已支持/);
+  assert.match(readme, /Pi、DeepSeek Harness、Hermes 适配器/);
   assert.doesNotMatch(readme, /proposal\/checkpoint\/action\/result 原生 hooks 仍标为 unsupported/);
 
   const store = new AuthorityStore();

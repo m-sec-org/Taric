@@ -17,7 +17,7 @@ import { loadPinnedQualityReleaseActivation } from "./quality-release-activation
 export { API_CONTRACT_VERSION };
 export type PrincipalRole = "model" | "host" | "reviewer" | "writer" | "operator";
 /** principal 只能由 transport 创建，不能由请求 body 自行声明权限。 */
-export type PrincipalCapability = "read" | "propose" | "review" | "admit" | "work" | "checkpoint" | "action" | "audit" | "operator" | "writer" | "content" | "content_read";
+export type PrincipalCapability = "read" | "propose" | "review" | "admit" | "work" | "checkpoint" | "action" | "audit" | "operator" | "writer" | "content" | "content_read" | "history_read";
 export interface ReviewerAttestation {
     capability: "deterministic" | "model" | "human";
     model?: string;
@@ -33,6 +33,16 @@ export interface Principal {
     capabilities?: readonly PrincipalCapability[];
     reviewer_attestation?: Readonly<ReviewerAttestation>;
     transport_verified: true;
+}
+export interface OperationAccessDescription {
+    operation: string;
+    request_contract: string;
+    request_schema: Readonly<Record<string, unknown>>;
+    roles: readonly PrincipalRole[];
+    required_capability?: PrincipalCapability;
+    engagement_scoped: boolean;
+    idempotent: boolean;
+    mutates_authority: boolean;
 }
 // Transport adapters register principals here; callers cannot make an arbitrary
 // object trusted by merely adding `transport_verified: true`.
@@ -407,6 +417,9 @@ export interface CoreService {
         work_run_id?: string;
         attempt_id?: string;
     }): Promise<ApiResponse<Record<string, unknown>>>;
+    historyQuery(principal: Principal, input: { engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string; kind?: "checkpoint" | "action" | "result" | "error"; cursor?: string; page_size?: number }): Promise<ApiResponse<Record<string, unknown>>>;
+    artifactSearch(principal: Principal, input: { engagement_id: string; session_id: string; query: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size?: number; max_response_bytes?: number }): Promise<ApiResponse<Record<string, unknown>>>;
+    artifactHistoryRead(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; max_response_bytes?: number }): Promise<ApiResponse<Record<string, unknown>>>;
     capabilityStatus(principal?: Principal): Promise<ApiResponse<Record<string, unknown>>>;
     dispatch(operation: string, principal: Principal, request: Record<string, unknown>): Promise<ApiResponse<unknown>>;
     /** 宿主面（host/operator）进程内订阅：信号无内容，投递前重鉴权，漏信号由权威状态读取恢复。 */
@@ -764,6 +777,18 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             if (sessionError)
                 return sessionError;
             return (await safe(async () => ({ ok: true as const, data: (await artifactStore.output({ ...input, principal_id: principal.id })) })));
+        },
+        async historyQuery(principal: Principal, input: { engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string; kind?: "checkpoint" | "action" | "result" | "error"; cursor?: string; page_size?: number }) {
+            const access = authorize(principal, "history.query", input.engagement_id); if (!access.ok) return access;
+            return safe(async () => ({ ok: true as const, data: await store.executionHistoryPage({ ...input, principal_id: principal.id, cursor_key_root: contentRoot }) as unknown as Record<string, unknown> }));
+        },
+        async artifactSearch(principal: Principal, input: { engagement_id: string; session_id: string; query: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size?: number; max_response_bytes?: number }) {
+            const access = authorize(principal, "artifact.search", input.engagement_id); if (!access.ok) return access;
+            return safe(async () => ({ ok: true as const, data: await artifactStore.searchHistory({ ...input, principal_id: principal.id }) }));
+        },
+        async artifactHistoryRead(principal: Principal, input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; max_response_bytes?: number }) {
+            const access = authorize(principal, "artifact.history.read", input.engagement_id); if (!access.ok) return access;
+            return safe(async () => ({ ok: true as const, data: await artifactStore.readHistory({ ...input, principal_id: principal.id }) }));
         },
         async buildContext(principal: Principal, input: {
             engagement_id: string;
@@ -1138,6 +1163,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "work.renew", input.engagement_id);
             if (!response.ok)
                 return response;
+            const run = await store.getWorkRun(input.work_run_id);
+            if (!run || run.engagement_id !== input.engagement_id)
+                return error("conflict", "work run not found in this engagement");
             return (await safe(async () => ({ ok: true as const, data: (await store.renewWorkRun(input.work_run_id, input.generation, principal.id, input.ttl_ms)) })));
         },
         async workReclaim(principal: Principal, input: {
@@ -1437,6 +1465,9 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
             const response = authorize(principal, "work.resume", input.engagement_id);
             if (!response.ok)
                 return response;
+            const run = await store.getWorkRun(input.work_run_id);
+            if (!run || run.engagement_id !== input.engagement_id)
+                return error("conflict", "work run not found in this engagement");
             return (await safe(async () => ({ ok: true as const, data: (await store.resumePacket(input.work_run_id, principal.id)) })));
         },
         async auditVerify(principal: Principal) {
@@ -1481,8 +1512,8 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 const config = entry && typeof entry === "object" && !Array.isArray(entry)
                     ? entry as Record<string, unknown>
                     : undefined;
-                const expectedVersion = "version" in manifest ? manifest.version : "1.4.0";
-                const expectedCommit = "commit" in manifest ? manifest.commit : "4a08025";
+                const expectedVersion = "version" in manifest ? manifest.version : "1.5.0";
+                const expectedCommit = "commit" in manifest ? manifest.commit : "f9a26365568127461c47a07a37dcb42c140a3ac5";
                 const version = typeof config?.version === "string" ? config.version : undefined;
                 const commit = typeof config?.commit === "string" ? config.commit : undefined;
                 return {
@@ -1573,7 +1604,7 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return error("unsupported_capability", `${host} has no verified native hooks`, "MCP/CLI fallback remains available");
             const config = readAdapterConfig();
             const adapters = (config.adapters && typeof config.adapters === "object" ? config.adapters : {}) as Record<string, unknown>;
-            adapters[host] = { enabled: true, version: "version" in evidence ? evidence.version : "1.4.0", commit: "commit" in evidence ? evidence.commit : "4a08025" };
+            adapters[host] = { enabled: true, version: "version" in evidence ? evidence.version : "1.5.0", commit: "commit" in evidence ? evidence.commit : "f9a26365568127461c47a07a37dcb42c140a3ac5" };
             config.adapters = adapters;
             saveAdapterConfig(config);
             return { ok: true as const, data: { host, installed: true, config_path: adapterConfigPath() } };
@@ -1763,17 +1794,11 @@ export async function createCoreService(store: AuthorityStore, contentRoot = pro
                 return error("authorization_error", "reviewer identity is bound to the authenticated principal");
             if (operation === "review.submit" && ["reviewer_capability", "reviewer_model", "prompt_digest", "ruleset_digest"].some((field) => Object.prototype.hasOwnProperty.call(request, field)))
                 return error("authorization_error", "reviewer attestation is assigned by the authenticated transport");
-            if (operation.startsWith("artifact.") || operation === "review.pack" || operation === "review.submit" || operation === "work.transition" || operation === "coverage.record" || ["engagement.close", "engagement.reopen", "scope.revise", "scope.invalidate", "scope.query", "report.snapshot.commit", "coverage.snapshot", "coverage.manifest.commit", "action.audit.query"].includes(operation)) {
-                const requestContract = operationContract(operation)!.request as ContractName;
-                let validate = operationRequestValidators.get(requestContract);
-                if (!validate) {
-                    validate = schemaValidator.compile({ $id: `${coreSchema.$id}/requests/${requestContract}.json`, $defs: coreSchema.$defs, $ref: `#/$defs/${requestContract}` });
-                    operationRequestValidators.set(requestContract, validate);
-                }
-                if (!validate || !validate(request))
-                    return error("validation_error", `invalid ${operation} request`, undefined, normalizeDiagnosticDetails(validate?.errors, requestContract));
+            if (operation.startsWith("artifact.") || operation === "history.query" || operation === "review.pack" || operation === "review.submit" || operation === "work.transition" || operation === "coverage.record" || ["engagement.close", "engagement.reopen", "scope.revise", "scope.invalidate", "scope.query", "report.snapshot.commit", "coverage.snapshot", "coverage.manifest.commit", "action.audit.query"].includes(operation)) {
+                const invalidRequest = validateOperationRequest(operation, request);
+                if (invalidRequest) return invalidRequest;
             }
-            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "engagement.close": "engagementClose", "engagement.reopen": "engagementReopen", "scope.revise": "reviseScope", "scope.invalidate": "invalidateScope", "scope.query": "scopeQuery", "report.snapshot.commit": "reportSnapshotCommit", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.manifest.commit": "coverageManifestCommit", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "coverage.snapshot": "coverageSnapshot", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "action.audit.query": "actionAuditQuery", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput" };
+            const aliases: Record<string, string> = { "engagement.init": "init", "engagement.status": "status", "engagement.close": "engagementClose", "engagement.reopen": "engagementReopen", "scope.revise": "reviseScope", "scope.invalidate": "invalidateScope", "scope.query": "scopeQuery", "report.snapshot.commit": "reportSnapshotCommit", "adapter.status": "adapterStatus", "adapter.install": "adapterInstall", "adapter.remove": "adapterRemove", "adapter.config": "adapterConfig", "capability.status": "capabilityStatus", "audit.verify": "auditVerify", "audit.doctor": "auditDoctor", "audit.reconcile": "auditReconcile", "error.report": "errorReport", "snapshot.export": "snapshotExport", "resource.revise": "resourceRevise", "resource.patch": "resourcePatch", "resource.relation": "resourceRelation", "resource.impact": "resourceImpact", "context.build": "buildContext", "context.query": "buildContext", "proposal.submit": "submitProposal", "capture": "captureObservation", "capture.observation": "captureObservation", "proposal.list": "listProposals", "review.pack": "reviewPack", "review.submit": "submitReview", "admission.evaluate": "admitProposal", "admission.commit": "admitProposal", "admission": "admitProposal", "work.claim": "workClaim", "work.renew": "workRenew", "work.reclaim": "workReclaim", "work.transition": "workTransition", "work.query": "workQuery", "coverage.gate": "coverageGate", "coverage.manifest.commit": "coverageManifestCommit", "coverage.record": "coverageRecord", "coverage.query": "coverageQuery", "coverage.snapshot": "coverageSnapshot", "checkpoint.propose": "checkpointPropose", "checkpoint.commit": "checkpointCommit", "action.recommend": "actionRecommend", "action.host-decision": "actionHostDecision", "action.host-result": "actionHostResult", "action.reconcile": "actionReconcile", "action.audit.query": "actionAuditQuery", "control.list": "controlList", "control.observe": "observeControl", "access.observe": "observeAccess", "work.resume": "resume", "resource.query": "query", "evidence.query": "query", "artifact.session.bind": "artifactSessionBind", "artifact.store.begin": "artifactStoreBegin", "artifact.ingest_file": "artifactIngestFile", "artifact.store.append": "artifactStoreAppend", "artifact.store.commit": "artifactStoreCommit", "artifact.metadata": "artifactMetadata", "artifact.content.read": "artifactContentRead", "artifact.content.list": "artifactContentList", "artifact.session.output": "artifactSessionOutput", "history.query": "historyQuery", "artifact.search": "artifactSearch", "artifact.history.read": "artifactHistoryRead" };
             aliases["host.state"] = "hostState";
             const methodName = aliases[operation] ?? operation;
             if (operation === "admission.promote_l2")
@@ -1926,6 +1951,8 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
         return "audit";
     if (operation === "artifact.content.read")
         return "content_read";
+    if (["history.query", "artifact.search", "artifact.history.read"].includes(operation))
+        return "history_read";
     if (operation.startsWith("artifact."))
         return "content";
     if (["resource.revise", "resource.patch", "resource.relation", "resource.impact"].includes(operation))
@@ -1933,6 +1960,57 @@ function capabilityForOperation(operation: string): PrincipalCapability | undefi
     if (["engagement.init", "capability.status"].includes(operation))
         return "operator";
     return undefined;
+}
+function freezeAccessValue<T>(value: T): T {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+    for (const item of Object.values(value as Record<string, unknown>)) freezeAccessValue(item);
+    return Object.freeze(value);
+}
+function operationInputSchema(requestContract: string): Record<string, unknown> {
+    const definitions = coreSchema.$defs as Record<string, Record<string, unknown>>;
+    const root = structuredClone(definitions[requestContract]);
+    const referenced: Record<string, unknown> = {};
+    const collect = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        if (!Array.isArray(value)) {
+            const ref = (value as Record<string, unknown>).$ref;
+            if (typeof ref === "string" && ref.startsWith("#/$defs/")) {
+                const name = ref.slice("#/$defs/".length).split("/")[0]!;
+                if (!(name in referenced)) {
+                    referenced[name] = structuredClone(definitions[name]);
+                    collect(referenced[name]);
+                }
+            }
+        }
+        for (const child of Object.values(value)) collect(child);
+    };
+    collect(root);
+    return { ...root, ...(Object.keys(referenced).length ? { $defs: referenced } : {}) };
+}
+/** Validate the shared request contract before a transport invokes dispatch. */
+export function validateOperationRequest(operation: string, request: unknown): ErrorEnvelope | undefined {
+    const contract = operationContract(operation);
+    if (!contract) return error("unsupported_capability", "operation is not supported");
+    let validate = operationRequestValidators.get(contract.request);
+    if (!validate) {
+        validate = schemaValidator.compile(operationInputSchema(contract.request));
+        operationRequestValidators.set(contract.request, validate);
+    }
+    if (!validate(request)) return error("validation_error", `invalid ${operation} request`, undefined, normalizeDiagnosticDetails(validate.errors, contract.request));
+    return undefined;
+}
+/** Core-owned, immutable operation metadata for adapters and transports. */
+export function describeOperationAccess(): readonly OperationAccessDescription[] {
+    return Object.freeze(operationContracts.map((contract) => freezeAccessValue({
+        operation: contract.operation,
+        request_contract: contract.request,
+        request_schema: operationInputSchema(contract.request),
+        roles: Object.freeze([...contract.roles]),
+        ...(capabilityForOperation(contract.operation) ? { required_capability: capabilityForOperation(contract.operation) } : {}),
+        engagement_scoped: contract.engagement_scoped,
+        idempotent: contract.idempotent,
+        mutates_authority: contract.mutates_authority,
+    } satisfies OperationAccessDescription)));
 }
 function defaultContentRoot(store: AuthorityStore): string {
     if (store.filename === ":postgresql:") throw new ContractValidationError("validation_error", "shared authority requires an explicit content root");

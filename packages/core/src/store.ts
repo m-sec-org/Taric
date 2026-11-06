@@ -730,23 +730,124 @@ export class AuthorityStore {
         work_run_id?: string;
         attempt_id?: string;
     }): Promise<Awaited<Array<Record<string, unknown>>>> {
-        return (await this.executionCatalogPage({ ...input, page_size: 1000 })).items;
+        return (await this.executionCatalogPage({ ...input, page_size: 100 })).items;
+    }
+    async indexArtifactHistory(row: { content_ref: string; engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string; content_hash?: string; manifest_hash?: string; history_content_class?: string }, text: string): Promise<void> {
+        if (row.history_content_class !== "execution_history" || !row.content_hash || !row.manifest_hash) return;
+        await this.transaction(async () => {
+            const existing = await this.sql.get<{ source_content_hash: string; source_manifest_hash: string; normalized_text: string; status: string }>("SELECT source_content_hash,source_manifest_hash,normalized_text,status FROM artifact_history_index WHERE content_ref=? AND engagement_id=? AND session_id=?", row.content_ref, row.engagement_id, row.session_id);
+            let indexed = existing?.status === "current" && existing.source_content_hash === row.content_hash && existing.source_manifest_hash === row.manifest_hash && existing.normalized_text === text;
+            if (this.sql.backend === "sqlite" && indexed) {
+                indexed = Boolean(await this.sql.get("SELECT 1 AS present FROM artifact_history_fts WHERE content_ref=?", row.content_ref));
+            }
+            if (!indexed) {
+                const seq = Number(((await this.sql.get("SELECT COALESCE(MAX(index_seq),0)+1 AS value FROM artifact_history_index")) as { value: number }).value);
+                await this.sql.run("INSERT INTO artifact_history_index(content_ref,engagement_id,session_id,work_run_id,attempt_id,source_content_hash,source_manifest_hash,normalized_text,index_seq,status) VALUES(?,?,?,?,?,?,?,?,?,'current') ON CONFLICT(content_ref) DO UPDATE SET engagement_id=excluded.engagement_id,session_id=excluded.session_id,work_run_id=excluded.work_run_id,attempt_id=excluded.attempt_id,source_content_hash=excluded.source_content_hash,source_manifest_hash=excluded.source_manifest_hash,normalized_text=excluded.normalized_text,index_seq=excluded.index_seq,status='current'", row.content_ref, row.engagement_id, row.session_id, row.work_run_id ?? null, row.attempt_id ?? null, row.content_hash, row.manifest_hash, text, seq);
+                if (this.sql.backend === "sqlite") { await this.sql.run("DELETE FROM artifact_history_fts WHERE content_ref=?", row.content_ref); await this.sql.run("INSERT INTO artifact_history_fts(content_ref,normalized_text) VALUES(?,?)", row.content_ref, text); }
+            }
+            await this.updateArtifactHistoryWatermark(row.engagement_id, row.session_id);
+        });
+    }
+    private async updateArtifactHistoryWatermark(engagementId: string, sessionId: string): Promise<void> {
+        const sourceRows = await this.sql.all<{ body: string }>("SELECT body FROM artifact_catalog WHERE engagement_id=? AND session_id=?", engagementId, sessionId);
+        const source = sourceRows.reduce((count, row) => {
+            try { return count + ((JSON.parse(row.body) as { history_content_class?: string }).history_content_class === "execution_history" ? 1 : 0); }
+            catch { return count; }
+        }, 0);
+        const indexed = Number(((await this.sql.get<{ value: number }>(`SELECT COUNT(*) AS value
+            FROM artifact_history_index i
+            JOIN artifact_catalog c ON c.content_ref=i.content_ref AND c.engagement_id=i.engagement_id AND c.session_id=i.session_id
+            WHERE i.engagement_id=? AND i.session_id=? AND i.status='current'
+              AND i.source_content_hash=${this.sql.jsonValue("c.body", "content_hash")}
+              AND i.source_manifest_hash=${this.sql.jsonValue("c.body", "manifest_hash")}
+              AND ${this.sql.jsonValue("c.body", "history_content_class")}='execution_history'
+              AND ${this.sql.jsonValue("c.body", "content_status")}='available'
+              AND ${this.sql.jsonValue("c.body", "integrity_status")}='verified'
+              ${this.sql.backend === "sqlite" ? "AND EXISTS (SELECT 1 FROM artifact_history_fts f WHERE f.content_ref=i.content_ref)" : ""}`, engagementId, sessionId))?.value ?? 0));
+        const status = source === indexed ? "current" : "pending";
+        await this.sql.run("INSERT INTO artifact_history_watermarks(engagement_id,session_id,source_watermark,index_watermark,index_status) VALUES(?,?,?,?,?) ON CONFLICT(engagement_id,session_id) DO UPDATE SET source_watermark=excluded.source_watermark,index_watermark=excluded.index_watermark,index_status=excluded.index_status", engagementId, sessionId, source, indexed, status);
+    }
+    async markArtifactHistoryIndex(input: { engagement_id: string; session_id: string; status: "pending" | "current" }): Promise<void> { await this.transaction(async () => { await this.updateArtifactHistoryWatermark(input.engagement_id, input.session_id); if (input.status === "pending") await this.sql.run("UPDATE artifact_history_watermarks SET index_status='pending' WHERE engagement_id=? AND session_id=?", input.engagement_id, input.session_id); }); }
+    async invalidateArtifactHistory(input: { content_ref: string; engagement_id: string; session_id: string }): Promise<void> { await this.transaction(async () => { await this.sql.run("UPDATE artifact_history_index SET status='invalid' WHERE content_ref=? AND engagement_id=? AND session_id=?", input.content_ref, input.engagement_id, input.session_id); await this.updateArtifactHistoryWatermark(input.engagement_id, input.session_id); }); }
+    async searchArtifactHistory(input: { engagement_id: string; session_id: string; query: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size?: number; max_response_bytes?: number; principal_id?: string; cursor_key_root?: string }): Promise<Record<string, unknown>> {
+        if (!input.query || !input.query.trim() || input.query.length > 256) throw new ContractValidationError("validation_error", "history search query must be 1..256 characters");
+        const requestedPageSize = input.page_size ?? 20;
+        if (!Number.isSafeInteger(requestedPageSize) || requestedPageSize < 1 || requestedPageSize > 100)
+            throw new ContractValidationError("validation_error", "history search page_size must be an integer between 1 and 100");
+        const limit = requestedPageSize;
+        let after = 0; let watermark: number;
+        const cursorKey = this.listCursorKey(!input.cursor, (input as { cursor_key_root?: string }).cursor_key_root);
+        if (input.cursor) { const c = decodeListCursor(input.cursor, cursorKey); if (c.operation !== "artifact.search" || c.principal_id !== ((input as { principal_id?: string }).principal_id ?? null) || c.engagement_id !== input.engagement_id || c.session_id !== input.session_id || c.query !== input.query || c.work_run_id !== (input.work_run_id ?? null) || c.attempt_id !== (input.attempt_id ?? null)) throw new InvalidCursorError("history cursor is bound to another request"); after = Number(c.after); watermark = Number(c.watermark); } else watermark = Number(((await this.sql.get("SELECT COALESCE(MAX(index_seq),0) AS value FROM artifact_history_index WHERE engagement_id=? AND session_id=?", input.engagement_id, input.session_id)) as { value: number }).value);
+        if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(watermark) || watermark < 0) throw new InvalidCursorError();
+        const phrase = input.query.trim().replace(/"/g, "");
+        const search = this.sql.backend === "postgresql" ? "i.search_vector @@ phraseto_tsquery('simple', ?)" : "f.normalized_text MATCH ?";
+        const from = this.sql.backend === "postgresql" ? "artifact_history_index i JOIN artifact_catalog c ON c.content_ref=i.content_ref AND c.engagement_id=i.engagement_id AND c.session_id=i.session_id" : "artifact_history_index i JOIN artifact_history_fts f ON f.content_ref=i.content_ref JOIN artifact_catalog c ON c.content_ref=i.content_ref AND c.engagement_id=i.engagement_id AND c.session_id=i.session_id";
+        const rows = await this.sql.all<{ content_ref: string; normalized_text: string; source_content_hash: string; source_manifest_hash: string; index_seq: number; work_run_id?: string; attempt_id?: string }>(`SELECT i.content_ref,i.normalized_text,i.source_content_hash,i.source_manifest_hash,i.index_seq,i.work_run_id,i.attempt_id FROM ${from} WHERE i.engagement_id=? AND i.session_id=? AND i.status='current' AND i.source_content_hash=${this.sql.jsonValue("c.body", "content_hash")} AND i.source_manifest_hash=${this.sql.jsonValue("c.body", "manifest_hash")} AND ${this.sql.jsonValue("c.body", "history_content_class")}='execution_history' AND ${this.sql.jsonValue("c.body", "content_status")}='available' AND ${this.sql.jsonValue("c.body", "integrity_status")}='verified' AND i.index_seq<=? AND i.index_seq>? AND ${search} AND (? IS NULL OR i.work_run_id=?) AND (? IS NULL OR i.attempt_id=?) ORDER BY i.index_seq,i.content_ref LIMIT ?`, input.engagement_id, input.session_id, watermark, after, this.sql.backend === "postgresql" ? phrase : `"${phrase}"`, input.work_run_id ?? null, input.work_run_id ?? null, input.attempt_id ?? null, input.attempt_id ?? null, limit + 1);
+        const selected = rows.slice(0, limit).map((row) => { const index = row.normalized_text.toLocaleLowerCase().indexOf(input.query.toLocaleLowerCase()); const prefix = row.normalized_text.slice(Math.max(0, index - 80), index < 0 ? 80 : index + input.query.length + 80); return { content_ref: row.content_ref, work_run_id: row.work_run_id, attempt_id: row.attempt_id, byte_offset: index < 0 ? 0 : Buffer.byteLength(row.normalized_text.slice(0, index)), byte_length: Buffer.byteLength(input.query), snippet: prefix, content_hash: row.source_content_hash, manifest_hash: row.source_manifest_hash, integrity_status: "verified", index_seq: row.index_seq }; });
+        const last = selected.at(-1); const hasMore = rows.length > limit;
+        const historyWatermark = await this.sql.get<{ source_watermark?: number; index_watermark?: number; index_status?: string }>("SELECT source_watermark,index_watermark,index_status FROM artifact_history_watermarks WHERE engagement_id=? AND session_id=?", input.engagement_id, input.session_id);
+        const sourceWatermark = Number(historyWatermark?.source_watermark ?? 0); const indexedWatermark = Number(historyWatermark?.index_watermark ?? 0);
+        // The persisted watermark can survive a crash after the derived row is
+        // removed. Recheck the source/hash join on every read so a missing or
+        // stale index is reported as incomplete instead of an empty complete
+        // result; repair remains an explicit reconcile operation.
+        const validIndexed = Number(((await this.sql.get<{ value: number }>(`SELECT COUNT(*) AS value
+            FROM artifact_history_index i
+            JOIN artifact_catalog c ON c.content_ref=i.content_ref AND c.engagement_id=i.engagement_id AND c.session_id=i.session_id
+            WHERE i.engagement_id=? AND i.session_id=? AND i.status='current'
+              AND i.source_content_hash=${this.sql.jsonValue("c.body", "content_hash")}
+              AND i.source_manifest_hash=${this.sql.jsonValue("c.body", "manifest_hash")}
+              AND ${this.sql.jsonValue("c.body", "history_content_class")}='execution_history'
+              AND ${this.sql.jsonValue("c.body", "content_status")}='available'
+              AND ${this.sql.jsonValue("c.body", "integrity_status")}='verified'
+              ${this.sql.backend === "sqlite" ? "AND EXISTS (SELECT 1 FROM artifact_history_fts f WHERE f.content_ref=i.content_ref)" : ""}`, input.engagement_id, input.session_id))?.value ?? 0));
+        const complete = (historyWatermark?.index_status ?? "current") === "current" && indexedWatermark >= sourceWatermark && validIndexed >= sourceWatermark;
+        const result = { items: selected, complete, incomplete: !complete, index_status: historyWatermark?.index_status ?? "current", index_watermark: watermark, source_watermark: sourceWatermark, next_cursor: hasMore && last ? encodeListCursor({ v: 1, operation: "artifact.search", principal_id: (input as { principal_id?: string }).principal_id ?? null, engagement_id: input.engagement_id, session_id: input.session_id, query: input.query, work_run_id: input.work_run_id ?? null, attempt_id: input.attempt_id ?? null, watermark, after: last.index_seq }, cursorKey) : undefined } as Record<string, unknown>;
+        const maxBytes = input.max_response_bytes ?? 1024 * 1024;
+        if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024)
+            throw new ContractValidationError("validation_error", "search response cap must be between 1 and 1048576 bytes");
+        if (Buffer.byteLength(JSON.stringify(result)) > maxBytes)
+            throw new ContractValidationError("validation_error", "search response cap is too small for the requested page");
+        return result;
     }
     async executionCatalogPage(input: {
         engagement_id: string;
         session_id: string;
         work_run_id?: string;
         attempt_id?: string;
+        kind?: "checkpoint" | "action" | "result" | "error";
+        principal_id?: string;
+        cursor_key_root?: string;
         cursor?: string;
         page_size: number;
     }): Promise<Awaited<{
         items: Array<Record<string, unknown>>;
         next_cursor?: string;
         index_watermark: number;
+        read_seq: number;
+        complete: boolean;
+        incomplete: boolean;
+        sidecar_status: string;
     }>> {
-        const limit = Math.min(1000, Math.max(1, Math.trunc(input.page_size)));
-        const cursor = input.cursor ? (() => { const [sequence, executionId] = input.cursor.split("\0"); const parsed = Number(sequence); if (!Number.isSafeInteger(parsed) || !executionId)
-            throw new ContractValidationError("validation_error", "invalid execution cursor"); return { sequence: parsed, executionId }; })() : undefined;
+        if (!Number.isSafeInteger(input.page_size) || input.page_size < 1 || input.page_size > 100)
+            throw new ContractValidationError("validation_error", "execution page_size must be an integer between 1 and 100");
+        const limit = input.page_size;
+        const cursorKey = this.listCursorKey(!input.cursor, input.cursor_key_root);
+        const cursor = input.cursor ? decodeListCursor(input.cursor, cursorKey) : undefined;
+        const currentWatermark = Number(((await this.sql.get("SELECT COALESCE(MAX(sequence),0) AS value FROM execution_catalog WHERE engagement_id=? AND session_id=?", input.engagement_id, input.session_id)) as { value: number }).value);
+        if (!Number.isSafeInteger(currentWatermark) || currentWatermark < 0)
+            throw new InvalidCursorError("invalid execution cursor watermark");
+        const readSeq = Number(cursor?.read_seq ?? currentWatermark);
+        const indexWatermark = Number(cursor?.index_watermark ?? readSeq);
+        if (!Number.isSafeInteger(readSeq) || readSeq < 0 || !Number.isSafeInteger(indexWatermark) || indexWatermark < 0)
+            throw new InvalidCursorError("invalid execution cursor watermark");
+        if (cursor && (readSeq > currentWatermark || indexWatermark > currentWatermark))
+            throw new InvalidCursorError("execution cursor watermark is no longer available");
+        if (cursor && (cursor.operation !== "history.query" || cursor.principal_id !== (input.principal_id ?? null) || cursor.engagement_id !== input.engagement_id || cursor.session_id !== input.session_id || cursor.work_run_id !== (input.work_run_id ?? null) || cursor.attempt_id !== (input.attempt_id ?? null) || cursor.kind !== (input.kind ?? null) || cursor.page_size !== limit || cursor.read_seq !== readSeq || cursor.index_watermark !== indexWatermark))
+            throw new InvalidCursorError("execution cursor is bound to another request");
+        const position = cursor ? { sequence: Number(cursor.sequence), executionId: String(cursor.execution_id) } : undefined;
+        if (position && (!Number.isSafeInteger(position.sequence) || position.sequence < 0 || position.sequence > readSeq || !position.executionId))
+            throw new InvalidCursorError("invalid execution cursor position");
         const where = ["engagement_id=?", "session_id=?"];
         const values: Array<string | number> = [input.engagement_id, input.session_id];
         if (input.work_run_id) {
@@ -757,9 +858,11 @@ export class AuthorityStore {
             where.push("attempt_id=?");
             values.push(input.attempt_id);
         }
-        if (cursor) {
+        if (input.kind) { where.push(`${this.sql.jsonValue("body", "kind")}=?`); values.push(input.kind); }
+        where.push("sequence<=?"); values.push(readSeq);
+        if (position) {
             where.push("(sequence>? OR (sequence=? AND execution_id>?))");
-            values.push(cursor.sequence, cursor.sequence, cursor.executionId);
+            values.push(position.sequence, position.sequence, position.executionId);
         }
         const rows = (await this.sql.all(`SELECT execution_id,sequence,body FROM execution_catalog WHERE ${where.join(" AND ")} ORDER BY sequence,execution_id LIMIT ?`, ...values, limit + 1)) as Array<{
             execution_id: string;
@@ -773,26 +876,38 @@ export class AuthorityStore {
         } | undefined;
         const items = selected.map((row) => {
             const body = JSON.parse(row.body) as Record<string, unknown>;
+            let sidecarStatus: "available" | "unavailable" | "integrity_failed" | "quarantined" | "sealed" = "available";
             if (body.sealed === true || body.quarantine === true)
-                return { ...body, sidecar_status: body.quarantine === true ? "quarantined" : "sealed" };
-            if (typeof body.sidecar_path !== "string" || typeof body.sidecar_hash !== "string")
-                return { ...body, sidecar_status: "unavailable" };
-            try {
+                sidecarStatus = body.quarantine === true ? "quarantined" : "sealed";
+            else if (typeof body.sidecar_path !== "string" || typeof body.sidecar_hash !== "string")
+                sidecarStatus = "unavailable";
+            else try {
                 const rootPath = resolve(root?.root ?? "");
                 const path = realpathSync(join(rootPath, body.sidecar_path));
                 if (path !== rootPath && !path.startsWith(`${rootPath}${sep}`))
-                    return { ...body, sidecar_status: "integrity_failed" };
-                const content = readFileSync(path);
-                return hash(content.toString("utf8")) === body.sidecar_hash ? { ...body, sidecar_status: "available" } : { ...body, sidecar_status: "integrity_failed" };
+                    sidecarStatus = "integrity_failed";
+                else {
+                    const content = readFileSync(path);
+                    if (hash(content.toString("utf8")) !== body.sidecar_hash)
+                        sidecarStatus = "integrity_failed";
+                }
             }
             catch {
-                return { ...body, sidecar_status: "unavailable" };
+                sidecarStatus = "unavailable";
             }
+            const { sidecar_path: _sidecarPath, ...portable } = body;
+            return { ...portable, sidecar_status: sidecarStatus };
         });
         const last = selected.at(-1);
-        return { items, next_cursor: hasMore && last ? `${last.sequence}\0${last.execution_id}` : undefined, index_watermark: Number(((await this.sql.get("SELECT COALESCE(MAX(sequence),0) AS value FROM execution_catalog WHERE engagement_id=? AND session_id=?", input.engagement_id, input.session_id)) as {
-                value: number;
-            }).value) };
+        const nextState = hasMore && last ? encodeListCursor({ v: 1, operation: "history.query", principal_id: input.principal_id ?? null, engagement_id: input.engagement_id, session_id: input.session_id, work_run_id: input.work_run_id ?? null, attempt_id: input.attempt_id ?? null, kind: input.kind ?? null, page_size: limit, read_seq: readSeq, index_watermark: indexWatermark, sequence: last.sequence, execution_id: last.execution_id }, cursorKey) : undefined;
+        const sidecarIncomplete = items.some((item) => ["unavailable", "integrity_failed", "quarantined", "sealed", "unbound"].includes(String(item.sidecar_status)));
+        return { items, next_cursor: nextState, read_seq: readSeq, index_watermark: indexWatermark, complete: !sidecarIncomplete, incomplete: sidecarIncomplete, sidecar_status: sidecarIncomplete ? "incomplete" : "available" };
+    }
+    async executionHistoryPage(input: { engagement_id: string; session_id: string; work_run_id?: string; attempt_id?: string; kind?: "checkpoint" | "action" | "result" | "error"; cursor?: string; page_size?: number; principal_id?: string; cursor_key_root?: string }): Promise<Record<string, unknown>> {
+        const pageSize = input.page_size ?? 20;
+        if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100)
+            throw new ContractValidationError("validation_error", "history page_size must be an integer between 1 and 100");
+        return this.executionCatalogPage({ ...input, page_size: pageSize });
     }
     private async writeExecutionSidecar(input: {
         engagement_id: string;
@@ -1101,6 +1216,7 @@ export class AuthorityStore {
             if (idempotency?.key)
                 (await this.sql.run("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", idempotency.key, "artifact.store.commit", idempotency.principal, row.engagement_id, idempotency.request_hash, JSON.stringify(idempotency.result)));
             (await this.sql.run("INSERT INTO artifact_catalog_watermarks(engagement_id,session_id,catalog_watermark,index_watermark,index_status) VALUES(?,?,1,1,'current') ON CONFLICT(engagement_id,session_id) DO UPDATE SET catalog_watermark=artifact_catalog_watermarks.catalog_watermark+1,index_watermark=artifact_catalog_watermarks.index_watermark+1,index_status='current'", row.engagement_id, row.session_id));
+            if (row.history_content_class === "execution_history") await this.updateArtifactHistoryWatermark(row.engagement_id, row.session_id);
             const marker = JSON.parse(publication.body!) as {
                 marker_commit_seq?: number;
             };
@@ -1117,7 +1233,7 @@ export class AuthorityStore {
         engagement_id: string;
         session_id: string;
     }, eventType: string): Promise<Awaited<void>> {
-        (await this.transaction(async () => { (await this.sql.run("UPDATE artifact_catalog SET body=? WHERE engagement_id=? AND session_id=? AND content_ref=?", JSON.stringify(row), row.engagement_id, row.session_id, row.content_ref)); (await this.nextEvent(eventType, { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, content_status: row.content_status, integrity_status: row.integrity_status }, row.content_ref)); }));
+        (await this.transaction(async () => { (await this.sql.run("UPDATE artifact_catalog SET body=? WHERE engagement_id=? AND session_id=? AND content_ref=?", JSON.stringify(row), row.engagement_id, row.session_id, row.content_ref)); if (row.history_content_class === "execution_history") await this.updateArtifactHistoryWatermark(row.engagement_id, row.session_id); (await this.nextEvent(eventType, { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, content_status: row.content_status, integrity_status: row.integrity_status }, row.content_ref)); }));
     }
     async markArtifactPublication(uploadId: string, phase: "publishing" | "published" | "quarantined"): Promise<Awaited<void>> { (await this.transaction(async () => {
         const prior = await this.sql.get<{ phase: string }>("SELECT phase FROM artifact_publications WHERE upload_id=?", uploadId);
@@ -1164,7 +1280,7 @@ export class AuthorityStore {
         (await this.transaction(async () => { await this.artifactWriteFence(row, principal); const category = typeof row.category === "string" ? row.category : null; const mediaType = typeof row.media_type === "string" ? row.media_type : null; (await this.sql.run("INSERT INTO artifact_catalog(content_ref,engagement_id,session_id,artifact_id,version,category,media_type,stored_at,work_run_id,attempt_id,body) VALUES(?,?,?,?,?,?,?,?,?,?,?)", row.content_ref, row.engagement_id, row.session_id, row.artifact_id, row.version, category, mediaType, row.stored_at, typeof row.work_run_id === "string" ? row.work_run_id : null, typeof row.attempt_id === "string" ? row.attempt_id : null, JSON.stringify(row))); const add = "INSERT INTO artifact_chunks(content_ref,ordinal,byte_offset,byte_count,chunk_hash,relative_path) VALUES(?,?,?,?,?,?)"; for (const chunk of chunks)
             (await this.sql.run(add, row.content_ref, chunk.ordinal, chunk.offset, chunk.bytes, chunk.hash, chunk.path)); if (uploadId)
             (await this.sql.run("DELETE FROM artifact_uploads WHERE upload_id=?", uploadId)); if (idempotency?.key)
-            (await this.sql.run("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", idempotency.key, "artifact.store.commit", idempotency.principal, row.engagement_id, idempotency.request_hash, JSON.stringify(idempotency.result))); (await this.sql.run("INSERT INTO artifact_catalog_watermarks(engagement_id,session_id,catalog_watermark,index_watermark,index_status) VALUES(?,?,1,1,'current') ON CONFLICT(engagement_id,session_id) DO UPDATE SET catalog_watermark=artifact_catalog_watermarks.catalog_watermark+1,index_watermark=artifact_catalog_watermarks.index_watermark+1,index_status='current'", row.engagement_id, row.session_id)); (await this.nextEvent(row.content_status === "external" ? "artifact.reference.external" : "artifact.content.committed", { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, byte_length: row.byte_length, content_hash: row.content_hash, chunk_count: row.chunk_count, work_run_id: row.work_run_id, attempt_id: row.attempt_id, generation: row.generation }, row.content_ref)); }));
+            (await this.sql.run("INSERT INTO artifact_idempotency(key,operation,principal,engagement_id,request_hash,result) VALUES(?,?,?,?,?,?)", idempotency.key, "artifact.store.commit", idempotency.principal, row.engagement_id, idempotency.request_hash, JSON.stringify(idempotency.result))); (await this.sql.run("INSERT INTO artifact_catalog_watermarks(engagement_id,session_id,catalog_watermark,index_watermark,index_status) VALUES(?,?,1,1,'current') ON CONFLICT(engagement_id,session_id) DO UPDATE SET catalog_watermark=artifact_catalog_watermarks.catalog_watermark+1,index_watermark=artifact_catalog_watermarks.index_watermark+1,index_status='current'", row.engagement_id, row.session_id)); if (row.history_content_class === "execution_history") await this.updateArtifactHistoryWatermark(row.engagement_id, row.session_id); (await this.nextEvent(row.content_status === "external" ? "artifact.reference.external" : "artifact.content.committed", { engagement_id: row.engagement_id, session_id: row.session_id, content_ref: row.content_ref, byte_length: row.byte_length, content_hash: row.content_hash, chunk_count: row.chunk_count, work_run_id: row.work_run_id, attempt_id: row.attempt_id, generation: row.generation }, row.content_ref)); }));
     }
     private async artifactWriteFence(row: Record<string, unknown>, principal?: string): Promise<void> {
         if (row.work_run_id === undefined && row.attempt_id === undefined && row.generation === undefined) return;

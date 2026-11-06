@@ -40,7 +40,7 @@ test("Core dispatch distinguishes unauthorized supported operations from unsuppo
   assert.equal((await service.dispatch("work.renew", operator, {})).error.code, "authorization_error");
   assert.equal((await service.dispatch("operation.missing", operator, {})).error.code, "unsupported_capability");
   assert.equal((await service.dispatch("query", operator, undefined)).error.code, "validation_error");
-  assert.equal(API_CONTRACT_VERSION, "1.4.0");
+  assert.equal(API_CONTRACT_VERSION, "1.5.0");
   assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: API_CONTRACT_VERSION })).ok, true);
   const before = await store.events();
   assert.equal((await service.dispatch("query", operator, { engagement_id: uuidv7(), contract_version: "1.2.0" })).error.code, "unsupported_schema_version");

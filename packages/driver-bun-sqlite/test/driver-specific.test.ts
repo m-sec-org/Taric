@@ -58,9 +58,13 @@ test("driver: initialization creates the authority schema and metadata", async (
   try {
     await driver.ready;
     const format = await driver.get<{ value: string }>("SELECT value FROM metadata WHERE key='storage_format'");
-    if (!format?.value?.startsWith("authority-sql/")) throw new Error(`unexpected storage format: ${format?.value}`);
+    if (format?.value !== "authority-sql/5") throw new Error(`unexpected storage format: ${format?.value}`);
     const records = await driver.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='records'");
     if (!records) throw new Error("records table missing after initialization");
+    for (const table of ["artifact_history_index", "artifact_history_watermarks", "artifact_history_fts"]) {
+      const found = await driver.get<{ name: string }>("SELECT name FROM sqlite_master WHERE name=?", table);
+      if (!found) throw new Error(`${table} missing after initialization`);
+    }
   } finally { await driver.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -78,6 +82,28 @@ test("driver: incompatible persisted schema version fails closed on open", async
     let rejected = false;
     try { await stale.ready; } catch (error) { if (!incompatible(error)) throw error; rejected = true; }
     if (!rejected) throw new Error("incompatible schema version was not rejected");
+  } finally { await stale.close().catch(() => undefined); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("driver: prior SQL layout fails closed before any write", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "taric-bun-driver-"));
+  const filename = join(directory, "old-layout.sqlite");
+  const setup = new BunSqliteAuthorityDriver(filename);
+  await setup.ready;
+  await setup.close();
+  const connection = new Database(filename);
+  connection.exec("UPDATE metadata SET value='authority-sql/4' WHERE key='storage_format'");
+  connection.exec("INSERT INTO metadata(key,value) VALUES('sentinel','before-open')");
+  connection.close();
+  const stale = new BunSqliteAuthorityDriver(filename);
+  try {
+    let rejected = false;
+    try { await stale.ready; } catch (error) { if (!incompatible(error)) throw error; rejected = true; }
+    if (!rejected) throw new Error("prior SQL layout was not rejected");
+    const check = new Database(filename);
+    const sentinel = check.prepare("SELECT value FROM metadata WHERE key='sentinel'").get() as { value?: string } | null;
+    check.close();
+    if (sentinel?.value !== "before-open") throw new Error("prior-layout rejection mutated metadata");
   } finally { await stale.close().catch(() => undefined); await rm(directory, { recursive: true, force: true }); }
 });
 

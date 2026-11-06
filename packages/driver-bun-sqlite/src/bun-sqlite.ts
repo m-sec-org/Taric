@@ -68,6 +68,7 @@ export class BunSqliteAuthorityDriver implements AuthoritySqlDriver {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         this.db.exec(AUTHORITY_SQL_TABLES);
+        this.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS artifact_history_fts USING fts5(content_ref UNINDEXED, normalized_text, tokenize='unicode61')");
         const columns = this.db.prepare("PRAGMA table_info(artifact_catalog)").all() as Array<{ name: string }>;
         if (!columns.some((column) => column.name === "media_type")) this.db.exec("ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT");
         this.db.exec(AUTHORITY_SQL_INDEXES);

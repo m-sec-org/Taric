@@ -61,18 +61,22 @@ export interface ArtifactBinding {
   generation?: number;
   owner_host?: string;
 }
-export interface ArtifactBeginInput { engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; storage_mode?: "external" | "taric_stored"; charset?: string; content_encoding?: string; transfer_encoding?: string; captured_at?: string; summary_ref?: string; summary?: string; expected_bytes?: number; expected_hash?: string; category?: string; host_ref?: string; work_run_id?: string; attempt_id?: string; generation?: number; base_content_ref?: string; parent_ref?: string; derived_from?: string; child_refs?: string[]; idempotency_key?: string; }
+export interface ArtifactBeginInput { engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; storage_mode?: "external" | "taric_stored"; charset?: string; content_encoding?: string; transfer_encoding?: string; captured_at?: string; summary_ref?: string; summary?: string; expected_bytes?: number; expected_hash?: string; category?: string; history_content_class?: "execution_history"; host_ref?: string; work_run_id?: string; attempt_id?: string; generation?: number; base_content_ref?: string; parent_ref?: string; derived_from?: string; child_refs?: string[]; idempotency_key?: string; }
 export interface ArtifactAppendInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; data: string; encoding?: "base64"; chunk_hash: string; idempotency_key?: string; }
 export interface ArtifactBinaryAppendInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; bytes: Uint8Array; chunk_hash: string; idempotency_key?: string; }
 export interface ArtifactBinaryAppendStreamInput { engagement_id: string; session_id: string; upload_id: string; ordinal: number; byte_length: number; chunk_hash: string; idempotency_key?: string; }
 export interface ArtifactCommitInput { engagement_id: string; session_id: string; upload_id: string; total_bytes: number; chunk_count?: number; content_hash: string; idempotency_key?: string; }
-export interface ArtifactRow { content_ref: string; artifact_id: string; version: number; engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; charset?: string; content_encoding?: string; transfer_encoding?: string; storage_mode?: "external" | "taric_stored"; category?: string; summary_ref?: string; captured_at?: string; host_ref?: string; byte_length: number; chunk_count: number; content_hash?: string; manifest_hash?: string; content_status: ArtifactContentStatus; integrity_status: "unverified" | "verified" | "mismatch" | "missing"; stored_at: string; work_run_id?: string; attempt_id?: string; generation?: number; parent_ref?: string; child_refs?: string[]; relative_dir: string; manifest_path: string; }
+export interface ArtifactRow { content_ref: string; artifact_id: string; version: number; engagement_id: string; session_id: string; payload_kind: ArtifactPayloadKind; media_type: string; charset?: string; content_encoding?: string; transfer_encoding?: string; storage_mode?: "external" | "taric_stored"; category?: string; history_content_class?: "execution_history"; summary_ref?: string; captured_at?: string; host_ref?: string; byte_length: number; chunk_count: number; content_hash?: string; manifest_hash?: string; content_status: ArtifactContentStatus; integrity_status: "unverified" | "verified" | "mismatch" | "missing"; stored_at: string; work_run_id?: string; attempt_id?: string; generation?: number; parent_ref?: string; child_refs?: string[]; relative_dir: string; manifest_path: string; }
 interface Upload { upload_id: string; artifact_id: string; version: number; binding: ArtifactBinding; principal: string; input: ArtifactBeginInput; staging_dir: string; chunks: Array<{ ordinal: number; bytes: number; hash: string; path: string }>; total_bytes: number; }
 interface ArtifactScope { engagement_id?: string; session_id?: string; }
 interface ArtifactCatalogAuthority {
   artifactMutation<T>(operation: () => Promise<T>): Promise<T>;
   artifactSessions(scope?: ArtifactScope): Promise<ArtifactBinding[]>; saveArtifactSession(binding: ArtifactBinding): Promise<void>;
   artifactCatalogRows(scope?: ArtifactScope): Promise<Array<Record<string, unknown>>>; saveArtifactCatalogRow(row: ArtifactRow, chunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }>, uploadId?: string, idempotency?: { key: string; principal: string; request_hash: string; result: unknown }, principal?: string): Promise<void>;
+  indexArtifactHistory?(row: ArtifactRow, text: string): Promise<void>;
+  invalidateArtifactHistory?(input: { content_ref: string; engagement_id: string; session_id: string }): Promise<void>;
+  markArtifactHistoryIndex?(input: { engagement_id: string; session_id: string; status: "pending" | "current" }): Promise<void>;
+  searchArtifactHistory?(input: { engagement_id: string; session_id: string; query: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size?: number; max_response_bytes?: number; principal_id?: string; cursor_key_root?: string }): Promise<Record<string, unknown>>;
   artifactCatalogRow?(engagementId: string, sessionId: string, contentRef: string): Promise<Record<string, unknown> | undefined>;
   artifactCatalogWatermark?(engagementId: string, sessionId: string): Promise<{ catalog_watermark: number; index_watermark: number; index_status: string }>;
   queryArtifactCatalog?(input: { engagement_id: string; session_id: string; category?: string; media_type?: string; work_run_id?: string; after?: { stored_at: string; content_ref: string }; limit: number }): Promise<{ items: Array<Record<string, unknown>>; has_more: boolean; watermark: { catalog_watermark: number; index_watermark: number; index_status: string } }>;
@@ -224,6 +228,7 @@ export class ArtifactContentStore {
   }
   private async beginUpload(input: ArtifactBeginInput, principal: string): Promise<Record<string, unknown>> {
     const binding = await this.requireBinding(input.engagement_id, input.session_id); if (!input.media_type || !["text", "binary", "manifest"].includes(input.payload_kind)) fail("validation_error", "payload_kind and media_type are required");
+    if (input.history_content_class !== undefined && (input.history_content_class !== "execution_history" || input.storage_mode === "external" || input.payload_kind !== "text" || !/^text\//i.test(input.media_type))) fail("validation_error", "execution history indexing requires a Taric-stored textual Artifact");
     const beginHash = requestHash(input); const prior = await this.idempotentResult(input.idempotency_key, "artifact.store.begin", principal, input.engagement_id, beginHash); if (prior) return prior as Record<string, unknown>;
     if (input.expected_bytes !== undefined && (!Number.isSafeInteger(input.expected_bytes) || input.expected_bytes < 0)) fail("validation_error", "expected_bytes must be a nonnegative integer"); if (input.expected_hash) checkHash(input.expected_hash, "expected_hash");
     let artifactId = uuidv7();
@@ -247,7 +252,7 @@ export class ArtifactContentStore {
     if (derivedFrom) { const parent = await this.findRow(input.engagement_id, input.session_id, derivedFrom); if (!parent) fail("authorization_error", "derived Artifact parent is not in this task session"); if (parent.parent_ref === artifactId) fail("validation_error", "derived Artifact references cannot form a cycle"); }
     if ((input.storage_mode ?? "taric_stored") === "external") {
       if (!input.host_ref) fail("validation_error", "external Artifact requires host_ref");
-      const row: ArtifactRow = { content_ref: `${artifactId}@v${version}`, artifact_id: artifactId, version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: input.payload_kind, media_type: input.media_type, storage_mode: "external", category: input.category, summary_ref: input.summary_ref, captured_at: input.captured_at, host_ref: input.host_ref, byte_length: input.expected_bytes ?? 0, chunk_count: 0, content_hash: input.expected_hash, content_status: "external", integrity_status: "unverified", stored_at: new Date().toISOString(), work_run_id: storedInput.work_run_id, attempt_id: storedInput.attempt_id, generation: storedInput.generation, parent_ref: derivedFrom, child_refs: input.child_refs, relative_dir: "", manifest_path: "" };
+      const row: ArtifactRow = { content_ref: `${artifactId}@v${version}`, artifact_id: artifactId, version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: input.payload_kind, media_type: input.media_type, storage_mode: "external", category: input.category, history_content_class: undefined, summary_ref: input.summary_ref, captured_at: input.captured_at, host_ref: input.host_ref, byte_length: input.expected_bytes ?? 0, chunk_count: 0, content_hash: input.expected_hash, content_status: "external", integrity_status: "unverified", stored_at: new Date().toISOString(), work_run_id: storedInput.work_run_id, attempt_id: storedInput.attempt_id, generation: storedInput.generation, parent_ref: derivedFrom, child_refs: input.child_refs, relative_dir: "", manifest_path: "" };
       await this.#authority?.saveArtifactCatalogRow(row, [], undefined, undefined, principal); this.#rows.set(this.rowKey(row), row); this.saveCatalog(); const result = { artifact_id: artifactId, content_ref: row.content_ref, version, storage_mode: "external", content_status: "external" }; await this.saveIdempotentResult(input.idempotency_key, "artifact.store.begin", principal, input.engagement_id, beginHash, result); return result;
     }
     const uploadId = uuidv7(); const stagingDir = join(binding.root, ".staging", uploadId); mkdirSync(stagingDir, { recursive: true, mode: 0o700 }); const upload: Upload = { upload_id: uploadId, artifact_id: artifactId, version, binding, principal, input: { ...storedInput, parent_ref: derivedFrom }, staging_dir: stagingDir, chunks: [], total_bytes: 0 }; await this.persistUpload(upload); this.#uploads.set(uploadId, upload);
@@ -360,7 +365,7 @@ export class ArtifactContentStore {
     const storedAt = new Date().toISOString(); const parts = storedAt.slice(0, 10).split("-"); const relDir = join("artifacts", ...parts, upload.artifact_id.slice(0, 2), upload.artifact_id, `v${String(upload.version).padStart(6, "0")}`); const dir = join(upload.binding.root, relDir); const publishDir = `${dir}.publishing-${input.upload_id}`;
     const manifestChunks: Array<{ ordinal: number; offset: number; bytes: number; hash: string; path: string }> = []; let offset = 0; for (const chunk of upload.chunks) { const filename = `payload-${String(chunk.ordinal + 1).padStart(6, "0")}.part`; manifestChunks.push({ ordinal: chunk.ordinal, offset, bytes: chunk.bytes, hash: chunk.hash, path: relative(upload.binding.root, join(dir, filename)).split(sep).join("/") }); offset += chunk.bytes; }
     const manifest = { schema_version: "1.0.0", artifact_id: upload.artifact_id, version: upload.version, payload_kind: upload.input.payload_kind, media_type: upload.input.media_type, charset: upload.input.charset, content_encoding: upload.input.content_encoding, transfer_encoding: upload.input.transfer_encoding, total_bytes: input.total_bytes, chunk_size: ARTIFACT_CHUNK_BYTES, chunk_count: manifestChunks.length, content_hash: input.content_hash, publication_state: "available", chunks: manifestChunks }; const manifestPath = join(publishDir, "content.manifest.json"); const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n"); const manifestHash = hashBytes(manifestBytes);
-    const row: ArtifactRow = { content_ref: `${upload.artifact_id}@v${upload.version}`, artifact_id: upload.artifact_id, version: upload.version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: upload.input.payload_kind, media_type: upload.input.media_type, charset: upload.input.charset, content_encoding: upload.input.content_encoding, transfer_encoding: upload.input.transfer_encoding, storage_mode: "taric_stored", category: upload.input.category, summary_ref: upload.input.summary_ref, captured_at: upload.input.captured_at, host_ref: upload.input.host_ref, byte_length: input.total_bytes, chunk_count: manifestChunks.length, content_hash: input.content_hash, manifest_hash: manifestHash, content_status: "available", integrity_status: "verified", stored_at: storedAt, work_run_id: upload.input.work_run_id, attempt_id: upload.input.attempt_id, generation: upload.input.generation, parent_ref: upload.input.parent_ref, child_refs: upload.input.child_refs, relative_dir: relDir.split(sep).join("/"), manifest_path: relative(upload.binding.root, join(dir, "content.manifest.json")).split(sep).join("/") };
+    const row: ArtifactRow = { content_ref: `${upload.artifact_id}@v${upload.version}`, artifact_id: upload.artifact_id, version: upload.version, engagement_id: input.engagement_id, session_id: input.session_id, payload_kind: upload.input.payload_kind, media_type: upload.input.media_type, charset: upload.input.charset, content_encoding: upload.input.content_encoding, transfer_encoding: upload.input.transfer_encoding, storage_mode: "taric_stored", category: upload.input.category, history_content_class: upload.input.history_content_class, summary_ref: upload.input.summary_ref, captured_at: upload.input.captured_at, host_ref: upload.input.host_ref, byte_length: input.total_bytes, chunk_count: manifestChunks.length, content_hash: input.content_hash, manifest_hash: manifestHash, content_status: "available", integrity_status: "verified", stored_at: storedAt, work_run_id: upload.input.work_run_id, attempt_id: upload.input.attempt_id, generation: upload.input.generation, parent_ref: upload.input.parent_ref, child_refs: upload.input.child_refs, relative_dir: relDir.split(sep).join("/"), manifest_path: relative(upload.binding.root, join(dir, "content.manifest.json")).split(sep).join("/") };
     if (this.#authority?.startArtifactPublication) await this.#authority.startArtifactPublication(input.upload_id, input.engagement_id, input.session_id, row.content_ref, dir);
     mkdirSync(dirname(dir), { recursive: true, mode: 0o700 }); mkdirSync(publishDir, { recursive: true, mode: 0o700 }); writeFileSync(join(publishDir, ".operation.json"), JSON.stringify({ upload_id: input.upload_id, phase: "publishing", content_hash: input.content_hash, chunk_count: upload.chunks.length, created_at: storedAt }) + "\n", { mode: 0o600 });
     for (const chunk of upload.chunks) { const filename = `payload-${String(chunk.ordinal + 1).padStart(6, "0")}.part`; copyFileSync(chunk.path, join(publishDir, filename)); }
@@ -385,6 +390,16 @@ export class ArtifactContentStore {
     } catch (error) {
       await this.#authority?.failArtifactPublication?.(input.upload_id, error instanceof Error ? error.message : "authority publication failed");
       throw error;
+    }
+    if (row.history_content_class === "execution_history") {
+      try {
+        const verified = this.checkArtifactFiles(upload.binding, row, [], []);
+        if (verified.content_status !== "available" || verified.integrity_status !== "verified") throw new Error("published Artifact failed integrity verification");
+        const text = Buffer.concat(manifestChunks.map((chunk) => readFileSync(join(dir, `payload-${String(chunk.ordinal + 1).padStart(6, "0")}.part`)))).toString("utf8");
+        await this.#authority?.indexArtifactHistory?.(row, text);
+      } catch {
+        await this.#authority?.markArtifactHistoryIndex?.({ engagement_id: row.engagement_id, session_id: row.session_id, status: "pending" });
+      }
     }
     this.#options.fault?.("after_catalog_commit");
     this.#options.measure?.("publish");
@@ -426,6 +441,19 @@ export class ArtifactContentStore {
     const requested = input.length ?? max;
     if (!Number.isSafeInteger(requested) || requested < 1) fail("validation_error", "read length must be bounded");
     return { ...await this.read({ ...input, length: Math.min(requested, max) }), max_response_bytes: max };
+  }
+  async readHistory(input: { engagement_id: string; session_id: string; content_ref: string; offset?: number; length?: number; chunk_cursor?: string; max_response_bytes?: number; principal_id?: string }): Promise<Record<string, unknown>> {
+    const row = await this.requireRow(input);
+    if (row.history_content_class !== "execution_history" || row.storage_mode !== "taric_stored" || row.payload_kind !== "text" || row.category === "task_credential") fail("authorization_error", "Artifact is not designated execution history");
+    const max = input.max_response_bytes ?? 16 * 1024;
+    if (!Number.isSafeInteger(max) || max < 1 || max > 1024 * 1024) fail("validation_error", "max_response_bytes must be bounded");
+    const length = Math.min(input.length ?? 16 * 1024, 16 * 1024, max);
+    return this.read({ ...input, length });
+  }
+  async searchHistory(input: { engagement_id: string; session_id: string; query: string; work_run_id?: string; attempt_id?: string; cursor?: string; page_size?: number; max_response_bytes?: number; principal_id?: string }): Promise<Record<string, unknown>> {
+    if (!this.#authority || !(this.#authority as ArtifactCatalogAuthority & { searchArtifactHistory?: Function }).searchArtifactHistory) return { items: [], complete: false, index_status: "unavailable", incomplete: true };
+    if (input.query.length > 256 || !input.query.trim()) fail("validation_error", "history search query must be 1..256 characters");
+    return (await this.#authority.searchArtifactHistory!({ ...input, cursor_key_root: this.#root }));
   }
   async metadata(input: { engagement_id: string; session_id: string; content_ref: string }): Promise<Record<string, unknown>> { await this.initialize(); const row = await this.requireRow(input); const { relative_dir: _dir, manifest_path: _manifest, host_ref: _hostRef, ...safe } = row; return safe; }
   async list(input: { engagement_id: string; session_id: string; cursor?: string; page_size?: number; category?: string; media_type?: string; work_run_id?: string; include_content?: boolean; max_response_bytes?: number; principal_id?: string }): Promise<Record<string, unknown>> {
@@ -496,7 +524,21 @@ export class ArtifactContentStore {
         const page = await this.#authority.queryArtifactCatalog({ engagement_id: binding.engagement_id, session_id: binding.session_id, after, limit: limit - checked });
         for (const raw of page.items) {
           const row = raw as unknown as ArtifactRow; checked++; const updated = this.checkArtifactFiles(binding, row, unavailable, integrity_failed);
-          if (updated !== row && !input.read_only) { await this.#authority.updateArtifactCatalogRow?.(updated, updated.content_status === "unavailable" ? "artifact.content.unavailable" : "artifact.content.integrity_failed"); this.#rows.set(this.rowKey(updated), updated); }
+          if (!input.read_only) {
+            if (updated !== row) {
+              await this.#authority.updateArtifactCatalogRow?.(updated, updated.content_status === "unavailable" ? "artifact.content.unavailable" : updated.content_status === "available" ? "artifact.content.recovered" : "artifact.content.integrity_failed");
+              this.#rows.set(this.rowKey(updated), updated);
+            }
+            // Reconcile is also the bounded index doctor. Always revalidate a
+            // verified designated Artifact so a crash between publication and
+            // indexing, or a deleted/stale derived row, is repaired without
+            // trusting the catalog status alone. indexArtifactHistory is
+            // idempotent when source hashes and text are unchanged.
+            if (updated.history_content_class === "execution_history" && updated.content_status === "available" && updated.integrity_status === "verified") {
+              try { await this.indexHistoryFromFiles(binding, updated); }
+              catch { await this.#authority.markArtifactHistoryIndex?.({ engagement_id: updated.engagement_id, session_id: updated.session_id, status: "pending" }); }
+            } else if (updated.history_content_class === "execution_history") await this.#authority.invalidateArtifactHistory?.({ content_ref: updated.content_ref, engagement_id: updated.engagement_id, session_id: updated.session_id });
+          }
           after = { stored_at: row.stored_at, content_ref: row.content_ref };
         }
         if (page.has_more) { next_cursor = cursorEncode({ engagement_id: input.engagement_id ?? null, session_id: input.session_id ?? null, session_index: sessionIndex, stored_at: after?.stored_at, content_ref: after?.content_ref }); break; }
@@ -522,8 +564,16 @@ export class ArtifactContentStore {
         offset += payload.length; fullHash.update(payload);
       }
       if (offset !== row.byte_length || `sha256:${fullHash.digest("hex")}` !== row.content_hash) { integrityFailed.push(row.content_ref); return { ...row, content_status: "integrity_failed", integrity_status: "mismatch" }; }
-      return row;
+      if (row.content_status === "available" && row.integrity_status === "verified") return row;
+      return { ...row, content_status: "available", integrity_status: "verified" };
     } catch { unavailable.push(row.content_ref); return { ...row, content_status: "unavailable", integrity_status: "missing" }; }
+  }
+  private async indexHistoryFromFiles(binding: ArtifactBinding, row: ArtifactRow): Promise<void> {
+    if (!this.#authority?.indexArtifactHistory || row.history_content_class !== "execution_history") return;
+    const manifestPath = canonicalWithin(binding.root, join(binding.root, row.manifest_path));
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { chunks: Array<{ path: string }> };
+    const text = Buffer.concat(manifest.chunks.map((chunk) => readFileSync(canonicalWithin(binding.root, join(binding.root, chunk.path))))).toString("utf8");
+    await this.#authority.indexArtifactHistory(row, text);
   }
   private bindingKey(engagementId: string, sessionId: string): string { return `${engagementId}\0${sessionId}`; }
   private matchesScope(value: { engagement_id: string; session_id: string }, scope: ArtifactScope): boolean { return (scope.engagement_id === undefined || value.engagement_id === scope.engagement_id) && (scope.session_id === undefined || value.session_id === scope.session_id); }

@@ -70,11 +70,17 @@ test("SQLite compatibility failure identifies expected and observed markers", as
   try {
     const driver = new driverModule.SqliteAuthorityDriver(filename);
     await driver.ready;
-    await driver.run("UPDATE metadata SET value=? WHERE key='storage_format'", "legacy-storage");
+    const format = await driver.get("SELECT value FROM metadata WHERE key='storage_format'");
+    assert.equal(format?.value, AUTHORITY_SQL_SCHEMA_VERSION);
+    for (const table of ["artifact_history_index", "artifact_history_watermarks", "artifact_history_fts"]) {
+      assert.ok(await driver.get("SELECT name FROM sqlite_master WHERE name=?", table), `${table} should be initialized`);
+    }
+    await driver.run("UPDATE metadata SET value=? WHERE key='storage_format'", "authority-sql/4");
+    await driver.run("INSERT INTO metadata(key,value) VALUES('sentinel','before-open')");
     await driver.close();
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(filename);
-    database.prepare("UPDATE metadata SET value=? WHERE key='storage_format'").run("legacy-storage");
+    database.prepare("UPDATE metadata SET value=? WHERE key='storage_format'").run("authority-sql/4");
     database.close();
     const incompatible = new driverModule.SqliteAuthorityDriver(filename);
     await assert.rejects(incompatible.ready, (error) => {
@@ -82,10 +88,13 @@ test("SQLite compatibility failure identifies expected and observed markers", as
       assert.equal(error.details.kind, "compatibility");
       assert.equal(error.details.backend, "sqlite");
       assert.equal(error.details.expected.storage_format, AUTHORITY_SQL_SCHEMA_VERSION);
-      assert.equal(error.details.observed.storage_format, "legacy-storage");
+      assert.equal(error.details.observed.storage_format, "authority-sql/4");
       return true;
     });
     await incompatible.close();
+    const check = new DatabaseSync(filename);
+    assert.equal(check.prepare("SELECT value FROM metadata WHERE key='sentinel'").get()?.value, "before-open");
+    check.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

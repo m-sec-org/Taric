@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Pool } from "pg";
-import { PostgresAuthorityStore, runtimeImplementationDigest } from "../packages/core/dist/index.js";
+import { PostgresAuthorityStore, runtimeImplementationDigest, uuidv7 } from "../packages/core/dist/index.js";
 
 const databaseUrl = process.env.TARIC_TEST_DATABASE_URL;
 const activationPath = process.env.TARIC_RUNTIME_CONFORMANCE;
@@ -168,7 +168,16 @@ try {
   const seed = new PostgresAuthorityStore(seedPool, { profile: "multi_host_authority" });
   await seed.migrate();
   const engagement = await seed.initializeEngagement({ name: "isolated two-container live verification", scope: { allowed_targets: ["https://multi-host.invalid"], excluded_targets: [], rules_of_engagement_ref: "test:multi-host-live" } });
-  const workItem = await seed.createRecord({ engagement_id: engagement.id, kind: "work_item", title: "shared PostgreSQL lease race", status: "queued", acceptance_criteria: ["exactly one active owner"] }, "L2");
+  const scope = await seed.get(engagement.scope_ref);
+  const roeBytes = Buffer.from("approved multi-host fixture ROE");
+  const roeHash = `sha256:${createHash("sha256").update(roeBytes).digest("hex")}`;
+  const roeArtifactId = uuidv7();
+  const roeRef = `${roeArtifactId}@v1`;
+  await seed.saveArtifactCatalogRow({ content_ref: roeRef, engagement_id: engagement.id, session_id: "multi-host-roe", artifact_id: roeArtifactId, version: 1, payload_kind: "text", media_type: "text/plain", storage_mode: "taric_stored", byte_length: roeBytes.length, chunk_count: 1, content_hash: roeHash, content_status: "available", integrity_status: "verified", stored_at: new Date().toISOString(), relative_dir: "", manifest_path: "" }, [{ ordinal: 0, offset: 0, bytes: roeBytes.length, hash: roeHash, path: "multi-host-roe/chunk" }]);
+  const approved = await seed.reviseScope({ engagement_id: engagement.id, scope_id: scope.id, expected_version: scope.version, policy: { allowed_targets: ["multi-host.invalid"], excluded_targets: [], protocols: ["https"], ports: [{ from: 443, to: 443 }], methods: ["GET"], dns: { require_pinned_addresses: true, reject_private_addresses: true, max_addresses: 4 }, redirects: { max_hops: 1, same_scope_only: true }, valid_from: new Date(Date.now() - 60_000).toISOString(), valid_until: new Date(Date.now() + 3_600_000).toISOString() }, roe_artifact_ref: roeRef, roe_artifact_version: 1, idempotency_key: `multi-host-scope:${engagement.id}`, principal: "multi-host-operator" });
+  const resource = await seed.createRecord({ engagement_id: engagement.id, kind: "resource", asset_type: "endpoint", identity: { origin: "https://multi-host.invalid", path: "/" }, revision: 1 }, "L2");
+  const revision = await seed.createRecord({ engagement_id: engagement.id, kind: "resource_revision", resource_ref: resource.id, revision: 1, content_hash: `sha256:${"a".repeat(64)}`, source_observation_refs: [] }, "L2");
+  const workItem = await seed.createRecord({ engagement_id: engagement.id, kind: "work_item", scope_ref: approved.scope.id, title: "shared PostgreSQL lease race", status: "queued", acceptance_criteria: ["exactly one active owner"], resource_refs: [resource.id, revision.id] }, "L2");
   const version = await seedPool.query("SELECT current_setting('server_version_num')::int AS version_num");
   await seed.close();
   await seedPool.end();

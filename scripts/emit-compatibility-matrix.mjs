@@ -16,6 +16,18 @@ import { ADAPTER_CONTRACT_VERSION, API_CONTRACT_VERSION, SCHEMA_VERSION, contrac
 import { AUTHORITY_STORAGE_CONTRACT_VERSION, TARIC_COMPATIBILITY_MANIFEST } from "../packages/core/dist/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const piEvidence = JSON.parse(readFileSync(join(root, "docs/benchmarks/pi-1.5.0-live.json"), "utf8"));
+const piHostCommit = "f9a26365568127461c47a07a37dcb42c140a3ac5";
+const piRequiredChecks = ["real_pi_rpc_process_starts", "taric_extension_loaded_by_real_pi_extension_api", "pi_1_5_schema_coercion_and_diagnostics", "real_pi_rpc_command_surface_available", "current_taric_adapter_matches_live_pi_version"];
+if (piEvidence.version !== "taric-third-party-host-live-verification/2" ||
+    piEvidence.host?.package !== "@earendil-works/pi-coding-agent" || piEvidence.host?.version !== "1.5.0" || piEvidence.host?.commit !== piHostCommit ||
+    piEvidence.evidence?.upstream_tag !== "v1.5.0" || piEvidence.evidence?.upstream_commit !== piHostCommit ||
+    piEvidence.schema?.package !== "@earendil-works/pi-schema" || piEvidence.schema?.version !== "1.5.0" ||
+    piEvidence.release_review?.extension_api !== "ExtensionAPI.on/registerTool" || !piEvidence.release_review?.tool_validation?.includes("pi-schema") ||
+    !Array.isArray(piEvidence.checks) || piRequiredChecks.some((id) => !piEvidence.checks.some((check) => check.id === id && check.passed === true)) ||
+    !Array.isArray(piEvidence.limitations) || piEvidence.limitations.length === 0 || "package_root" in (piEvidence.evidence ?? {})) {
+  throw new Error("Pi 1.5.0 certification requires a passing, path-scrubbed live report at docs/benchmarks/pi-1.5.0-live.json");
+}
 const readPackage = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
 const corePackage = readPackage("packages/core/package.json");
 const schemasPackage = readPackage("packages/schemas/package.json");

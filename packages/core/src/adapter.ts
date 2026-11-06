@@ -94,7 +94,7 @@ export interface PiRegisteredTool {
   execute(toolCallId: string, params: Record<string, unknown>): Promise<{ content: Array<{ type: "text"; text: string }>; details?: unknown }>;
 }
 
-/** Pi 1.1 ExtensionAPI hooks and tool registration used by the pinned host contract. */
+/** Pi 1.x ExtensionAPI hooks and tool registration used by the pinned host contract. */
 export interface PiExtensionApi {
   on(event: string, handler: (event: unknown, context?: unknown) => Promise<unknown> | unknown): () => void;
   registerTool?(tool: PiRegisteredTool): void;
@@ -412,7 +412,7 @@ export class TaricAdapterClient implements AdapterClient {
 
     const hooks = ["session_start", "context", "before_agent_start", "agent_before_settle", "tool_result", "session_shutdown"];
     // `callbacks` is the stable Taric lifecycle vocabulary. `hooks` below is
-    // the concrete Pi 1.x registration list (unchanged through 1.4.0); Pi has
+    // the concrete Pi 1.x registration list (verified through 1.5.0); Pi has
     // no native proposal, checkpoint, action, result, or error event names.
     const callbacks: PiLifecycleEventName[] = ["session_start", "context"];
     extension.on("session_start", async (raw) => this.handle("session_start", raw));

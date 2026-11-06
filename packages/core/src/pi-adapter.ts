@@ -17,7 +17,7 @@ export interface CertifiedPiVersion {
  * supported；兼容区间必须有两端边界测试才可声明，当前不声明任何区间）。
  */
 export const CERTIFIED_PI_VERSIONS: readonly CertifiedPiVersion[] = [
-  { version: "1.4.0", host_commit: "4a08025", evidence_ref: "packages/core/test/host-adapters.test.mjs" },
+  { version: "1.5.0", host_commit: "f9a26365568127461c47a07a37dcb42c140a3ac5", evidence_ref: "docs/benchmarks/pi-1.5.0-live.json" },
 ];
 const LATEST_CERTIFIED = CERTIFIED_PI_VERSIONS[0];
 
@@ -31,7 +31,7 @@ export const SUPPORTED_PI_HOST = {
   host_id: "pi",
   package: "@earendil-works/pi-coding-agent",
   version: LATEST_CERTIFIED.version,
-  /** v1.4.0 发布对应上游 tag commit 4a08025（earendil-works/pi v1.x 线，2026-10-21）。 */
+  /** v1.5.0 发布对应上游 tag commit f9a26365568127461c47a07a37dcb42c140a3ac5。 */
   host_commit: LATEST_CERTIFIED.host_commit,
   source: "https://github.com/earendil-works/pi",
   extension_api: "ExtensionAPI.on",

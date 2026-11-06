@@ -103,6 +103,7 @@ export class SqliteAuthorityDriver implements AuthoritySqlDriver {
         db.exec("BEGIN IMMEDIATE");
         try {
           db.exec(AUTHORITY_SQL_TABLES);
+          db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS artifact_history_fts USING fts5(content_ref UNINDEXED, normalized_text, tokenize='unicode61')");
           const columns = db.prepare("PRAGMA table_info(artifact_catalog)").all() as Array<{ name: string }>;
           if (!columns.some((column) => column.name === "media_type")) db.exec("ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT");
           db.exec(AUTHORITY_SQL_INDEXES);
@@ -250,6 +251,8 @@ export class PostgresAuthorityDriver implements AuthoritySqlDriver {
         await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.quotedSchema}`);
         await client.query(`SET LOCAL search_path TO ${this.quotedSchema},pg_catalog`);
         await client.query(AUTHORITY_SQL_TABLES.replace("commit_seq INTEGER PRIMARY KEY AUTOINCREMENT", "commit_seq BIGINT PRIMARY KEY").replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id BIGSERIAL PRIMARY KEY"));
+        await client.query("ALTER TABLE artifact_history_index ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', normalized_text)) STORED");
+        await client.query("CREATE INDEX IF NOT EXISTS artifact_history_index_fts ON artifact_history_index USING GIN(search_vector)");
         await client.query(AUTHORITY_SQL_INDEXES);
         for (const [key, value] of AUTHORITY_SQL_INITIAL_METADATA) await client.query("INSERT INTO metadata(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING", [key, value]);
         await client.query("INSERT INTO metadata(key,value) VALUES('authority_id',$1) ON CONFLICT(key) DO NOTHING", [uuidv7()]);

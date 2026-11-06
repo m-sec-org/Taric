@@ -6,7 +6,7 @@ export interface SchemaMetadata {
   created_at: string;
 }
 
-export const CORE_VERSION = "1.0.4";
+export const CORE_VERSION = "1.1.0";
 
 /** RFC 9562 UUIDv7 with millisecond timestamp ordering. */
 export function uuidv7(now = Date.now()): string {

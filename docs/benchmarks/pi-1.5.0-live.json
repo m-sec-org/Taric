@@ -1,0 +1,120 @@
+{
+  "version": "taric-third-party-host-live-verification/2",
+  "generated_at": "2026-11-06T01:04:46.775Z",
+  "host": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "1.5.0",
+    "commit": "f9a26365568127461c47a07a37dcb42c140a3ac5"
+  },
+  "evidence": {
+    "upstream_tag": "v1.5.0",
+    "upstream_commit": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+    "commands": [
+      "npm install --prefix <isolated-prefix> --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.5.0",
+      "node scripts/verify-pi-host-live.mjs --output <report-path>"
+    ],
+    "install_source": "npm registry",
+    "installation": "isolated package prefix"
+  },
+  "schema": {
+    "package": "@earendil-works/pi-schema",
+    "version": "1.5.0"
+  },
+  "release_review": {
+    "extension_api": "ExtensionAPI.on/registerTool",
+    "tool_validation": "Pi 1.5.0 routes JSON Schema tool arguments through pi-schema, including coercion and pi-schema diagnostics.",
+    "typebox_boundary": "TypeBox-only features outside JSON Schema are not applied to tool arguments."
+  },
+  "checks": [
+    {
+      "id": "real_pi_rpc_process_starts",
+      "passed": true,
+      "mode": "rpc",
+      "session": "01a1ae63-04d3-7226-b048-a4e4b0ba31f0"
+    },
+    {
+      "id": "taric_extension_loaded_by_real_pi_extension_api",
+      "passed": true,
+      "callbacks": [
+        "session_start",
+        "context"
+      ],
+      "hooks": [
+        "session_start",
+        "context",
+        "before_agent_start",
+        "agent_before_settle",
+        "tool_result",
+        "session_shutdown",
+        "registerTool:taric_proposal"
+      ],
+      "capabilities": [
+        "session_lifecycle",
+        "context_injection",
+        "proposal_submission"
+      ],
+      "registered_tools": [
+        "taric_proposal"
+      ]
+    },
+    {
+      "id": "pi_1_5_schema_coercion_and_diagnostics",
+      "passed": true,
+      "coercion": {
+        "input_expected_version": "0",
+        "output_expected_version_type": "number",
+        "output_expected_version": 0
+      },
+      "invalid": {
+        "ok": false,
+        "errors": [
+          {
+            "path": "/expected_version",
+            "keyword": "type",
+            "message": "expected integer, got string"
+          }
+        ]
+      },
+      "additional_properties": {
+        "ok": false,
+        "errors": [
+          {
+            "path": "/unexpected",
+            "keyword": "additionalProperties",
+            "message": "unknown field"
+          }
+        ]
+      },
+      "proposal_execution": {
+        "valid_coerced": {
+          "ok": true,
+          "error_code": null
+        },
+        "core_invalid": {
+          "ok": false,
+          "error_code": "validation_error"
+        },
+        "core_additional_property": {
+          "ok": false,
+          "error_code": "validation_error"
+        }
+      }
+    },
+    {
+      "id": "real_pi_rpc_command_surface_available",
+      "passed": true
+    },
+    {
+      "id": "current_taric_adapter_matches_live_pi_version",
+      "passed": true,
+      "available_capabilities": [
+        "session_lifecycle",
+        "context_injection"
+      ]
+    }
+  ],
+  "pi_session_digest": "sha256:0fee12213908861cc763d1763e1f33cdd2039489d248b2ccabbabd667b50a489",
+  "limitations": [
+    "Pi 1.5.0 was installed and started as a real RPC host. The extension registered Taric's proposal tool, and the installed pi-schema compiler recorded numeric coercion plus invalid/additional-property diagnostics. The smoke calls the extension tool implementation directly to confirm Core rejects invalid and extra arguments; it does not send model-generated tool calls through a provider. No model provider call, credential access, interactive target tool execution, or external target action was performed; Core remains the strict authorization and contract boundary."
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0.0",
-  "core_version": "1.0.4",
-  "api_contract_version": "1.4.0",
+  "core_version": "1.1.0",
+  "api_contract_version": "1.5.0",
   "adapter_contract_version": "1.1",
-  "storage_contract_version": "authority-storage/4",
+  "storage_contract_version": "authority-storage/5",
   "runtime_dependency_closure": {
     "@taric/schemas": {
-      "version": "1.0.4",
+      "version": "1.1.0",
       "exports": [
         ".",
         "./schemas/v1/core.schema.json"
@@ -14,13 +14,13 @@
       "runtime_dependencies": {}
     },
     "@taric/core": {
-      "version": "1.0.4",
+      "version": "1.1.0",
       "exports": [
         ".",
         "./storage-contract"
       ],
       "runtime_dependencies": {
-        "@taric/schemas": "1.0.4",
+        "@taric/schemas": "1.1.0",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "pg": "^8.23.1"
@@ -30,13 +30,13 @@
   "drivers": [
     {
       "name": "@taric/driver-bun-sqlite",
-      "version": "1.0.4",
+      "version": "1.1.0",
       "runtime": "bun",
       "exports": [
         "."
       ],
       "peer_dependencies": {
-        "@taric/core": "1.0.4"
+        "@taric/core": "1.1.0"
       },
       "runtime_dependencies": {}
     }
@@ -47,7 +47,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "engagementInitRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -69,7 +69,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "engagementStatusRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -210,7 +210,7 @@
         "reviewer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "emptyRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -229,7 +229,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "emptyRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -247,7 +247,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "adapterHostRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -267,7 +267,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "adapterHostRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -287,7 +287,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "adapterConfigRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -309,7 +309,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "contextRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -329,7 +329,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "contextRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -349,7 +349,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "queryRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -369,7 +369,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "queryRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -389,7 +389,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "queryRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -409,7 +409,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "proposalEnvelope",
+      "request_schema": "proposalSubmitRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -431,7 +431,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "proposalListRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -450,7 +450,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "observation",
+      "request_schema": "captureObservationRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -511,7 +511,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "admissionRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -533,7 +533,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "admissionRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -576,7 +576,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "controlObservation",
+      "request_schema": "controlObserveRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -597,7 +597,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "accessDecisionObservation",
+      "request_schema": "accessObserveRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -619,7 +619,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "engagementIdRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -638,7 +638,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "hostStateRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -656,7 +656,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "workClaimRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -676,7 +676,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "workRenewRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -696,7 +696,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "workReclaimRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -736,7 +736,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "workResumeRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -775,7 +775,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "coverageSnapshotRequest",
+      "request_schema": "coverageGateRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -875,7 +875,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "checkpointProposeRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -895,7 +895,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "checkpoint",
+      "request_schema": "checkpointCommitRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -917,7 +917,7 @@
         "host",
         "operator"
       ],
-      "request_schema": "actionIntent",
+      "request_schema": "actionRecommendRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -937,7 +937,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "actionIntent",
+      "request_schema": "actionHostDecisionRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -957,7 +957,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "actionIntent",
+      "request_schema": "actionHostResultRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -977,7 +977,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "actionIntent",
+      "request_schema": "actionReconcileRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1197,11 +1197,71 @@
       "engagement_scoped": true
     },
     {
+      "operation": "history.query",
+      "roles": [
+        "model"
+      ],
+      "request_schema": "historyQueryRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error",
+        "unavailable_host"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
+      "engagement_scoped": true,
+      "capability": "history_read"
+    },
+    {
+      "operation": "artifact.search",
+      "roles": [
+        "model"
+      ],
+      "request_schema": "artifactSearchRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error",
+        "unavailable_host"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
+      "engagement_scoped": true,
+      "capability": "history_read"
+    },
+    {
+      "operation": "artifact.history.read",
+      "roles": [
+        "model"
+      ],
+      "request_schema": "artifactHistoryReadRequest",
+      "response_schema": "apiSuccess",
+      "errors": [
+        "validation_error",
+        "authorization_error",
+        "invalid_cursor",
+        "minimum_budget_required",
+        "internal_error",
+        "unavailable_host"
+      ],
+      "idempotent": false,
+      "mutates_authority": false,
+      "engagement_scoped": true,
+      "capability": "history_read"
+    },
+    {
       "operation": "audit.verify",
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "emptyRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1219,7 +1279,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "emptyRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1237,7 +1297,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "auditReconcileRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1255,7 +1315,7 @@
       "roles": [
         "host"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "errorReportRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1275,7 +1335,7 @@
       "roles": [
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "snapshotExportRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1295,7 +1355,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "resourceRevisionRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1317,7 +1377,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "patchSetRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1339,7 +1399,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "relationRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1361,7 +1421,7 @@
         "writer",
         "operator"
       ],
-      "request_schema": "apiSuccess",
+      "request_schema": "resourceImpactRequest",
       "response_schema": "apiSuccess",
       "errors": [
         "validation_error",
@@ -1381,10 +1441,10 @@
     "pi": {
       "state": "supported",
       "package": "@earendil-works/pi-coding-agent",
-      "version": "1.4.0",
-      "commit": "4a08025",
+      "version": "1.5.0",
+      "commit": "f9a26365568127461c47a07a37dcb42c140a3ac5",
       "certified_versions": [
-        "1.4.0"
+        "1.5.0"
       ],
       "contract": null
     },

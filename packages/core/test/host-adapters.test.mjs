@@ -98,7 +98,7 @@ test("Pi lifecycle callbacks reject cross-engagement and forged host attribution
   (await store.close());
 });
 
-test("Pi 1.4 hooks use explicit host bindings for proposal, checkpoint, and action result paths", async () => {
+test("Pi 1.5 hooks use explicit host bindings for proposal, checkpoint, and action result paths", async () => {
   const store = new AuthorityStore();
   const service = (await createCoreService(store));
   const engagement_id = uuidv7();
@@ -291,7 +291,7 @@ test("same-major uncertified Pi version runs the read-only safe subset without a
   const host = createPrincipal("host", "pi-host", engagement_id);
   const run = (await store.claimWorkRun({ work_item_id, engagement_id, host_id: host.id, agent_id: "agent-a" }));
   // 未认证的同 major 版本：register 允许，能力收敛到只读安全子集。
-  const pi = createPiAdapter(service, host, "1.5.0");
+  const pi = createPiAdapter(service, host, "1.5.1");
   assert.equal(pi.descriptor.certification_state, "not_certified");
   const extension = richPiExtensionApi();
   const loaded = await pi.register(extension, {

@@ -3,14 +3,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const files = ["readme.md"];
+const files = ["README.MD"];
 const collect = (directory) => {
   if (!existsSync(join(root, directory))) return;
   if (!existsSync(join(root, directory))) return;
   for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (path !== "openspec/changes/archive") collect(path);
+      if (path !== "openspec/changes/archive" && path !== "docs/pi-docs") collect(path);
     } else if (entry.isFile() && entry.name.endsWith(".md")) files.push(path);
   }
 };

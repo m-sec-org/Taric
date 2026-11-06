@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AuthorityStore, PostgresAuthorityStore, ContractValidationError, POSTGRES_MIGRATIONS, AUTHORITY_BACKEND_METHODS, uuidv7 } from "../dist/index.js";
+import { AuthorityStore, PostgresAuthorityStore, ContractValidationError, POSTGRES_MIGRATIONS, AUTHORITY_BACKEND_METHODS, AUTHORITY_SQL_SCHEMA_VERSION, uuidv7 } from "../dist/index.js";
 
 test("PostgreSQL uses the shared complete Core method surface without startup queries", async () => {
   let queries = 0;
@@ -37,13 +37,41 @@ test("selected PostgreSQL migration failure rolls back and never advertises read
   await store.close();
 });
 
+test("PostgreSQL rejects the prior SQL layout before any migration write", async () => {
+  const statements = [];
+  const store = new PostgresAuthorityStore({ async query(sql, values = []) {
+    statements.push({ sql, values });
+    if (sql === "BEGIN ISOLATION LEVEL READ COMMITTED" || sql === "ROLLBACK") return { rows: [] };
+    if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
+    if (sql.includes("information_schema.columns")) return { rows: [
+      { table_name: "metadata", column_name: "key", data_type: "text" },
+      { table_name: "metadata", column_name: "value", data_type: "text" },
+      { table_name: "records", column_name: "id", data_type: "text" },
+      { table_name: "proposals", column_name: "expected_version", data_type: "integer" },
+    ] };
+    if (sql.includes("key='schema_version'")) return { rows: [{ value: "1.0.0" }] };
+    if (sql.includes("key='storage_format'")) return { rows: [{ value: "authority-sql/4" }] };
+    throw new Error(`unexpected query: ${sql}`);
+  } }, { profile: "multi_host_authority", schema: "isolated_old_layout" });
+  await assert.rejects(store.migrate(), (error) => {
+    assert.equal(error.code, "unsupported_schema_version");
+    assert.equal(error.details.expected.storage_format, AUTHORITY_SQL_SCHEMA_VERSION);
+    assert.equal(error.details.observed.storage_format, "authority-sql/4");
+    return true;
+  });
+  assert.equal(statements.some(({ sql }) => /CREATE|ALTER|INSERT|UPDATE|DELETE/i.test(sql)), false);
+  await store.close();
+});
+
 test("shared SQL migrations declare every runtime persistence domain", () => {
   const sql = POSTGRES_MIGRATIONS.map((migration) => migration.sql).join("\n");
-  for (const table of ["proposals", "proposal_versions", "reviews", "object_refs", "checkpoints", "action_intents", "artifact_sessions", "artifact_catalog", "artifact_chunks", "artifact_publications", "artifact_idempotency", "work_runs", "attempts", "events", "outbox", "record_versions", "reader_pins"]) {
+  for (const table of ["proposals", "proposal_versions", "reviews", "object_refs", "checkpoints", "action_intents", "artifact_sessions", "artifact_catalog", "artifact_chunks", "artifact_history_index", "artifact_history_watermarks", "artifact_publications", "artifact_idempotency", "work_runs", "attempts", "events", "outbox", "record_versions", "reader_pins"]) {
     assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
   }
   assert.doesNotMatch(sql, /AUTOINCREMENT|jsonb/);
   assert.match(sql, /display_id.*UNIQUE|UNIQUE INDEX.*records_display_id_unique/);
+  assert.match(sql, /search_vector tsvector GENERATED ALWAYS/);
+  assert.match(sql, /artifact_history_index_fts ON artifact_history_index USING GIN/);
   assert.match(sql, /storage_format/);
 });
 

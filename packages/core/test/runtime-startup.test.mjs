@@ -33,6 +33,92 @@ test("Core shared config discovery resolves path, content and principal without 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("history-read startup grant is model-only and disabled by default", () => {
+  const deniedByDefault = resolveRuntimeAuthority({ config: { principal_role: "model" }, env: {}, home: "/tmp/taric-history-startup" });
+  assert.equal(deniedByDefault.principal.capabilities.includes("history_read"), false);
+  assert.equal(deniedByDefault.precedence.history_read_enabled, "default");
+
+  const configured = resolveRuntimeAuthority({ config: { principal_role: "model", history_read_enabled: true }, env: {}, home: "/tmp/taric-history-startup" });
+  assert.equal(configured.principal.capabilities.includes("history_read"), true);
+  assert.equal(configured.precedence.history_read_enabled, "config");
+
+  const ambient = resolveRuntimeAuthority({ config: {}, env: { TARIC_PRINCIPAL_ROLE: "model", TARIC_HISTORY_READ_ENABLED: "true" }, home: "/tmp/taric-history-startup" });
+  assert.equal(ambient.principal.capabilities.includes("history_read"), true);
+  assert.equal(ambient.precedence.history_read_enabled, "environment");
+
+  for (const options of [
+    { config: { history_read_enabled: true }, env: {} },
+    { config: { principal_role: "host", history_read_enabled: true }, env: {} },
+    { config: {}, env: { TARIC_PRINCIPAL_ROLE: "operator", TARIC_HISTORY_READ_ENABLED: "true" } },
+  ]) assert.throws(() => resolveRuntimeAuthority({ ...options, home: "/tmp/taric-history-startup" }), (error) => error.code === "configuration_invalid" && /model MCP principal/.test(error.message));
+});
+
+test("trusted startup capability grants are immutable and add to principal role defaults", () => {
+  const roleDefaults = {
+    model: ["read", "propose"],
+    host: ["read", "propose", "work", "checkpoint", "action", "content"],
+    reviewer: ["read", "review"],
+    writer: ["read", "propose", "admit", "writer"],
+    operator: ["read", "propose", "admit", "writer", "audit", "operator", "content"],
+  };
+  for (const [principal_role, defaults] of Object.entries(roleDefaults)) {
+    const content_read_enabled = ["host", "operator"].includes(principal_role);
+    const principal_capabilities = ["read", "propose", "propose", ...(content_read_enabled ? ["content_read", "content_read"] : [])];
+    const expectedGrants = ["read", "propose", ...(content_read_enabled ? ["content_read"] : [])];
+    const { principal } = resolveRuntimeAuthority({ config: { principal_role, principal_capabilities, content_read_enabled }, env: {}, home: "/tmp/taric-grant-startup" });
+    assert.deepEqual([...principal.capabilities].sort(), [...expectedGrants].sort());
+    const registered = createPrincipal(principal.role, "runtime-grant", principal.engagement_id, principal.capabilities);
+    assert.deepEqual([...registered.capabilities].sort(), [...new Set([...defaults, ...expectedGrants])].sort());
+    assert.equal(Object.isFrozen(principal), true);
+    assert.equal(Object.isFrozen(principal.capabilities), true);
+    principal_capabilities.push("audit");
+    assert.deepEqual([...principal.capabilities].sort(), [...expectedGrants].sort(), "resolved grants must not share the mutable config array");
+    assert.throws(() => principal.capabilities.push("audit"), TypeError);
+  }
+  for (const principal_capabilities of ["read", null, ["unknown"], ["read", 1]]) {
+    assert.throws(() => resolveRuntimeAuthority({ config: { principal_capabilities }, env: {}, home: "/tmp/taric-grant-startup" }), (error) => error.code === "configuration_invalid");
+  }
+});
+
+test("startup transport sessions require a host and a nonempty bounded identifier", () => {
+  for (const transport_session_id of ["session", "s".repeat(256)]) {
+    const resolved = resolveRuntimeAuthority({ config: { principal_role: "host", transport_session_id }, env: {}, home: "/tmp/taric-session-startup" });
+    assert.equal(resolved.principal.transport_session_id, transport_session_id);
+  }
+  for (const transport_session_id of ["", " \t", "s".repeat(257), 123, null]) {
+    assert.throws(() => resolveRuntimeAuthority({ config: { principal_role: "host", transport_session_id }, env: {}, home: "/tmp/taric-session-startup" }), (error) => error.code === "configuration_invalid");
+  }
+  for (const principal_role of ["model", "reviewer", "writer", "operator"]) {
+    assert.throws(() => resolveRuntimeAuthority({ config: { principal_role, transport_session_id: "session" }, env: {}, home: "/tmp/taric-session-startup" }), (error) => error.code === "configuration_invalid");
+  }
+  assert.throws(() => resolveRuntimeAuthority({ config: { principal_role: "host", transport_session_id: "session" }, env: { TARIC_PRINCIPAL_ROLE: "model" }, home: "/tmp/taric-session-startup" }), (error) => error.code === "configuration_invalid", "the effective role controls session ownership");
+});
+
+test("startup reviewer attestations require the reviewer role and valid immutable evidence", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  for (const capability of ["deterministic", "model", "human"]) {
+    const reviewer_attestation = { capability, model: "reviewer-model", prompt_digest: digest, ruleset_digest: digest };
+    const { principal } = resolveRuntimeAuthority({ config: { principal_role: "reviewer", reviewer_attestation }, env: {}, home: "/tmp/taric-reviewer-startup" });
+    assert.deepEqual(principal.reviewer_attestation, reviewer_attestation);
+    assert.equal(Object.isFrozen(principal.reviewer_attestation), true);
+    reviewer_attestation.model = "changed-config";
+    assert.equal(principal.reviewer_attestation.model, "reviewer-model");
+    assert.throws(() => { principal.reviewer_attestation.capability = "human"; }, TypeError);
+  }
+  for (const principal_role of ["model", "host", "writer", "operator"]) {
+    assert.throws(() => resolveRuntimeAuthority({ config: { principal_role, reviewer_attestation: { capability: "human" } }, env: {}, home: "/tmp/taric-reviewer-startup" }), (error) => error.code === "configuration_invalid");
+  }
+  for (const reviewer_attestation of [
+    null, [], {}, { capability: "unknown" }, { capability: "model", model: " \t" },
+    { capability: "model", prompt_digest: `sha256:${"a".repeat(63)}` },
+    { capability: "model", prompt_digest: `sha256:${"A".repeat(64)}` },
+    { capability: "model", ruleset_digest: "sha256:invalid" },
+    { capability: "model", ruleset_digest: 123 },
+  ]) {
+    assert.throws(() => resolveRuntimeAuthority({ config: { principal_role: "reviewer", reviewer_attestation }, env: {}, home: "/tmp/taric-reviewer-startup" }), (error) => error.code === "configuration_invalid");
+  }
+});
+
 test("explicit runtime config is strict, authoritative, and reports a safe digest", async () => {
   const directory = mkdtempSync(join(tmpdir(), "taric-startup-explicit-"));
   try {

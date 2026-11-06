@@ -17,7 +17,7 @@ ajv.addSchema(coreSchema);
 const validators = new Map(contractNames.map((name) => [name, ajv.getSchema(`${coreSchema.$id}#/$defs/${name}`)]));
 
 test("public API, adapter, and schema versions agree across generated manifests", () => {
-  assert.equal(contractRegistry.api_contract_version, "1.4.0");
+  assert.equal(contractRegistry.api_contract_version, "1.5.0");
   assert.equal(contractRegistry.adapter_contract_version, "1.1");
   assert.equal(supportedProfile.core_api_version, API_CONTRACT_VERSION);
   assert.equal(supportedProfile.adapter_api_version, ADAPTER_CONTRACT_VERSION);
@@ -45,6 +45,117 @@ test("contract registry covers every supported operation with request, response,
   assert.equal(coverageRecord?.request, "coverageRecordRequest");
   assert.equal(coverageRecord?.idempotent, true);
   assert.equal(coverageRecord?.mutates_authority, true);
+});
+
+test("every supported operation has a concrete strict object request contract", () => {
+  for (const { operation, request } of operationContracts) {
+    assert.notEqual(request, "apiSuccess", `${operation} must not use a response envelope as its request`);
+    assert.ok(contractNames.includes(request), `${operation} request is registered in contractNames`);
+    const schema = coreSchema.$defs[request];
+    assert.ok(schema, `${operation} request exists in coreSchema`);
+    assert.equal(schema.type, "object", `${operation} takes a top-level object`);
+    assert.ok(schema.additionalProperties === false || schema.unevaluatedProperties === false, `${operation} rejects unknown request fields`);
+    const validate = validators.get(request);
+    assert.equal(typeof validate, "function", `${operation} request compiles`);
+    assert.equal(validate({ unexpected_request_field: true }), false, `${operation} rejects unexpected request fields`);
+    assert.equal(validate([]), false, `${operation} rejects array arguments`);
+  }
+  for (const operation of ["capability.status", "adapter.status", "audit.verify", "audit.doctor"]) {
+    const request = operationContracts.find((entry) => entry.operation === operation).request;
+    assert.equal(request, "emptyRequest", `${operation} declares its empty input explicitly`);
+    assert.equal(validators.get(request)({}), true, `${operation} accepts empty arguments`);
+  }
+});
+
+test("completed request contracts preserve required fields, enums, bounds, and trusted identity boundaries", () => {
+  const engagement_id = "018f47a1-7c00-7000-8000-000000000001";
+  const record_id = "018f47a1-7c00-7000-8000-000000000002";
+  const digest = "sha256:" + "a".repeat(64);
+  const checkpoint = {
+    source_read_seq: 0, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [],
+    host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: {},
+  };
+  const requests = {
+    engagementInitRequest: { scope: { allowed_targets: ["https://example.test"], excluded_targets: [], rules_of_engagement_ref: "roe:test" } },
+    engagementStatusRequest: { engagement_id },
+    engagementIdRequest: { engagement_id },
+    adapterHostRequest: { host: "pi" },
+    adapterConfigRequest: { host: "pi", config: { enabled: true } },
+    contextRequest: { engagement_id, budget: 4000, filters: { kind: "claim" } },
+    queryRequest: { engagement_id, page_size: 100, trust_level: "L2" },
+    proposalListRequest: { engagement_id, page_size: 100 },
+    admissionRequest: { engagement_id, proposal_id: record_id, expected_version: 0, policy_digest: digest },
+    hostStateRequest: { engagement_id, limit: 100 },
+    workClaimRequest: { engagement_id, work_item_id: record_id, agent_id: "worker" },
+    workRenewRequest: { engagement_id, work_run_id: record_id, generation: 1 },
+    workReclaimRequest: { engagement_id, work_run_id: record_id, agent_id: "worker" },
+    workResumeRequest: { engagement_id, work_run_id: record_id },
+    checkpointProposeRequest: { engagement_id, work_run_id: record_id, generation: 1, checkpoint },
+    checkpointCommitRequest: { engagement_id, work_run_id: record_id, generation: 1, checkpoint: {
+      ...checkpoint, work_item_ref: record_id, work_run_ref: record_id, attempt_ref: record_id, generation: 1, target_version: 1, work_item_version: 1, scope_version: 1,
+      owner: { host_id: "host", agent_id: "worker" }, lease_expires_at: "2026-11-06T12:00:00Z",
+    } },
+    proposalSubmitRequest: { engagement_id, subject_type: "claim", expected_version: 0, work_run_id: record_id, generation: 1,
+      content: { engagement_id, schema_version: "1.0.0", kind: "claim", proposition: "candidate", status: "proposed", evidence_refs: [], limitations: [] } },
+    captureObservationRequest: { engagement_id, observation: { engagement_id, schema_version: "1.0.0", kind: "observation", resource_ref: record_id, observed_at: "2026-11-06T12:00:00Z", statement: "observed", artifact_refs: [] } },
+    actionRecommendRequest: { engagement_id, target: "/test", method: "GET", rationale: "verify" },
+    actionHostDecisionRequest: { engagement_id, work_run_id: record_id, action_id: record_id, generation: 1, mode: "host_hitl", status: "authorized" },
+    actionHostResultRequest: { engagement_id, work_run_id: record_id, action_id: record_id, generation: 1, mode: "host_hitl", status: "unknown" },
+    actionReconcileRequest: { engagement_id, work_run_id: record_id, action_id: record_id, generation: 1, status: "executed", result_ref: "result:1" },
+    controlObserveRequest: { engagement_id, resource_ref: record_id, operation: "GET", conditions: [], outcome: "inconclusive", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", evidence_refs: [], limitations: [] },
+    accessObserveRequest: { engagement_id, resource_ref: record_id, operation: "GET", conditions: [], decision: "unknown", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", evidence_refs: [], limitations: [] },
+    coverageGateRequest: { engagement_id },
+    auditReconcileRequest: { action: "preview" },
+    errorReportRequest: { engagement_id, message: "tool failed" },
+    snapshotExportRequest: { engagement_id, as_of: 0 },
+    resourceRevisionRequest: { engagement_id, asset_type: "route", identity: { route: "/test" }, variant: { method: "GET", path_template: "/test" }, content_hash: digest, source_observation_refs: [record_id] },
+    patchSetRequest: { engagement_id, base_generation: 0, read_set: [], write_set: [], operations: [{ op: "replace", entity_id: record_id, changes: { name: "updated" } }], source_observation_refs: [record_id] },
+    relationRequest: { engagement_id, from_ref: record_id, predicate: "depends_on", to_ref: engagement_id, source_observation_refs: [record_id] },
+    resourceImpactRequest: { engagement_id, source_id: record_id, limit: 100 },
+  };
+  for (const [name, request] of Object.entries(requests)) {
+    const validate = validators.get(name);
+    assert.equal(validate(request), true, `${name}: ${JSON.stringify(validate.errors)}`);
+    for (const field of ["role", "principal", "capabilities", "transport_session_id", "reviewer_attestation"]) {
+      assert.equal(validate({ ...request, [field]: "caller-selected" }), false, `${name} rejects ${field}`);
+    }
+    for (const field of coreSchema.$defs[name].required ?? []) {
+      const incomplete = { ...request };
+      delete incomplete[field];
+      assert.equal(validate(incomplete), false, `${name} requires ${field}`);
+    }
+  }
+  for (const [name, invalid] of [
+    ["adapterHostRequest", { host: "unknown" }],
+    ["admissionRequest", { ...requests.admissionRequest, expected_version: -1 }],
+    ["contextRequest", { ...requests.contextRequest, budget: 0 }],
+    ["queryRequest", { ...requests.queryRequest, page_size: 1001 }],
+    ["hostStateRequest", { ...requests.hostStateRequest, limit: 1001 }],
+    ["workClaimRequest", { ...requests.workClaimRequest, host_id: "body-host" }],
+    ["workClaimRequest", { ...requests.workClaimRequest, task_session_ref: "body-session" }],
+    ["workRenewRequest", { ...requests.workRenewRequest, generation: 0 }],
+    ["workRenewRequest", { ...requests.workRenewRequest, generation: Number.MAX_SAFE_INTEGER + 1 }],
+    ["workResumeRequest", { ...requests.workResumeRequest, host_id: "body-host" }],
+    ["auditReconcileRequest", { action: "unknown" }],
+    ["errorReportRequest", { ...requests.errorReportRequest, message: "x".repeat(513) }],
+    ["resourceRevisionRequest", { ...requests.resourceRevisionRequest, variant: { unsupported: true } }],
+    ["resourceRevisionRequest", { ...requests.resourceRevisionRequest, id: record_id }],
+    ["patchSetRequest", { ...requests.patchSetRequest, operations: [] }],
+    ["relationRequest", { ...requests.relationRequest, predicate: "unknown" }],
+    ["resourceImpactRequest", { ...requests.resourceImpactRequest, limit: 1001 }],
+    ["captureObservationRequest", { engagement_id }],
+    ["proposalSubmitRequest", { ...requests.proposalSubmitRequest, content: { ...requests.proposalSubmitRequest.content, role: "operator" } }],
+    ["proposalSubmitRequest", { ...requests.proposalSubmitRequest, content: { ...requests.proposalSubmitRequest.content, proposition: undefined } }],
+    ["proposalSubmitRequest", { ...requests.proposalSubmitRequest, content: { ...requests.proposalSubmitRequest.content, status: "verified" } }],
+    ["proposalSubmitRequest", { ...requests.proposalSubmitRequest, subject_type: "resource" }],
+    ["proposalSubmitRequest", { ...requests.proposalSubmitRequest, subject_type: "unsupported" }],
+    ["checkpointProposeRequest", { ...requests.checkpointProposeRequest, checkpoint: {} }],
+    ["actionRecommendRequest", { ...requests.actionRecommendRequest, status: "executed" }],
+    ["actionHostDecisionRequest", { ...requests.actionHostDecisionRequest, status: "executed" }],
+    ["actionHostResultRequest", { ...requests.actionHostResultRequest, status: "authorized" }],
+    ["actionReconcileRequest", { ...requests.actionReconcileRequest, status: "unknown" }],
+    ["coverageGateRequest", { ...requests.coverageGateRequest, page_size: 100 }],
+  ]) assert.equal(validators.get(name)(invalid), false, `${name} rejects ${JSON.stringify(invalid)}`);
 });
 
 test("coverage.record request requires a versioned cell write and rejects writer-controlled fields", () => {

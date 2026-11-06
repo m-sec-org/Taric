@@ -73,6 +73,7 @@ test("SQLite store structurally implements the published authority storage contr
     "integrity_checked_snapshot_backup_and_atomic_restore",
     "lease_expiry_heartbeat_reclaim_and_fencing_generation",
     "atomic_admission_bound_review_snapshot_and_policy_binding",
+    "derived_artifact_history_index_integrity_and_watermarks",
   ]);
   (await store.close());
 });

@@ -66,6 +66,45 @@ const fixtures = {
   artifactContentRead: () => ({ engagement_id: randomUUID(), session_id: "session-1", content_ref: "artifact-1@v1", offset: 0, length: 1 }),
   artifactContentList: () => ({ engagement_id: randomUUID(), session_id: "session-1", page_size: 10 }),
   artifactSessionOutput: () => ({ engagement_id: randomUUID(), session_id: "session-1", page_size: 10, include_content: false }),
+  historyQueryRequest: () => ({ engagement_id: randomUUID(), session_id: "session-1" }),
+  artifactSearchRequest: () => ({ engagement_id: randomUUID(), session_id: "session-1", query: "checkpoint" }),
+  artifactHistoryReadRequest: () => ({ engagement_id: randomUUID(), session_id: "session-1", content_ref: "artifact-1@v1" }),
+  emptyRequest: () => ({}),
+  engagementInitRequest: () => ({ scope: { allowed_targets: ["https://example.test"], excluded_targets: [], rules_of_engagement_ref: "roe:test" } }),
+  engagementStatusRequest: () => ({ engagement_id: randomUUID() }),
+  engagementIdRequest: () => ({ engagement_id: randomUUID() }),
+  adapterHostRequest: () => ({ host: "pi" }),
+  adapterConfigRequest: () => ({ host: "pi", config: { enabled: true } }),
+  contextRequest: () => ({ engagement_id: randomUUID(), budget: 4000, filters: { kind: "claim" } }),
+  queryRequest: () => ({ engagement_id: randomUUID(), page_size: 100, trust_level: "L2" }),
+  proposalListRequest: () => ({ engagement_id: randomUUID(), page_size: 100 }),
+  admissionRequest: () => ({ engagement_id: randomUUID(), proposal_id: randomUUID(), expected_version: 0, policy_digest: `sha256:${"a".repeat(64)}` }),
+  hostStateRequest: () => ({ engagement_id: randomUUID(), limit: 100 }),
+  workClaimRequest: () => ({ engagement_id: randomUUID(), work_item_id: randomUUID(), agent_id: "worker" }),
+  workRenewRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), generation: 1 }),
+  workReclaimRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), agent_id: "worker" }),
+  workResumeRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID() }),
+  checkpointProposeContent: () => ({ source_read_seq: 0, completed_steps: [], next_steps: [], observation_refs: [], evidence_refs: [], negative_results: [], unresolved_work: [], host_decision_refs: [], external_action_state: "none", budget: {}, draft_refs: [], handoff_refs: [], action_refs: [], tool_result_refs: [], context_manifest: {} }),
+  checkpointCommitContent: () => ({ ...fixtures.checkpointProposeContent(), work_item_ref: randomUUID(), work_run_ref: randomUUID(), attempt_ref: randomUUID(), generation: 1, target_version: 1, work_item_version: 1, scope_version: 1, owner: { host_id: "host", agent_id: "worker" }, lease_expires_at: "2026-11-06T12:00:00Z" }),
+  checkpointProposeRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), generation: 1, checkpoint: fixtures.checkpointProposeContent() }),
+  checkpointCommitRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), generation: 1, checkpoint: fixtures.checkpointCommitContent() }),
+  auditReconcileRequest: () => ({ action: "preview" }),
+  errorReportRequest: () => ({ engagement_id: randomUUID(), message: "tool failed" }),
+  snapshotExportRequest: () => ({ engagement_id: randomUUID(), as_of: 0 }),
+  resourceRevisionRequest: () => ({ engagement_id: randomUUID(), asset_type: "route", identity: { route: "/test" }, variant: { method: "GET", path_template: "/test" }, content_hash: `sha256:${"a".repeat(64)}`, source_observation_refs: [randomUUID()] }),
+  patchSetRequest: () => ({ engagement_id: randomUUID(), base_generation: 0, read_set: [], write_set: [], operations: [{ op: "replace", entity_id: randomUUID(), changes: { name: "updated" } }], source_observation_refs: [randomUUID()] }),
+  relationRequest: () => ({ engagement_id: randomUUID(), from_ref: randomUUID(), predicate: "depends_on", to_ref: randomUUID(), source_observation_refs: [randomUUID()] }),
+  resourceImpactRequest: () => ({ engagement_id: randomUUID(), source_id: randomUUID(), limit: 100 }),
+  proposalSubmitRequest: () => ({ engagement_id: randomUUID(), subject_type: "claim", expected_version: 0, content: { schema_version: "1.0.0", engagement_id: randomUUID(), kind: "claim", proposition: "candidate", status: "proposed", evidence_refs: [], limitations: [] } }),
+  captureObservationRequest: () => ({ engagement_id: randomUUID(), observation: { schema_version: "1.0.0", engagement_id: randomUUID(), kind: "observation", resource_ref: randomUUID(), observed_at: "2026-11-06T12:00:00Z", statement: "observed", artifact_refs: [] } }),
+  actionRecommendRequest: () => ({ engagement_id: randomUUID(), target: "/test", method: "GET", rationale: "verify" }),
+  actionHostDecisionRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), action_id: randomUUID(), generation: 1, mode: "host_hitl", status: "authorized" }),
+  actionHostResultRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), action_id: randomUUID(), generation: 1, mode: "host_hitl", status: "unknown" }),
+  actionReconcileRequest: () => ({ engagement_id: randomUUID(), work_run_id: randomUUID(), action_id: randomUUID(), generation: 1, status: "executed", result_ref: "result:1" }),
+  controlObserveRequest: () => ({ engagement_id: randomUUID(), resource_ref: randomUUID(), operation: "GET", conditions: [], outcome: "inconclusive", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", evidence_refs: [], limitations: [] }),
+  accessObserveRequest: () => ({ engagement_id: randomUUID(), resource_ref: randomUUID(), operation: "GET", conditions: [], decision: "unknown", decision_layer: "unknown", origin_reached: "unknown", origin_outcome: "unknown", evidence_refs: [], limitations: [] }),
+  coverageGateRequest: () => ({ engagement_id: randomUUID() }),
+  patchRelationCandidate: () => ({ from_ref: randomUUID(), to_ref: randomUUID(), predicate: "depends_on", source_observation_refs: [randomUUID()] }),
   auditEvent: () => ({ event_id: randomUUID(), commit_seq: 1, event_type: "record.commit", created_at: "2026-10-09T00:00:00.000Z", hash: `sha256:${"a".repeat(64)}` }),
   apiSuccess: () => ({ ok: true, data: {} }),
   apiError: () => ({ ok: false, error: { code: "validation_error", message: "invalid" } }),
@@ -88,11 +127,20 @@ for (const name of contractNames) {
     assert.equal(validate(fixtures[name]()), true, JSON.stringify(validate.errors));
     const invalid = fixtures[name]();
     if ("engagement_id" in invalid) delete invalid.engagement_id;
+    else if (contractSchema.$defs[name].required?.length) delete invalid[contractSchema.$defs[name].required[0]];
     else if (name === "apiSuccess") delete invalid.data;
     else if (name === "apiError") delete invalid.error;
     else if (name === "auditEvent") delete invalid.event_type;
     else if (name === "proposalProvenance") delete invalid.source_kind;
     else if (name === "coverageGateResult") delete invalid.can_close;
+    else {
+      const [property, propertySchema] = Object.entries(contractSchema.$defs[name].properties ?? {})[0] ?? [];
+      if (property) {
+        invalid[property] = propertySchema.enum ? "__invalid__" : null;
+      } else {
+        invalid.unexpected = true;
+      }
+    }
     assert.equal(validate(invalid), false);
     const extra = fixtures[name]();
     extra.unexpected = true;

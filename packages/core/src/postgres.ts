@@ -68,7 +68,7 @@ const runtimeDomainTables = {
   admission_l2: ["proposals", "reviews", "records", "record_versions", "object_refs", "events", "outbox"],
   checkpoint: ["work_runs", "attempts", "checkpoints", "records", "object_refs"],
   action: ["work_runs", "attempts", "action_intents", "records", "object_refs"],
-  artifact: ["artifact_sessions", "artifact_catalog", "artifact_chunks", "artifact_uploads", "artifact_publications", "artifact_idempotency", "artifact_catalog_watermarks", "execution_catalog"],
+  artifact: ["artifact_sessions", "artifact_catalog", "artifact_chunks", "artifact_uploads", "artifact_publications", "artifact_idempotency", "artifact_catalog_watermarks", "artifact_history_index", "artifact_history_watermarks", "execution_catalog"],
   lease: ["work_runs", "attempts"], fencing: ["work_runs", "attempts"],
   audit_outbox: ["metadata", "events", "outbox", "operation_markers"], pinned_read: ["record_versions", "reader_pins"],
   backup_restore: ["records", "record_versions", "metadata"],
@@ -89,6 +89,8 @@ const requiredRuntimeColumns: Readonly<Record<string, readonly string[]>> = {
   artifact_chunks: ["content_ref", "ordinal", "byte_offset", "byte_count", "chunk_hash", "relative_path"], artifact_uploads: ["upload_id", "engagement_id", "session_id", "body"],
   artifact_publications: ["upload_id", "engagement_id", "session_id", "content_ref", "phase", "body"], artifact_idempotency: ["key", "operation", "principal", "engagement_id", "request_hash", "result"],
   artifact_catalog_watermarks: ["engagement_id", "session_id", "catalog_watermark", "index_watermark", "index_status"],
+  artifact_history_index: ["content_ref", "engagement_id", "session_id", "source_content_hash", "source_manifest_hash", "normalized_text", "index_seq", "status", "search_vector"],
+  artifact_history_watermarks: ["engagement_id", "session_id", "source_watermark", "index_watermark", "index_status"],
   execution_catalog: ["execution_id", "engagement_id", "session_id", "work_run_id", "attempt_id", "sequence", "body"],
 };
 export const POSTGRES_SCHEMA_VERSION = SCHEMA_VERSION;
@@ -97,7 +99,7 @@ export const POSTGRES_SCHEMA_NAME = "taric";
 /** Offline SQL is derived from the same versioned layout used by the drivers. */
 export const POSTGRES_MIGRATIONS: readonly { version: string; sql: string }[] = Object.freeze([{
   version: AUTHORITY_SQL_SCHEMA_VERSION,
-  sql: `CREATE SCHEMA IF NOT EXISTS taric; SET search_path TO taric,pg_catalog;\n${AUTHORITY_SQL_TABLES.replace("commit_seq INTEGER PRIMARY KEY AUTOINCREMENT", "commit_seq BIGINT PRIMARY KEY").replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id BIGSERIAL PRIMARY KEY")}\n${AUTHORITY_SQL_INDEXES}\n${AUTHORITY_SQL_INITIAL_METADATA.map(([key, value]) => `INSERT INTO metadata(key,value) VALUES('${key}','${value}') ON CONFLICT(key) DO NOTHING;`).join("\n")}\nINSERT INTO metadata(key,value) VALUES('authority_id',overlay(gen_random_uuid()::text placing '7' from 15 for 1)) ON CONFLICT(key) DO NOTHING;`,
+  sql: `CREATE SCHEMA IF NOT EXISTS taric; SET search_path TO taric,pg_catalog;\n${AUTHORITY_SQL_TABLES.replace("commit_seq INTEGER PRIMARY KEY AUTOINCREMENT", "commit_seq BIGINT PRIMARY KEY").replace("id INTEGER PRIMARY KEY AUTOINCREMENT", "id BIGSERIAL PRIMARY KEY")}\nALTER TABLE artifact_history_index ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', normalized_text)) STORED;\nCREATE INDEX IF NOT EXISTS artifact_history_index_fts ON artifact_history_index USING GIN(search_vector);\n${AUTHORITY_SQL_INDEXES}\n${AUTHORITY_SQL_INITIAL_METADATA.map(([key, value]) => `INSERT INTO metadata(key,value) VALUES('${key}','${value}') ON CONFLICT(key) DO NOTHING;`).join("\n")}\nINSERT INTO metadata(key,value) VALUES('authority_id',overlay(gen_random_uuid()::text placing '7' from 15 for 1)) ON CONFLICT(key) DO NOTHING;`,
 }]);
 type SnapshotOptions = { asOf?: number; trustLevel?: TrustLevel; includeCandidates?: boolean; readTime?: string };
 

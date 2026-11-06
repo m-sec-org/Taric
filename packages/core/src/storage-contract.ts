@@ -1,7 +1,7 @@
 import type { AuthorityStore, CanonicalRecord, DoctorReport, ReadSnapshot, TrustLevel, AuditEvent } from "./store.js";
 import type { PostgresAuthorityStore } from "./postgres.js";
 
-export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/4" as const;
+export const AUTHORITY_STORAGE_CONTRACT_VERSION = "authority-storage/5" as const;
 
 /** Observable guarantees all authority backends must implement; database-specific mechanics remain private. */
 export const AUTHORITY_STORAGE_INVARIANTS = [
@@ -17,6 +17,7 @@ export const AUTHORITY_STORAGE_INVARIANTS = [
   "integrity_checked_snapshot_backup_and_atomic_restore",
   "lease_expiry_heartbeat_reclaim_and_fencing_generation",
   "atomic_admission_bound_review_snapshot_and_policy_binding",
+  "derived_artifact_history_index_integrity_and_watermarks",
 ] as const;
 export type AuthorityStorageInvariant = typeof AUTHORITY_STORAGE_INVARIANTS[number];
 
@@ -59,7 +60,7 @@ export const AUTHORITY_BACKEND_METHODS = [
   "artifactCatalogWatermark", "artifactUploads", "saveArtifactUpload", "deleteArtifactUpload",
   "artifactPublications", "startArtifactPublication", "prepareArtifactPublication", "markArtifactPublication",
   "completeArtifactPublication", "failArtifactPublication", "updateArtifactCatalogRow", "saveArtifactCatalogRow",
-  "artifactIdempotencyResult", "saveArtifactIdempotency", "updateArtifactIdempotencyResult", "recordArtifactEvent", "executionCatalogPage", "artifactMutation",
+  "artifactIdempotencyResult", "saveArtifactIdempotency", "updateArtifactIdempotencyResult", "recordArtifactEvent", "executionCatalogPage", "executionHistoryPage", "indexArtifactHistory", "invalidateArtifactHistory", "searchArtifactHistory", "markArtifactHistoryIndex", "artifactMutation",
   "transitionWorkRun", "recordHostError", "recordLateResult", "maintenanceRead",
   "events", "verifyAudit", "consumeOutbox", "doctor", "previewRecovery", "reconcileDerived", "operationMarkers", "markOperationFailed", "replayDerived", "rebuildDerived", "sealExecutionSidecars", "executionCatalogRows",
 ] as const satisfies readonly (keyof AuthorityStore)[];
